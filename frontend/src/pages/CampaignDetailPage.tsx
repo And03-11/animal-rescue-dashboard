@@ -82,7 +82,7 @@ export const CampaignDetailPage = () => {
         <Typography color="text.primary">{details?.subject || 'Campaign Details'}</Typography>
       </Breadcrumbs>
       
-      <Grid container spacing={3}>
+      <Grid container spacing={3} sx={{ justifyContent: 'center' }}>
         {/* --- Columna Izquierda: Detalles y Lista de Contactos --- */}
         <Grid item xs={12} md={5}>
           <Box display="flex" flexDirection="column" gap={3}>
