@@ -1,0 +1,28 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Node.js
+node_modules/
+dist/
+.npm
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Archivos de configuración y secretos
+.env
+credentials_account*.json
+token_*.json
+gmail_credentials/
+
+# Archivos de datos generados
+campaign_data/
+sent_logs/
+campaign_targets/
+*.csv
+
+# Sistema Operativo
+.DS_Store
+Thumbs.db
