@@ -1,19 +1,29 @@
 // src/pages/CampaignDetailPage.tsx
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link as RouterLink } from 'react-router-dom';
+// Línea nueva
+// La línea nueva y corregida
 import { 
   Box, Typography, CircularProgress, Alert, Paper, Table, 
   TableBody, TableCell, TableContainer, TableHead, TableRow, 
-  Breadcrumbs, Link, Chip, Divider 
+  Breadcrumbs, Link, Chip, Divider, Grid, Card, CardHeader,
+  Avatar, ToggleButtonGroup, ToggleButton, TextField, CardContent
 } from '@mui/material';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
 import apiClient from '../api/apiClient';
+// Añade estas líneas junto a tus otros imports
+import ArticleIcon from '@mui/icons-material/Article';
+import CodeIcon from '@mui/icons-material/Code';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import { EmailPreview } from '../components/EmailPreview';
+
 
 export const CampaignDetailPage = () => {
   const { campaignId } = useParams<{ campaignId: string }>();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'preview' | 'code'>('preview'); // Por defecto en preview
 
   const fetchCampaignDetails = useCallback(async () => {
     if (!campaignId) return;
@@ -60,8 +70,9 @@ export const CampaignDetailPage = () => {
   const details = data?.details;
   const contacts = data?.contacts || [];
 
+  // Bloque nuevo con Grid
   return (
-    <Box sx={{ width: '100%', maxWidth: '1100px' }}>
+    <Box sx={{ width: '100%', maxWidth: '1800px' }}>
       <Breadcrumbs separator={<NavigateNextIcon fontSize="small" />} sx={{ mb: 2 }}>
         <Link component={RouterLink} underline="hover" color="inherit" to="/send-email">
           Campaign Manager
@@ -69,47 +80,54 @@ export const CampaignDetailPage = () => {
         <Typography color="text.primary">{details?.subject || 'Campaign Details'}</Typography>
       </Breadcrumbs>
       
-      <Typography variant="h4" gutterBottom>
-        Campaign Details
-      </Typography>
-      
-      <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
-        <Typography><strong>Subject:</strong> {details?.subject}</Typography>
-        <Typography><strong>Target:</strong> {details?.region} (Bounced: {details?.is_bounced ? 'Yes' : 'No'})</Typography>
-        <Typography><strong>Status:</strong> <Chip label={details?.status} color={details?.status === 'Completed' ? 'success' : details?.status === 'Sending' ? 'warning' : 'default'} size="small"/></Typography>
-        <Typography><strong>Total Recipients:</strong> {details?.target_count}</Typography>
-      </Paper>
+      <Grid container spacing={3}>
+        {/* --- Columna Izquierda: Detalles y Lista de Contactos --- */}
+        <Grid item xs={12} md={5}>
+          <Typography variant="h4" gutterBottom>Campaign Details</Typography>
+          <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
+            <Typography><strong>Subject:</strong> {details?.subject}</Typography>
+            <Typography><strong>Target:</strong> {details?.region} (Bounced: {details?.is_bounced ? 'Yes' : 'No'})</Typography>
+            <Typography><strong>Status:</strong> <Chip label={details?.status} color={details?.status === 'Completed' ? 'success' : details?.status === 'Sending' ? 'warning' : 'default'} size="small"/></Typography>
+            <Typography><strong>Total Recipients:</strong> {details?.target_count}</Typography>
+          </Paper>
+          <Paper variant="outlined">
+            <TableContainer sx={{ maxHeight: 440 }}>
+              <Table stickyHeader>
+                <TableHead><TableRow><TableCell sx={{fontWeight: 'bold'}}>Contact Email</TableCell><TableCell sx={{fontWeight: 'bold'}} align="right">Status</TableCell></TableRow></TableHead>
+                <TableBody>
+                  {contacts.map((contact: any, index: number) => (
+                    <TableRow key={index} hover><TableCell>{contact.email}</TableCell><TableCell align="right"><Chip label={contact.status} color={contact.status === 'Sent' ? 'success' : 'default'} size="small" /></TableCell></TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Paper>
+        </Grid>
 
-      <Paper variant="outlined">
-        <TableContainer>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell sx={{fontWeight: 'bold'}}>Contact Email</TableCell>
-                <TableCell sx={{fontWeight: 'bold'}} align="right">Status</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {contacts.length > 0 ? (
-                contacts.map((contact: any, index: number) => (
-                  <TableRow key={index} hover>
-                    <TableCell>{contact.email}</TableCell>
-                    <TableCell align="right">
-                      <Chip label={contact.status} color={contact.status === 'Sent' ? 'success' : 'default'} size="small" />
-                    </TableCell>
-                  </TableRow>
-                ))
-              ) : (
-                <TableRow>
-                  <TableCell colSpan={2} align="center">
-                    {details?.status === 'Draft' ? 'Launch the campaign to see the recipient list.' : 'No contacts found for this campaign.'}
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </Paper>
+        {/* --- Columna Derecha: Vista Previa del Correo --- */}
+        <Grid item xs={12} md={7}>
+            <Typography variant="h4" gutterBottom sx={{visibility: 'hidden'}}>Content</Typography> {/* Espaciador para alinear títulos */}
+            <Card variant="outlined">
+                <CardHeader
+                    avatar={<Avatar><ArticleIcon /></Avatar>}
+                    title="Email Content"
+                    action={
+                        <ToggleButtonGroup value={viewMode} exclusive onChange={(e, newMode) => newMode && setViewMode(newMode)} size="small">
+                            <ToggleButton value="preview" aria-label="preview"><VisibilityIcon /></ToggleButton>
+                            <ToggleButton value="code" aria-label="code view"><CodeIcon /></ToggleButton>
+                        </ToggleButtonGroup>
+                    }
+                />
+                <CardContent>
+                    {viewMode === 'preview' ? (
+                        <EmailPreview subject={details?.subject} htmlBody={details?.html_body} />
+                    ) : (
+                        <TextField fullWidth multiline InputProps={{ readOnly: true }} rows={15} value={details?.html_body} variant="outlined" />
+                    )}
+                </CardContent>
+            </Card>
+        </Grid>
+      </Grid>
     </Box>
   );
 };

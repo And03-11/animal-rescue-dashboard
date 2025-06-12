@@ -11,16 +11,28 @@ import { Link as RouterLink } from 'react-router-dom';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch';
 import apiClient from '../api/apiClient';
+import { ToggleButtonGroup, ToggleButton } from '@mui/material';
+import CodeIcon from '@mui/icons-material/Code';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import { EmailPreview } from '../components/EmailPreview';
 
 // --- Componente del Formulario para Crear Campañas (Completo) ---
+// Reemplaza el componente CampaignForm en src/pages/EmailSenderPage.tsx
 const CampaignForm: React.FC<{ onSave: (campaign: any) => void; onCancel: () => void; }> = ({ onSave, onCancel }) => {
   const [region, setRegion] = useState('USA');
   const [isBounced, setIsBounced] = useState(false);
   const [subject, setSubject] = useState('');
   const [htmlBody, setHtmlBody] = useState('<h1>New Campaign</h1>\n<p>Write your content here.</p>');
+  const [viewMode, setViewMode] = useState<'code' | 'preview'>('code');
 
   const handleSave = () => {
     onSave({ region, is_bounced: isBounced, subject, html_body: htmlBody });
+  };
+
+  const handleViewChange = (event: React.MouseEvent<HTMLElement>, newViewMode: 'code' | 'preview' | null) => {
+    if (newViewMode !== null) {
+      setViewMode(newViewMode);
+    }
   };
 
   return (
@@ -37,7 +49,19 @@ const CampaignForm: React.FC<{ onSave: (campaign: any) => void; onCancel: () => 
         </FormControl>
         <FormControlLabel control={<Checkbox checked={isBounced} onChange={(e) => setIsBounced(e.target.checked)} />} label="Target Bounced Accounts Only" />
         <TextField fullWidth label="Email Subject" variant="outlined" value={subject} onChange={(e) => setSubject(e.target.value)} margin="normal" />
-        <TextField fullWidth label="Email Body (HTML)" variant="outlined" multiline rows={10} value={htmlBody} onChange={(e) => setHtmlBody(e.target.value)} margin="normal" />
+
+        <Box sx={{display: 'flex', justifyContent: 'flex-end', my: 1}}>
+            <ToggleButtonGroup value={viewMode} exclusive onChange={handleViewChange} size="small">
+                <ToggleButton value="code" aria-label="code view"><CodeIcon sx={{mr:1}}/> Code</ToggleButton>
+                <ToggleButton value="preview" aria-label="preview"><VisibilityIcon sx={{mr:1}}/> Preview</ToggleButton>
+            </ToggleButtonGroup>
+        </Box>
+
+        {viewMode === 'code' ? (
+            <TextField fullWidth label="Email Body (HTML)" variant="outlined" multiline rows={10} value={htmlBody} onChange={(e) => setHtmlBody(e.target.value)} />
+        ) : (
+            <EmailPreview subject={subject} htmlBody={htmlBody} />
+        )}
       </DialogContent>
       <DialogActions>
         <Button onClick={onCancel}>Cancel</Button>
