@@ -1,12 +1,10 @@
-// src/components/Layout.tsx
 import React from 'react';
-import { Box, Drawer, List, ListItem, ListItemButton, ListItemIcon, ListItemText, Toolbar, Typography, CssBaseline } from '@mui/material';
+import { Box, Drawer, List, ListItem, ListItemButton, ListItemIcon, ListItemText, Typography } from '@mui/material';
 import { Link } from 'react-router-dom';
 import SearchIcon from '@mui/icons-material/Search';
 import MailIcon from '@mui/icons-material/Mail';
 import HomeIcon from '@mui/icons-material/Home';
 
-// 1. Importamos el logo como un módulo
 import logo from '../assets/Logo.png';
 
 const drawerWidth = 240;
@@ -14,7 +12,6 @@ const drawerWidth = 240;
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return (
     <Box sx={{ display: 'flex' }}>
-      <CssBaseline />
       <Drawer
         variant="permanent"
         sx={{
@@ -23,12 +20,9 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           [`& .MuiDrawer-paper`]: { width: drawerWidth, boxSizing: 'border-box' },
         }}
       >
-        {/* 2. Reemplazamos el texto del Toolbar con nuestro logo */}
-        <Toolbar>
-            <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                <img src={logo} alt="Animal Rescue Center Logo" style={{ height: '70px', marginRight: '8px' }} />
-            </Box>
-        </Toolbar>
+        <Box sx={{ display: 'flex', alignItems: 'center', p: 1, justifyContent: 'center' }}>
+            <img src={logo} alt="Animal Rescue Center Logo" style={{ height: '70px' }} />
+        </Box>
         <Box sx={{ overflow: 'auto' }}>
           <List>
             <ListItem disablePadding>
@@ -53,18 +47,19 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         </Box>
       </Drawer>
 
-      <Box 
-        component="main" 
+      <Box
+        component="main"
         sx={{ 
           flexGrow: 1, 
-          p: 3,
+          px: 3, 
+          py: 2, // Mantenemos un poco de padding vertical para abajo
           width: '100%',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center'
         }}
       >
-        <Toolbar /> 
+        {/* La línea <Toolbar /> ha sido eliminada */}
         {children}
       </Box>
     </Box>
