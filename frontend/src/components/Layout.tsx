@@ -1,10 +1,11 @@
 import React from 'react';
-import { Box, Drawer, List, ListItem, ListItemButton, ListItemIcon, ListItemText, Typography } from '@mui/material';
+import { Box, Drawer, List, ListItem, ListItemButton, ListItemIcon, ListItemText } from '@mui/material';
 import { Link } from 'react-router-dom';
 import SearchIcon from '@mui/icons-material/Search';
 import MailIcon from '@mui/icons-material/Mail';
 import HomeIcon from '@mui/icons-material/Home';
-
+// ¡NUEVO ÍCONO IMPORTADO!
+import AssessmentIcon from '@mui/icons-material/Assessment'; 
 import logo from '../assets/Logo.png';
 
 const drawerWidth = 240;
@@ -31,6 +32,15 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                 <ListItemText primary="Dashboard" sx={{ color: 'text.primary' }} />
               </ListItemButton>
             </ListItem>
+            {/* ¡AQUÍ ESTÁ EL CAMBIO! */}
+            <ListItem disablePadding>
+              <ListItemButton component={Link} to="/form-title-search">
+                {/* Ícono cambiado */}
+                <ListItemIcon sx={{ color: 'text.primary' }}><AssessmentIcon /></ListItemIcon>
+                {/* Texto cambiado */}
+                <ListItemText primary="Custom Reports" sx={{ color: 'text.primary' }} />
+              </ListItemButton>
+            </ListItem>
             <ListItem disablePadding>
               <ListItemButton component={Link} to="/search">
                 <ListItemIcon sx={{ color: 'text.primary' }}><SearchIcon /></ListItemIcon>
@@ -52,14 +62,13 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         sx={{ 
           flexGrow: 1, 
           px: 3, 
-          py: 2, // Mantenemos un poco de padding vertical para abajo
+          py: 2,
           width: '100%',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center'
         }}
       >
-        {/* La línea <Toolbar /> ha sido eliminada */}
         {children}
       </Box>
     </Box>

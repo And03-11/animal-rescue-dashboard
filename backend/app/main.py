@@ -4,7 +4,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware # <--- NUEVO IMPORT
 from app.api.v1.endpoints import dashboard, contacts
-from app.api.v1.endpoints import dashboard, contacts, email_sender # <-- Añadir
+from app.api.v1.endpoints import dashboard, contacts, email_sender, form_titles, campaigns # <-- Añadir
 
 app = FastAPI(
     title="Dashboard Centro de Rescate API",
@@ -35,7 +35,8 @@ app.add_middleware(
 app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["Dashboard"])
 app.include_router(contacts.router, prefix="/api/v1/contacts", tags=["Contacts"])
 app.include_router(email_sender.router, prefix="/api/v1", tags=["Sender"])
-
+app.include_router(form_titles.router, prefix="/api/v1/form-titles", tags=["form-titles"])
+app.include_router(campaigns.router, prefix="/api/v1/campaigns", tags=["campaigns"])
 
 @app.get("/")
 def read_root():

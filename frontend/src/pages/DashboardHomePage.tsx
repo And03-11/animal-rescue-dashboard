@@ -70,8 +70,7 @@ export const DashboardHomePage = () => {
   const formatXAxis = (tickItem: string) => dayjs(tickItem).format('D/M');
 
   return (
-    // Se reduce el espaciado general
-    <Box sx={{ width: '100%', maxWidth: '1200px', display: 'flex', flexDirection: 'column', gap: 3 }}>
+    <Box sx={{ width: '100%', maxWidth: '1200px', display: 'flex', flexDirection: 'column', gap: 2 }}>
       <Typography variant="h4" component="h1">Global Dashboard</Typography>
 
       {/* --- SECCIÓN 1: VISTA RÁPIDA --- */}
@@ -80,16 +79,13 @@ export const DashboardHomePage = () => {
         <Divider sx={{ mb: 2 }} />
         {loading.glance ? <CircularProgress /> : error.glance ? <Alert severity="error">{error.glance}</Alert> : glanceData && (
           <Box>
-            {/* Se reduce el margen inferior de las tarjetas */}
             <Box sx={{ display: 'flex', gap: 2, mb: 2, flexDirection: { xs: 'column', sm: 'row' }, justifyContent: 'center' }}>
               <StatCard title="Donations Today" value={`$${glanceData.amountToday.toFixed(2)}`} icon={<TodayIcon color="primary" sx={{ fontSize: 40 }} />} />
               <StatCard title="This Month" value={`$${glanceData.amountThisMonth.toFixed(2)}`} icon={<CalendarMonthIcon color="secondary" sx={{ fontSize: 40 }} />} />
             </Box>
 
-            {/* Fila del gráfico con altura reducida */}
             <Box>
-              <Typography variant="h6" sx={{ mb: 1 }}>Trend (Last 30 Days)</Typography>
-              {/* Se reduce la altura del gráfico */}
+              <Typography variant="h6" sx={{ mt: 2, mb: 1 }}>Trend (Last 30 Days)</Typography>
               <Box sx={{ height: '350px', width: '100%' }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={glanceData.glanceTrend} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
@@ -126,7 +122,8 @@ export const DashboardHomePage = () => {
               <StatCard title="Total Donated in Range" value={`$${filteredData.amountInRange.toFixed(2)}`} icon={<MonetizationOnIcon color="success" sx={{ fontSize: 40 }} />} />
             </Grid>
             <Grid item xs={12} sm={6}>
-              <StatCard title="# of Donations in Range" value={`${filteredData.donationsCount}`} icon={<ReceiptLongIcon sx={{ fontSize: 40, color: '#BFACB5' }} />} />
+              {/* ¡AQUÍ ESTÁ EL CAMBIO! */}
+              <StatCard title="Number of Donations" value={`${filteredData.donationsCount}`} icon={<ReceiptLongIcon sx={{ fontSize: 40, color: '#BFACB5' }} />} />
             </Grid>
           </Grid>
         )}
