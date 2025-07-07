@@ -152,8 +152,27 @@ class AirtableService:
             return []
 
     def get_donations(self, start_utc: Optional[str] = None, end_utc: Optional[str] = None) -> List[Dict]:
-        # (Esta función no ha cambiado)
-        pass
+        try:
+            formula_parts = []
+            if start_utc:
+                formula_parts.append(f"IS_AFTER({{Date}}, DATETIME_PARSE('{start_utc}'))")
+            if end_utc:
+                formula_parts.append(f"IS_BEFORE({{Date}}, DATETIME_PARSE('{end_utc}'))")
+            formula = f"AND({', '.join(formula_parts)})" if formula_parts else None
+
+            records = self.donations_table.all(formula=formula, fields=[DONATIONS_FIELDS["date"], DONATIONS_FIELDS["amount"]])
+            return [
+                {
+                    "id": rec["id"],
+                    "date": rec["fields"].get(DONATIONS_FIELDS["date"]),
+                    "amount": rec["fields"].get(DONATIONS_FIELDS["amount"], 0),
+                }
+                for rec in records
+            ]
+        except Exception as e:
+            print(f"Error en get_donations: {e}")
+            return []  # fallback seguro
+
 
 
 
