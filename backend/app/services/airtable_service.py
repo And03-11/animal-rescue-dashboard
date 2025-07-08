@@ -79,7 +79,9 @@ class AirtableService:
         except Exception as e:
             print(f"¡ERROR en get_form_titles!: {e}")
             return []
-            
+
+
+         
     def get_donations_for_form_title(self, form_title_id: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> List[Dict]:
         """
         Retrieves donations for a form title and enriches them with donor name and email.
@@ -177,40 +179,127 @@ class AirtableService:
 
     # En backend/app/services/airtable_service.py, reemplaza el método existente
 
+    # En backend/app/services/airtable_service.py, reemplaza ÚNICAMENTE esta función:
+
+    # En backend/app/services/airtable_service.py, reemplaza ÚNICAMENTE esta función:
+
     def get_campaign_stats(self, campaign_id: str) -> Dict[str, Any]:
-            """
-            Función corregida y final para calcular las estadísticas de la campaña.
-            """
-            try:
-                form_titles_in_campaign = self.get_form_titles(campaign_id=campaign_id)
-                if not form_titles_in_campaign:
-                    return {"campaign_total_amount": 0, "campaign_total_count": 0, "stats_by_form_title": []}
+        """
+        Estadísticas de campaña optimizado:
+         1) Trae todos los form-titles (name, campaign_link, donations_link)
+         2) Filtra en Python los que pertenecen a campaign_id
+         3) Unifica y trae donaciones, donantes y emails en 4 llamadas
+         4) Agrega totales por form-title
+        """
+        try:
+            # Paso 1: todos los form-titles con sus enlaces
+            title_records = self.form_titles_table.all(
+                fields=[
+                    FORM_TITLES_FIELDS["name"],
+                    FORM_TITLES_FIELDS["campaign_link"],
+                    FORM_TITLES_FIELDS["donations_link"],
+                ]
+            )
 
-                all_stats = []
-                grand_total_amount = 0
-                grand_total_count = 0
+            # Filtrar en Python los que son de esta campaña
+            form_titles: List[Dict[str, Any]] = []
+            for rec in title_records:
+                f = rec.get("fields", {})
+                if campaign_id in f.get(FORM_TITLES_FIELDS["campaign_link"], []):
+                    form_titles.append({
+                        "id": rec["id"],
+                        "name": f.get(FORM_TITLES_FIELDS["name"], ""),
+                        "donation_ids": f.get(FORM_TITLES_FIELDS["donations_link"], []),
+                    })
 
-                for form_title in form_titles_in_campaign:
-                    form_title_id = form_title['id']
-                    form_title_name = form_title.get('name', 'Unknown Title')
-                    donations = self.get_donations_for_form_title(form_title_id=form_title_id)
-                    donation_count = len(donations)
-                    total_amount = sum(d.get('amount', 0) for d in donations)
-
-                    if donation_count > 0:
-                        all_stats.append({
-                            'form_title_name': form_title_name,
-                            'total_amount': total_amount,
-                            'donation_count': donation_count
-                        })
-                    grand_total_amount += total_amount
-                    grand_total_count += donation_count
-
+            if not form_titles:
                 return {
-                    "campaign_total_amount": grand_total_amount,
-                    "campaign_total_count": grand_total_count,
-                    "stats_by_form_title": sorted(all_stats, key=lambda x: x['total_amount'], reverse=True)
+                    "campaign_total_amount": 0,
+                    "campaign_total_count":  0,
+                    "stats_by_form_title":   []
                 }
-            except Exception as e:
-                print(f"Error inesperado calculando estadísticas de campaña: {e}")
-                raise HTTPException(status_code=500, detail="Ocurrió un error inesperado al calcular las estadísticas.")
+
+            # Paso 2: unificar donation_ids y traer donaciones
+            all_donation_ids = {did for ft in form_titles for did in ft["donation_ids"]}
+            if not all_donation_ids:
+                return {
+                    "campaign_total_amount": 0,
+                    "campaign_total_count":  0,
+                    "stats_by_form_title":   []
+                }
+            formula_donations = "OR(" + ",".join(
+                f"RECORD_ID()='{did}'" for did in all_donation_ids
+            ) + ")"
+            donation_records = self.donations_table.all(
+                formula=formula_donations,
+                fields=[DONATIONS_FIELDS["amount"], DONATIONS_FIELDS["donor_link"]]
+            )
+
+            # Paso 3: traer donantes en bloque
+            donor_ids = {
+                rec.get("fields", {}).get(DONATIONS_FIELDS["donor_link"], [None])[0]
+                for rec in donation_records
+            } - {None}
+            donor_records: List[Dict[str, Any]] = []
+            if donor_ids:
+                formula_donors = "OR(" + ",".join(
+                    f"RECORD_ID()='{did}'" for did in donor_ids
+                ) + ")"
+                donor_records = self.donors_table.all(
+                    formula=formula_donors,
+                    fields=[
+                        DONORS_FIELDS["name"],
+                        DONORS_FIELDS["last_name"],
+                        DONORS_FIELDS["emails_link"],
+                    ]
+                )
+
+            # Paso 4: traer emails en bloque
+            email_ids = {
+                eid
+                for dr in donor_records
+                for eid in dr.get("fields", {}).get(DONORS_FIELDS["emails_link"], [])
+            }
+            email_records: List[Dict[str, Any]] = []
+            if email_ids:
+                formula_emails = "OR(" + ",".join(
+                    f"RECORD_ID()='{eid}'" for eid in email_ids
+                ) + ")"
+                email_records = self.emails_table.all(
+                    formula=formula_emails,
+                    fields=[EMAILS_FIELDS["email"]]
+                )
+
+            # Paso 5: mapas y agregación
+            donations_map = {
+                rec["id"]: rec["fields"].get(DONATIONS_FIELDS["amount"], 0)
+                for rec in donation_records
+            }
+
+            stats: List[Dict[str, Any]] = []
+            grand_total = 0
+            grand_count = 0
+            for ft in form_titles:
+                tot = sum(donations_map.get(did, 0) for did in ft["donation_ids"])
+                cnt = sum(1 for did in ft["donation_ids"] if did in donations_map)
+                if cnt > 0:
+                    stats.append({
+                        "form_title_name": ft["name"],
+                        "total_amount":    tot,
+                        "donation_count":  cnt
+                    })
+                grand_total += tot
+                grand_count += cnt
+
+            stats.sort(key=lambda x: x["total_amount"], reverse=True)
+            return {
+                "campaign_total_amount": grand_total,
+                "campaign_total_count":  grand_count,
+                "stats_by_form_title":   stats
+            }
+
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail="Ocurrió un error al calcular las estadísticas de la campaña."
+            )
