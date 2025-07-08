@@ -1,9 +1,11 @@
 import os
 from dotenv import load_dotenv
+from fastapi import HTTPException
 from pyairtable import Api
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
+import traceback
 
 load_dotenv()
 
@@ -25,11 +27,7 @@ if not AIRTABLE_API_KEY or not AIRTABLE_BASE_ID:
 # --- Nombres de Campos ---
 DONATIONS_FIELDS = {"amount": "Amount", "date": "Date", "form_title_link": "Form Title", "donor_link": "Donor"}
 CAMPAIGNS_FIELDS = {"name": "Name", "source": "Source"}
-FORM_TITLES_FIELDS = {
-    "name": "Name", 
-    "campaign_link": "Campaign",
-    "donations_link": "Donations"
-}
+FORM_TITLES_FIELDS = {"name": "Name", "campaign_link": "Campaign", "donations_link": "Donations"}
 DONORS_FIELDS = {"name": "Name", "last_name": "Last Name", "emails_link": "Emails"}
 EMAILS_FIELDS = {"email": "Email"}
 
@@ -172,8 +170,47 @@ class AirtableService:
         except Exception as e:
             print(f"Error en get_donations: {e}")
             return []  # fallback seguro
+        
 
 
+        # En backend/app/services/airtable_service.py
 
+    # En backend/app/services/airtable_service.py, reemplaza el método existente
 
-    
+    def get_campaign_stats(self, campaign_id: str) -> Dict[str, Any]:
+            """
+            Función corregida y final para calcular las estadísticas de la campaña.
+            """
+            try:
+                form_titles_in_campaign = self.get_form_titles(campaign_id=campaign_id)
+                if not form_titles_in_campaign:
+                    return {"campaign_total_amount": 0, "campaign_total_count": 0, "stats_by_form_title": []}
+
+                all_stats = []
+                grand_total_amount = 0
+                grand_total_count = 0
+
+                for form_title in form_titles_in_campaign:
+                    form_title_id = form_title['id']
+                    form_title_name = form_title.get('name', 'Unknown Title')
+                    donations = self.get_donations_for_form_title(form_title_id=form_title_id)
+                    donation_count = len(donations)
+                    total_amount = sum(d.get('amount', 0) for d in donations)
+
+                    if donation_count > 0:
+                        all_stats.append({
+                            'form_title_name': form_title_name,
+                            'total_amount': total_amount,
+                            'donation_count': donation_count
+                        })
+                    grand_total_amount += total_amount
+                    grand_total_count += donation_count
+
+                return {
+                    "campaign_total_amount": grand_total_amount,
+                    "campaign_total_count": grand_total_count,
+                    "stats_by_form_title": sorted(all_stats, key=lambda x: x['total_amount'], reverse=True)
+                }
+            except Exception as e:
+                print(f"Error inesperado calculando estadísticas de campaña: {e}")
+                raise HTTPException(status_code=500, detail="Ocurrió un error inesperado al calcular las estadísticas.")

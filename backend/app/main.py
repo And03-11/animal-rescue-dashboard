@@ -42,3 +42,6 @@ app.include_router(campaigns.router, prefix="/api/v1/campaigns", tags=["campaign
 def read_root():
     return {"mensaje": "Bienvenido a la API del Dashboard de Rescate Animal."}
 
+
+
+
