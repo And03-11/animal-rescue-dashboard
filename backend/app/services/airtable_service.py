@@ -185,14 +185,11 @@ class AirtableService:
 
     def get_campaign_stats(self, campaign_id: str) -> Dict[str, Any]:
         """
-        Estadísticas de campaña optimizado:
-         1) Trae todos los form-titles (name, campaign_link, donations_link)
-         2) Filtra en Python los que pertenecen a campaign_id
-         3) Unifica y trae donaciones, donantes y emails en 4 llamadas
-         4) Agrega totales por form-title
+        Estadísticas de campaña, ordenadas por fecha de creación de cada Form Title
+        (más nuevos arriba).
         """
         try:
-            # Paso 1: todos los form-titles con sus enlaces
+            # — Paso 1: traer todos los form-titles con enlaces y createdTime —
             title_records = self.form_titles_table.all(
                 fields=[
                     FORM_TITLES_FIELDS["name"],
@@ -201,8 +198,8 @@ class AirtableService:
                 ]
             )
 
-            # Filtrar en Python los que son de esta campaña
-            form_titles: List[Dict[str, Any]] = []
+            # — Paso 2: filtrar solo los de esta campaña y guardar createdTime —
+            form_titles = []
             for rec in title_records:
                 f = rec.get("fields", {})
                 if campaign_id in f.get(FORM_TITLES_FIELDS["campaign_link"], []):
@@ -210,6 +207,7 @@ class AirtableService:
                         "id": rec["id"],
                         "name": f.get(FORM_TITLES_FIELDS["name"], ""),
                         "donation_ids": f.get(FORM_TITLES_FIELDS["donations_link"], []),
+                        "createdTime": rec.get("createdTime")  # ISO string
                     })
 
             if not form_titles:
@@ -219,7 +217,7 @@ class AirtableService:
                     "stats_by_form_title":   []
                 }
 
-            # Paso 2: unificar donation_ids y traer donaciones
+            # — Paso 3: unificar donation IDs y traer donaciones —
             all_donation_ids = {did for ft in form_titles for did in ft["donation_ids"]}
             if not all_donation_ids:
                 return {
@@ -227,56 +225,45 @@ class AirtableService:
                     "campaign_total_count":  0,
                     "stats_by_form_title":   []
                 }
-            formula_donations = "OR(" + ",".join(
-                f"RECORD_ID()='{did}'" for did in all_donation_ids
-            ) + ")"
+            formula_donations = "OR(" + ",".join(f"RECORD_ID()='{did}'" for did in all_donation_ids) + ")"
             donation_records = self.donations_table.all(
                 formula=formula_donations,
                 fields=[DONATIONS_FIELDS["amount"], DONATIONS_FIELDS["donor_link"]]
             )
 
-            # Paso 3: traer donantes en bloque
+            # — Paso 4: traer donantes en bloque —
             donor_ids = {
                 rec.get("fields", {}).get(DONATIONS_FIELDS["donor_link"], [None])[0]
                 for rec in donation_records
             } - {None}
-            donor_records: List[Dict[str, Any]] = []
+            donor_records = []
             if donor_ids:
-                formula_donors = "OR(" + ",".join(
-                    f"RECORD_ID()='{did}'" for did in donor_ids
-                ) + ")"
+                formula_donors = "OR(" + ",".join(f"RECORD_ID()='{did}'" for did in donor_ids) + ")"
                 donor_records = self.donors_table.all(
                     formula=formula_donors,
-                    fields=[
-                        DONORS_FIELDS["name"],
-                        DONORS_FIELDS["last_name"],
-                        DONORS_FIELDS["emails_link"],
-                    ]
+                    fields=[DONORS_FIELDS["name"], DONORS_FIELDS["last_name"], DONORS_FIELDS["emails_link"]]
                 )
 
-            # Paso 4: traer emails en bloque
+            # — Paso 5: traer emails en bloque —
             email_ids = {
-                eid
-                for dr in donor_records
-                for eid in dr.get("fields", {}).get(DONORS_FIELDS["emails_link"], [])
+                eid for dr in donor_records for eid in dr.get("fields", {}).get(DONORS_FIELDS["emails_link"], [])
             }
-            email_records: List[Dict[str, Any]] = []
+            email_records = []
             if email_ids:
-                formula_emails = "OR(" + ",".join(
-                    f"RECORD_ID()='{eid}'" for eid in email_ids
-                ) + ")"
+                formula_emails = "OR(" + ",".join(f"RECORD_ID()='{eid}'" for eid in email_ids) + ")"
                 email_records = self.emails_table.all(
                     formula=formula_emails,
                     fields=[EMAILS_FIELDS["email"]]
                 )
 
-            # Paso 5: mapas y agregación
+            # — Paso 6: construir map de montos por donation ID —
             donations_map = {
                 rec["id"]: rec["fields"].get(DONATIONS_FIELDS["amount"], 0)
                 for rec in donation_records
             }
 
-            stats: List[Dict[str, Any]] = []
+            # — Paso 7: armar lista de stats incluyendo form_title_id —
+            stats = []
             grand_total = 0
             grand_count = 0
             for ft in form_titles:
@@ -284,6 +271,7 @@ class AirtableService:
                 cnt = sum(1 for did in ft["donation_ids"] if did in donations_map)
                 if cnt > 0:
                     stats.append({
+                        "form_title_id":   ft["id"],
                         "form_title_name": ft["name"],
                         "total_amount":    tot,
                         "donation_count":  cnt
@@ -291,7 +279,13 @@ class AirtableService:
                 grand_total += tot
                 grand_count += cnt
 
-            stats.sort(key=lambda x: x["total_amount"], reverse=True)
+            # — Paso 8: ordenar POR createdTime (más recientes primero) —
+            ft_map = {ft["id"]: ft for ft in form_titles}
+            stats.sort(
+                key=lambda x: ft_map[x["form_title_id"]]["createdTime"],
+                reverse=False
+            )
+
             return {
                 "campaign_total_amount": grand_total,
                 "campaign_total_count":  grand_count,
