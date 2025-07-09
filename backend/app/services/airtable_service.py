@@ -28,7 +28,7 @@ if not AIRTABLE_API_KEY or not AIRTABLE_BASE_ID:
 DONATIONS_FIELDS = {"amount": "Amount", "date": "Date", "form_title_link": "Form Title", "donor_link": "Donor"}
 CAMPAIGNS_FIELDS = {"name": "Name", "source": "Source"}
 FORM_TITLES_FIELDS = {"name": "Name", "campaign_link": "Campaign", "donations_link": "Donations"}
-DONORS_FIELDS = {"name": "Name", "last_name": "Last Name", "emails_link": "Emails"}
+DONORS_FIELDS = {"name": "Name", "last_name": "Last Name", "emails_link": "Emails", "donations_link": "Donations"}
 EMAILS_FIELDS = {"email": "Email"}
 
 
@@ -43,6 +43,69 @@ class AirtableService:
         # ¡NUEVO! Se inicializa la tabla de Emails
         self.emails_table = self.base.table(EMAILS_TABLE_NAME)
         print("Servicio de Airtable inicializado correctamente.")
+
+    # Reemplaza el método get_airtable_data_by_email en airtable_service.py con este
+
+    def get_airtable_data_by_email(self, email: str) -> Dict[str, Any]:
+        """
+        VERSIÓN FINAL Y CORREGIDA
+        Busca la información completa de un donante y sus donaciones a partir de su email.
+        """
+        # Paso 1 y 2: Encontrar el donante (esto ya funciona)
+        email_formula = f"{{{EMAILS_FIELDS['email']}}} = '{email}'"
+        email_records = self.emails_table.all(formula=email_formula, max_records=1)
+        if not email_records:
+            return {"donor_info": None, "donations": []}
+        email_id = email_records[0]['id']
+
+        all_donors = self.donors_table.all(formula=f"NOT({{{DONORS_FIELDS['emails_link']}}} = '')")
+        donor_record = None
+        for donor in all_donors:
+            if email_id in donor.get("fields", {}).get(DONORS_FIELDS["emails_link"], []):
+                donor_record = donor
+                break
+        if not donor_record:
+            return {"donor_info": None, "donations": []}
+
+        # --- INICIO DE LA CORRECCIÓN CLAVE ---
+        # Paso 3: Obtener las donaciones usando el nombre de campo correcto.
+        
+        donation_records = []
+        # Usamos la nueva clave 'donations_link' que apunta al campo "Donations".
+        donation_ids = donor_record.get('fields', {}).get(DONORS_FIELDS['donations_link'])
+
+        if donation_ids:
+            id_formulas = [f"RECORD_ID() = '{id}'" for id in donation_ids]
+            donations_formula = f"OR({', '.join(id_formulas)})"
+            
+            donation_records = self.donations_table.all(
+                formula=donations_formula,
+                fields=[
+                    DONATIONS_FIELDS["amount"],
+                    DONATIONS_FIELDS["date"],
+                    DONATIONS_FIELDS["form_title_link"]
+                ]
+            )
+        # --- FIN DE LA CORRECCIÓN CLAVE ---
+
+        return {
+            "donor_info": donor_record,
+            "donations": donation_records
+        }
+
+    def get_emails_from_ids(self, email_ids: List[str]) -> List[str]:
+        """
+        Convierte una lista de IDs de email en una lista de direcciones de email.
+        """
+        if not email_ids:
+            return []
+        
+        id_formulas = [f"RECORD_ID() = '{id}'" for id in email_ids]
+        formula = f"OR({', '.join(id_formulas)})"
+        
+        email_records = self.emails_table.all(formula=formula, fields=[EMAILS_FIELDS["email"]])
+        
+        return [rec.get("fields", {}).get(EMAILS_FIELDS["email"]) for rec in email_records if "fields" in rec]
 
     def get_unique_campaign_sources(self) -> List[str]:
         try:
