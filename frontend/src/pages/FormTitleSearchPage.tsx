@@ -95,7 +95,7 @@ export const FormTitleSearchPage = () => {
   }, [selectedTitle, startDate, endDate]);
 
   return (
-    <Box sx={{ width: '100%', maxWidth: '900px', display: 'flex', flexDirection: 'column', gap: 3 }}>
+    <Box sx={{ width: '100%', maxWidth: '1280px', mx: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
       <Typography variant="h4" component="h1">Advanced Donation Search</Typography>
 
       <Paper variant="outlined" sx={{ p: 2 }}>

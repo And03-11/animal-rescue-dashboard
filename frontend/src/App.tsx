@@ -1,23 +1,21 @@
 // src/App.tsx
-import { ThemeProvider, CssBaseline } from '@mui/material';
 import { BrowserRouter } from 'react-router-dom';
-import { theme } from './theme/theme';
 import { LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
+import { ThemeToggleProvider } from './theme/ThemeToggleProvider';
 import { AppRoutes } from './routes';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
 function App() {
   return (
     <LocalizationProvider dateAdapter={AdapterDayjs}>
-      <ThemeProvider theme={theme}>
-        <CssBaseline />
+      <ThemeToggleProvider>
         <BrowserRouter>
           <ErrorBoundary>
             <AppRoutes />
           </ErrorBoundary>
         </BrowserRouter>
-      </ThemeProvider>
+      </ThemeToggleProvider>
     </LocalizationProvider>
   );
 }
