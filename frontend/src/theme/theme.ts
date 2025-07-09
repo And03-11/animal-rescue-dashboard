@@ -7,14 +7,85 @@ export const prefersDarkMode =
   window.matchMedia('(prefers-color-scheme: dark)').matches;
 
 const baseComponents: ThemeOptions['components'] = {
+  MuiTableCell: {
+    styleOverrides: {
+      head: {
+        backgroundColor: '#2a2d3a',
+        color: '#ffffff',
+        fontWeight: 'bold',
+        fontSize: '0.875rem',
+        letterSpacing: '0.5px',
+      },
+      root: {
+        transition: 'all 0.3s ease',
+        borderBottom: '1px solid rgba(255,255,255,0.1)',
+      },
+    },
+  },
+  MuiInputLabel: {
+    styleOverrides: {
+      root: {
+        color: 'inherit',
+        '&.Mui-focused': {
+          color: '#6c5ce7',
+        },
+      },
+    },
+  },
+  MuiSelect: {
+    styleOverrides: {
+      select: {
+        '&:focus': {
+          backgroundColor: 'inherit',
+        },
+      },
+    },
+  },
+  MuiCard: {
+    styleOverrides: {
+      root: {
+        transition: 'all 0.3s ease',
+        '&:hover': {
+          transform: 'scale(1.015)',
+          boxShadow: '0 6px 20px rgba(0,0,0,0.12)',
+        },
+      },
+    },
+  },
+  MuiTableRow: {
+    styleOverrides: {
+      root: {
+        transition: 'all 0.3s ease',
+        '&:hover': {
+          backgroundColor: 'rgba(255,255,255,0.05)',
+        },
+        '&.Mui-selected': {
+          backgroundColor: 'rgba(100, 100, 255, 0.12)',
+        },
+        '&.Mui-selected:hover': {
+          backgroundColor: 'rgba(100, 100, 255, 0.2)',
+        },
+      },
+    },
+  },
   MuiListItemIcon: {
     styleOverrides: {
       root: {
         transition: 'all 0.3s ease',
         color: 'inherit',
-        '&:hover': {
+      },
+    },
+  },
+  MuiListItemButton: {
+    styleOverrides: {
+      root: {
+        transition: 'all 0.3s ease',
+        '&:hover .MuiListItemIcon-root': {
           color: '#6c5ce7',
           transform: 'scale(1.1)',
+        },
+        '&:hover .MuiListItemText-primary': {
+          color: '#6c5ce7',
         },
       },
     },
