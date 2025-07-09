@@ -20,8 +20,8 @@ export const Layout: React.FC = () => { // Ya no necesita la prop 'children'
     { text: 'Dashboard', icon: <HomeIcon />, path: '/' },
     { text: 'Campaign Stats', icon: <BarChartIcon />, path: '/campaign-stats' },
     { text: 'Custom Reports', icon: <AssessmentIcon />, path: '/form-title-search' },
-    { text: 'Contact Search', icon: <SearchIcon />, path: '/search' },
-    { text: 'Send Email', icon: <MailIcon />, path: '/send-email' },
+    { text: 'Contact Search', icon: <SearchIcon />, path: '/contact-search' },
+    { text: 'Send Email', icon: <MailIcon />, path: '/email-sender' },
   ];
 
   return (

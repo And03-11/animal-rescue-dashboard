@@ -211,3 +211,5 @@ export const EmailSenderPage = () => {
     </Container>
   );
 };
+
+export default EmailSenderPage

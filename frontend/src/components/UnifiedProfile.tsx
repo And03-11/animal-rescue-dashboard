@@ -118,3 +118,5 @@ export const UnifiedProfile: React.FC<UnifiedProfileProps> = ({ profileData }) =
     </Card>
   );
 };
+
+export default UnifiedProfile;

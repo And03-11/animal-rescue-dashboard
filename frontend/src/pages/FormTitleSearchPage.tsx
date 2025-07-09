@@ -189,3 +189,5 @@ export const FormTitleSearchPage = () => {
     </Box>
   );
 };
+
+export default FormTitleSearchPage

@@ -279,3 +279,6 @@ export const CampaignStatsPage: React.FC = () => {
     </Box>
   );
 };
+
+
+export default CampaignStatsPage

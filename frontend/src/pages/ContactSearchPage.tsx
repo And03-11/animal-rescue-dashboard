@@ -53,3 +53,5 @@ export const ContactSearchPage = () => {
     </Container>
   );
 };
+
+export default ContactSearchPage

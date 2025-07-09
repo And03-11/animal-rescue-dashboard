@@ -131,3 +131,5 @@ export const DashboardHomePage = () => {
     </Box>
   );
 };
+
+export default DashboardHomePage

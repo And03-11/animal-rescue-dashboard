@@ -152,3 +152,5 @@ export const CampaignDetailPage = () => {
     </Box>
   );
 };
+
+export default CampaignDetailPage
