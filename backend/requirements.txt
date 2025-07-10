@@ -8,3 +8,5 @@ httpx
 pytest
 pyairtable
 google-auth
+google-auth-oauthlib
+
