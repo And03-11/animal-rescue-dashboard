@@ -34,21 +34,21 @@ EMAILS_FIELDS = {"email": "Email"}
 
 class AirtableService:
     def __init__(self):
+        # Validar credenciales en la inicialización
+        if not AIRTABLE_API_KEY or not AIRTABLE_BASE_ID:
+            raise ValueError("AIRTABLE_API_KEY y AIRTABLE_BASE_ID deben estar definidos en el archivo .env")
         self.api = Api(AIRTABLE_API_KEY)
         self.base = self.api.base(AIRTABLE_BASE_ID)
+        # inicializar tablas
         self.donations_table = self.base.table(DONATIONS_TABLE_NAME)
         self.form_titles_table = self.base.table(FORM_TITLES_TABLE_NAME)
         self.campaigns_table = self.base.table(CAMPAIGNS_TABLE_NAME)
         self.donors_table = self.base.table(DONORS_TABLE_NAME)
-        # ¡NUEVO! Se inicializa la tabla de Emails
         self.emails_table = self.base.table(EMAILS_TABLE_NAME)
+
         print("Servicio de Airtable inicializado correctamente.")
 
     def create_record(self, table_name: str, data: dict) -> dict:
-        """
-        Crea un registro en la tabla de contactos (Donors en Airtable).
-        """
-        # Según tu configuración, los contactos están en donors_table
         return self.donors_table.create(data)
 
     # Reemplaza el método get_airtable_data_by_email en airtable_service.py con este
