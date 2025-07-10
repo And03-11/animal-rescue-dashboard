@@ -10,6 +10,9 @@ on:
 jobs:
   backend:
     name: Backend Tests
+    env:
+      AIRTABLE_API_KEY: test
+      AIRTABLE_BASE_ID: test
     runs-on: ubuntu-latest
     strategy:
       matrix:
