@@ -1,10 +1,10 @@
+# --- Archivo: backend/requirements.txt ---
 fastapi
 uvicorn
 pydantic[email]
 python-dotenv
 requests
 pandas
-httpx        # requerido por TestClient
-pytest       # framework de testing
-# airtable-python-wrapper
-# google-api-python-client
+httpx
+pytest
+pyairtable
