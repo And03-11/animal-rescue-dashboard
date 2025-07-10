@@ -44,6 +44,13 @@ class AirtableService:
         self.emails_table = self.base.table(EMAILS_TABLE_NAME)
         print("Servicio de Airtable inicializado correctamente.")
 
+    def create_record(self, table_name: str, data: dict) -> dict:
+        """
+        Crea un registro en la tabla de contactos (Donors en Airtable).
+        """
+        # Según tu configuración, los contactos están en donors_table
+        return self.donors_table.create(data)
+
     # Reemplaza el método get_airtable_data_by_email en airtable_service.py con este
 
     def get_airtable_data_by_email(self, email: str) -> Dict[str, Any]:
@@ -360,3 +367,27 @@ class AirtableService:
                 status_code=500,
                 detail="Ocurrió un error al calcular las estadísticas de la campaña."
             )
+        
+
+
+    def get_dashboard_data(self) -> Dict[str, Any]:
+        """
+        Devuelve métricas de donaciones: total y tendencia diaria.
+        """
+        # Llama al método existente que obtiene todas las donaciones
+        donations = self.get_donations()
+        total = sum(d.get("amount", 0) for d in donations)
+        # Agrupar montos por fecha
+        trend: Dict[str, float] = {}
+        for d in donations:
+            date = d.get("date")
+            amt = d.get("amount", 0)
+            if date:
+                trend[date] = trend.get(date, 0) + amt
+
+        # Formatear daily_trend como lista
+        daily_trend = [{"date": dt, "amount": trend[dt]} for dt in sorted(trend)]
+        return {"total_donations": total, "daily_trend": daily_trend}
+
+
+    

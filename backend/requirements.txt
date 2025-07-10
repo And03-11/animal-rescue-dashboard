@@ -1,5 +1,10 @@
 fastapi
-uvicorn[standard]
-requests
+uvicorn
+pydantic[email]
 python-dotenv
+requests
 pandas
+httpx        # requerido por TestClient
+pytest       # framework de testing
+# airtable-python-wrapper
+# google-api-python-client
