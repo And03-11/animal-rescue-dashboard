@@ -21,8 +21,6 @@ EMAILS_TABLE_NAME = os.getenv("AIRTABLE_EMAILS_TABLE_NAME", "Emails")
 
 COSTA_RICA_TZ = ZoneInfo("America/Costa_Rica")
 
-if not AIRTABLE_API_KEY or not AIRTABLE_BASE_ID:
-    raise ValueError("AIRTABLE_API_KEY y AIRTABLE_BASE_ID deben estar definidos en el archivo .env")
 
 # --- Nombres de Campos ---
 DONATIONS_FIELDS = {"amount": "Amount", "date": "Date", "form_title_link": "Form Title", "donor_link": "Donor"}
@@ -34,6 +32,9 @@ EMAILS_FIELDS = {"email": "Email"}
 
 class AirtableService:
     def __init__(self):
+        if not AIRTABLE_API_KEY or not AIRTABLE_BASE_ID:
+            raise ValueError("AIRTABLE_API_KEY y AIRTABLE_BASE_ID deben estar definidos en el archivo .env")
+
         # Validar credenciales en la inicialización
         if not AIRTABLE_API_KEY or not AIRTABLE_BASE_ID:
             raise ValueError("AIRTABLE_API_KEY y AIRTABLE_BASE_ID deben estar definidos en el archivo .env")
