@@ -119,10 +119,10 @@ export const DashboardHomePage = () => {
         </Box>
         {loading.filter ? <CircularProgress /> : error.filter ? <Alert severity="error">{error.filter}</Alert> : filteredData && (
           <Grid container spacing={3}>
-            <Grid item xs={12} sm={6}>
+            <Grid size={{ xs: 12, md: 6 }}>
               <StatCard title="Total Donated in Range" value={`$${filteredData.amountInRange.toFixed(2)}`} icon={<MonetizationOnIcon color="success" sx={{ fontSize: 40 }} />} />
             </Grid>
-            <Grid item xs={12} sm={6}>
+            <Grid size={{ xs: 12, md: 6 }}>
               {/* ¡AQUÍ ESTÁ EL CAMBIO! */}
               <StatCard title="Number of Donations" value={`${filteredData.donationsCount}`} icon={<ReceiptLongIcon sx={{ fontSize: 40, color: '#BFACB5' }} />} />
             </Grid>

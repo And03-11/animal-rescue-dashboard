@@ -145,16 +145,6 @@ const baseComponents: ThemeOptions['components'] = {
       },
     },
   },
-  MuiListItemButton: {
-  styleOverrides: {
-    root: {
-      '&:hover .MuiListItemIcon-root': {
-        color: '#6c5ce7',
-        transform: 'scale(1.1)',
-      },
-    }
-  }
-}
 };
 
 export const lightTheme = createTheme({

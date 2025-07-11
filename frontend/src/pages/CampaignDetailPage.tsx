@@ -85,7 +85,7 @@ export const CampaignDetailPage = () => {
       
       <Grid container spacing={3} sx={{ justifyContent: 'center' }}>
         {/* --- Columna Izquierda: Detalles y Lista de Contactos --- */}
-        <Grid item xs={12} md={5}>
+        <Grid size={{ xs: 12, md: 5 }}>
           <Box display="flex" flexDirection="column" gap={3}>
             <Paper variant="outlined" sx={{ p: 2 }}>
               <Typography variant="h6" gutterBottom>Campaign Info</Typography>
@@ -128,13 +128,13 @@ export const CampaignDetailPage = () => {
         </Grid>
 
         {/* --- Columna Derecha: Vista Previa del Correo --- */}
-        <Grid item xs={12} md={7}>
+        <Grid size={{ xs: 12, md: 7 }}>
             <Paper variant="outlined">
                 <CardHeader
                     avatar={<Avatar><ArticleIcon /></Avatar>}
                     title="Sent Email Content"
                     action={
-                        <ToggleButtonGroup value={viewMode} exclusive onChange={(e, newMode) => newMode && setViewMode(newMode)} size="small">
+                        <ToggleButtonGroup value={viewMode} exclusive onChange={(_e, newMode) => newMode && setViewMode(newMode)} size="small">
                             <ToggleButton value="preview" aria-label="preview"><VisibilityIcon /></ToggleButton>
                             <ToggleButton value="code" aria-label="code view"><CodeIcon /></ToggleButton>
                         </ToggleButtonGroup>

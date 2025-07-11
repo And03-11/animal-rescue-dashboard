@@ -134,13 +134,13 @@ export const FormTitleSearchPage = () => {
           {/* Step 4: Dates and Search */}
           <Collapse in={!!selectedTitle}>
             <Grid container spacing={2} alignItems="center" sx={{ mt: 1 }}>
-              <Grid item xs={12} sm={5}>
+              <Grid size={{ xs: 12, md: 5 }}>
                 <DatePicker label="Start Date (Optional)" value={startDate} onChange={setStartDate} sx={{ width: '100%' }} />
               </Grid>
-              <Grid item xs={12} sm={5}>
+              <Grid size={{ xs: 12, md: 5 }}>
                 <DatePicker label="End Date (Optional)" value={endDate} onChange={setEndDate} sx={{ width: '100%' }} />
               </Grid>
-              <Grid item xs={12} sm={2}>
+              <Grid size={{ xs: 12, md: 2 }}>
                 <Button fullWidth variant="contained" onClick={handleSearch} disabled={loading.donations} sx={{ height: '56px' }}>
                   {loading.donations ? <CircularProgress size={24} color="inherit" /> : 'Search'}
                 </Button>

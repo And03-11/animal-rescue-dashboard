@@ -29,7 +29,7 @@ const CampaignForm: React.FC<{ onSave: (campaign: any) => void; onCancel: () => 
     onSave({ region, is_bounced: isBounced, subject, html_body: htmlBody });
   };
 
-  const handleViewChange = (event: React.MouseEvent<HTMLElement>, newViewMode: 'code' | 'preview' | null) => {
+  const handleViewChange = (_event: React.MouseEvent<HTMLElement>, newViewMode: 'code' | 'preview' | null) => {
     if (newViewMode !== null) {
       setViewMode(newViewMode);
     }
