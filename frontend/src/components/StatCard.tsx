@@ -1,6 +1,5 @@
 // src/components/StatCard.tsx
-import React from 'react';
-import { Card, CardContent, Typography, Box } from '@mui/material';
+import { Card, Typography, Box } from '@mui/material';
 
 interface StatCardProps {
   title: string;
@@ -8,7 +7,7 @@ interface StatCardProps {
   icon: React.ReactNode;
 }
 
-export const StatCard: React.FC<StatCardProps> = ({ title, value, icon }) => {
+export function StatCard({ title, value, icon }: StatCardProps) {
   return (
     <Card sx={{ display: 'flex', alignItems: 'center', p: 2 }}>
       <Box sx={{ mr: 2 }}>

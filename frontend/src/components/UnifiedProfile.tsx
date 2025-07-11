@@ -1,6 +1,7 @@
 // src/components/UnifiedProfile.tsx
 import React from 'react';
-import { Card, CardContent, Typography, Box, Grid, Chip, Divider, List, ListItem, ListItemIcon, ListItemText } from '@mui/material';
+import { Card, CardContent, Typography, Box, Chip, Divider, List, ListItem, ListItemIcon, ListItemText } from '@mui/material';
+import Grid from '@mui/material/Grid';
 import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
 import PeopleIcon from '@mui/icons-material/People';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';

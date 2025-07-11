@@ -1,14 +1,15 @@
 // src/pages/CampaignDetailPage.tsx
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link as RouterLink } from 'react-router-dom';
 // Línea nueva
 // La línea nueva y corregida
 import { 
   Box, Typography, CircularProgress, Alert, Paper, Table, 
   TableBody, TableCell, TableContainer, TableHead, TableRow, 
-  Breadcrumbs, Link, Chip, Divider, Grid, Card, CardHeader,
+  Breadcrumbs, Link, Chip, Divider, CardHeader,
   Avatar, ToggleButtonGroup, ToggleButton, TextField, CardContent
 } from '@mui/material';
+import Grid from '@mui/material/Grid';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
 import apiClient from '../api/apiClient';
 // Añade estas líneas junto a tus otros imports

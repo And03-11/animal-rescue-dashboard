@@ -1,6 +1,5 @@
 // src/components/BrevoCard.tsx
-import React from 'react';
-import { Card, CardContent, Typography, Box, List, ListItem, ListItemText, Chip } from '@mui/material';
+import { Card, CardContent, Typography, List, ListItem, ListItemText, Chip } from '@mui/material';
 import DoNotDisturbOnIcon from '@mui/icons-material/DoNotDisturbOn';
 import MarkEmailReadIcon from '@mui/icons-material/MarkEmailRead';
 
@@ -8,7 +7,8 @@ interface BrevoCardProps {
   brevoProfile: any;
 }
 
-export const BrevoCard: React.FC<BrevoCardProps> = ({ brevoProfile }) => {
+export function BrevoCard({ brevoProfile }: BrevoCardProps) {
+
   if (!brevoProfile || !brevoProfile.found) {
     return <Typography sx={{mt: 2}}>This donor was not found in Brevo.</Typography>;
   }

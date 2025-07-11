@@ -1,5 +1,5 @@
 // src/pages/ContactSearchPage.tsx
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Box, Button, Container, TextField, Typography, CircularProgress, Alert } from '@mui/material';
 import apiClient from '../api/apiClient';
 // Importamos nuestro nuevo y único componente de perfil
