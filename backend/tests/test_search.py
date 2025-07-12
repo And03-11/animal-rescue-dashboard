@@ -39,7 +39,9 @@ def override_dependencies():
     app.dependency_overrides[get_mailchimp_service] = lambda: DummyMailchimpService()
     app.dependency_overrides[get_brevo_service] = lambda: DummyBrevoService()
     yield
-    app.dependency_overrides.clear()
+    del app.dependency_overrides[get_airtable_service]
+    del app.dependency_overrides[get_mailchimp_service]
+    del app.dependency_overrides[get_brevo_service]
 
 client = TestClient(app)
 
