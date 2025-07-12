@@ -12,6 +12,7 @@ google-auth-oauthlib
 google-api-python-client
 python-jose[cryptography]
 passlib[bcrypt]
+sqlalchemy
 
 
 
