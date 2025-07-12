@@ -1,4 +1,3 @@
-
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react-swc';
 
@@ -23,5 +22,10 @@ export default defineConfig({
   optimizeDeps: {
     include: ['@mui/material', '@mui/icons-material'],
     exclude: [],
+  },
+  server: {
+    proxy: {
+      '/api': 'http://localhost:8001',
+    },
   },
 });

@@ -7,7 +7,8 @@ from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 import traceback
 
-load_dotenv()
+dotenv_path = os.path.join(os.path.dirname(__file__), "..", "..", ".env")
+load_dotenv(dotenv_path=os.path.abspath(dotenv_path))
 
 # --- Variables de Entorno ---
 AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")

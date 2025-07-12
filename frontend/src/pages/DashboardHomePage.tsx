@@ -4,12 +4,13 @@ import Grid from '@mui/material/Grid';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import dayjs, { Dayjs } from 'dayjs';
-import apiClient from '../api/apiClient';
+import apiClient from '../api/axiosConfig';
 import { StatCard } from '../components/StatCard';
 import TodayIcon from '@mui/icons-material/Today';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
+
 
 // Interfaces de datos
 interface GlanceData {
@@ -69,7 +70,8 @@ export const DashboardHomePage = () => {
   }, [startDate, endDate]);
 
   const formatXAxis = (tickItem: string) => dayjs(tickItem).format('D/M');
-
+  console.log("glanceData", glanceData);
+  console.log("filteredData", filteredData);
   return (
     <Box sx={{ width: '100%', maxWidth: '1200px', display: 'flex', flexDirection: 'column', gap: 2 }}>
       <Typography variant="h4" component="h1">Global Dashboard</Typography>

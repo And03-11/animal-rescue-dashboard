@@ -3,6 +3,7 @@ from app.services.airtable_service import AirtableService
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 from typing import List, Dict, Any, Optional
+from app.core.security import get_current_user
 
 router = APIRouter()
 COSTA_RICA_TZ = ZoneInfo("America/Costa_Rica")
@@ -24,7 +25,9 @@ def process_donations_for_trend(donations: List[Dict]) -> List[Dict[str, Any]]:
 def get_dashboard_metrics(
     start_date: Optional[str] = None, 
     end_date: Optional[str] = None,
-    airtable_service: AirtableService = Depends(AirtableService)
+    airtable_service: AirtableService = Depends(AirtableService),
+    current_user: str = Depends(get_current_user)  # 🔐 protección con JWT
+
 ):
     try:
         now_in_tz = datetime.now(COSTA_RICA_TZ)

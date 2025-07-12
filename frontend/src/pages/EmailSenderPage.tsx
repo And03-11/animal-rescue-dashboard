@@ -10,7 +10,7 @@ import {
 import { Link as RouterLink } from 'react-router-dom';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch';
-import apiClient from '../api/apiClient';
+import apiClient from '../api/axiosConfig';
 import { ToggleButtonGroup, ToggleButton } from '@mui/material';
 import CodeIcon from '@mui/icons-material/Code';
 import VisibilityIcon from '@mui/icons-material/Visibility';

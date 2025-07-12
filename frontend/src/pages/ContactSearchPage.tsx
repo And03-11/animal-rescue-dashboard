@@ -1,7 +1,7 @@
 // src/pages/ContactSearchPage.tsx
 import { useState } from 'react';
 import { Box, Button, Container, TextField, Typography, CircularProgress, Alert } from '@mui/material';
-import apiClient from '../api/apiClient';
+import apiClient from '../api/axiosConfig';
 // Importamos nuestro nuevo y único componente de perfil
 import { UnifiedProfile } from '../components/UnifiedProfile';
 

@@ -3,11 +3,16 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException, status
 from app.schemas import ContactCreate, Contact
 from app.services.airtable_service import AirtableService, DONORS_FIELDS
+from fastapi import Depends
+from app.core.security import get_current_user
 
 router = APIRouter()
 
-@router.post("/", response_model=Contact, status_code=status.HTTP_201_CREATED)
-def create_contact(contact: ContactCreate):
+@router.post("", response_model=Contact, status_code=status.HTTP_201_CREATED)
+def create_contact(
+    contact: ContactCreate,
+    current_user: str = Depends(get_current_user)
+    ):
     """
     Crea un nuevo contacto en Airtable (tabla Donors).
     """
@@ -27,8 +32,8 @@ def create_contact(contact: ContactCreate):
         **contact.model_dump()
     )
 
-@router.get("/", response_model=List[Contact])
-def list_contacts():
+@router.get("", response_model=List[Contact])
+def list_contacts(current_user: str = Depends(get_current_user)):
     """
     Obtiene la lista de contactos (donors) desde Airtable y su email.
     """

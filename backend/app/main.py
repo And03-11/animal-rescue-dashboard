@@ -2,6 +2,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware  # ◀ Importamos el middleware CORS
 from app.api.v1.endpoints.search import router as search_router
+from app.api.v1.endpoints import auth_sqlite
+
 
 
 # Importar routers
@@ -43,6 +45,7 @@ app.include_router(campaigns.router, prefix="/api/v1/campaigns", tags=["campaign
 app.include_router(form_titles.router, prefix="/api/v1/form-titles", tags=["form-titles"])
 app.include_router(email_sender.router, prefix="/api/v1/send-email", tags=["email"])
 app.include_router(search_router, prefix="/api/v1", tags=["search"])
+app.include_router(auth_sqlite.router, prefix="/api/v1", tags=["auth"])
 
 # Nota: Con esta configuración, tu frontend en localhost:3000 puede hacer peticiones
 #       a este backend sin problemas de CORS.

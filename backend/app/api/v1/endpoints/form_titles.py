@@ -1,13 +1,17 @@
 from fastapi import APIRouter, Depends
 from app.services.airtable_service import AirtableService
 from typing import List, Dict, Optional
+from app.core.security import get_current_user
 
 router = APIRouter()
 
 @router.get("", response_model=List[Dict])
 def get_form_titles(
     campaign_id: Optional[str] = None,
-    airtable_service: AirtableService = Depends(AirtableService)
+    airtable_service: AirtableService = Depends(AirtableService),
+    current_user: str = Depends(get_current_user)
+
+    
 ) -> List[Dict]:
     """
     Endpoint to get a list of form titles.
@@ -20,7 +24,9 @@ def get_donations_by_form_title(
     form_title_id: str,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    airtable_service: AirtableService = Depends(AirtableService)
+    airtable_service: AirtableService = Depends(AirtableService),
+    current_user: str = Depends(get_current_user)
+
 ) -> Dict:
     """
     Endpoint to get donations filtered by a specific form title and date range.

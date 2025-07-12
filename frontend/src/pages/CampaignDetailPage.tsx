@@ -11,7 +11,7 @@ import {
 } from '@mui/material';
 import Grid from '@mui/material/Grid';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
-import apiClient from '../api/apiClient';
+import apiClient from '../api/axiosConfig';
 // Añade estas líneas junto a tus otros imports
 import ArticleIcon from '@mui/icons-material/Article';
 import CodeIcon from '@mui/icons-material/Code';

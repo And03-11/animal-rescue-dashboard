@@ -33,7 +33,7 @@ import {
   ResponsiveContainer
 } from 'recharts';
 import CloseIcon from '@mui/icons-material/Close';
-import apiClient from '../api/apiClient';
+import apiClient from '../api/axiosConfig';
 import { StatCard } from '../components/StatCard';
 import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';

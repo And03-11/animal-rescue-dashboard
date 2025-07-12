@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Any
+from app.core.security import get_current_user
 
 from app.services.airtable_service import AirtableService
 
@@ -21,17 +22,19 @@ class DonationDetail(BaseModel):
 
 @router.get("/sources", response_model=List[str])
 def get_campaign_sources(
-    airtable_service: AirtableService = Depends(AirtableService)
+    airtable_service: AirtableService = Depends(AirtableService),
+    current_user: str = Depends(get_current_user)
 ):
     """
     Endpoint to get a list of unique campaign sources.
     """
     return airtable_service.get_unique_campaign_sources()
 
-@router.get("/", response_model=List[Dict[str, Any]])
+@router.get("", response_model=List[Dict[str, Any]])
 def get_campaigns_by_source(
     source: str,
-    airtable_service: AirtableService = Depends(AirtableService)
+    airtable_service: AirtableService = Depends(AirtableService),
+    current_user: str = Depends(get_current_user)
 ):
     """
     Endpoint to get campaigns filtered by a specific source.
@@ -41,7 +44,8 @@ def get_campaigns_by_source(
 @router.get("/{campaign_id}/stats", response_model=Dict[str, Any])
 def get_campaign_stats(
     campaign_id: str,
-    airtable_service: AirtableService = Depends(AirtableService)
+    airtable_service: AirtableService = Depends(AirtableService),
+    current_user: str = Depends(get_current_user)
 ):
     """
     Obtiene estadísticas detalladas para una campaña específica,
@@ -62,7 +66,8 @@ def get_campaign_stats(
 )
 def get_donations_for_form_title(
     form_title_id: str,
-    airtable_service: AirtableService = Depends(AirtableService)
+    airtable_service: AirtableService = Depends(AirtableService),
+    current_user: str = Depends(get_current_user)
 ):
     """
     Devuelve la lista de donaciones (con nombre y email de donante)

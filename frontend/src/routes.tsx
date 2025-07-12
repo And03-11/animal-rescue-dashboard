@@ -5,8 +5,16 @@ import { Box, CircularProgress } from '@mui/material';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import { Layout } from './components/Layout';
+import PrivateRoute from './components/PrivateRoute';
+import LoginForm from './pages/LoginForm';
 
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
+const DashboardHomePage = lazy(() => import('./pages/DashboardHomePage'));
+const CampaignStatsPage = lazy(() => import('./pages/CampaignStatsPage'));
+const FormTitleSearchPage = lazy(() => import('./pages/FormTitleSearchPage'));
+const ContactSearchPage = lazy(() => import('./pages/ContactSearchPage'));
+const EmailSenderPage = lazy(() => import('./pages/EmailSenderPage'));
+const CampaignDetailPage = lazy(() => import('./pages/CampaignDetailPage'));
 
 const SpinnerFallback = () => (
   <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
@@ -36,33 +44,52 @@ const PageTransition = ({ children }: { children: React.ReactNode }) => {
   );
 };
 
-const routes = [
-  { path: '/', element: lazy(() => import('./pages/DashboardHomePage')), index: true },
-  { path: 'campaign-stats', element: lazy(() => import('./pages/CampaignStatsPage')) },
-  { path: 'form-title-search', element: lazy(() => import('./pages/FormTitleSearchPage')) },
-  { path: 'contact-search', element: lazy(() => import('./pages/ContactSearchPage')) },
-  { path: 'email-sender', element: lazy(() => import('./pages/EmailSenderPage')) },
-  { path: 'campaign-detail', element: lazy(() => import('./pages/CampaignDetailPage')) },
-];
-
 export function AppRoutes() {
   return (
     <Suspense fallback={<SpinnerFallback />}>
       <Routes>
+        <Route path="/login" element={<LoginForm />} />
         <Route path="/" element={<Layout />}>
-          {routes.map(({ path, element: Component, index }) => (
-            <Route
-              key={path}
-              path={index ? undefined : path}
-              index={!!index}
-              element={<PageTransition><Component /></PageTransition>}
-            />
-          ))}
-          <Route path="*" element={<PageTransition><NotFoundPage /></PageTransition>} />
+          <Route
+            index
+            element={
+              <PrivateRoute>
+                <PageTransition><DashboardHomePage /></PageTransition>
+              </PrivateRoute>
+            }
+          />
+          <Route path="campaign-stats" element={
+            <PrivateRoute>
+              <PageTransition><CampaignStatsPage /></PageTransition>
+            </PrivateRoute>
+          } />
+          <Route path="form-title-search" element={
+            <PrivateRoute>
+              <PageTransition><FormTitleSearchPage /></PageTransition>
+            </PrivateRoute>
+          } />
+          <Route path="contact-search" element={
+            <PrivateRoute>
+              <PageTransition><ContactSearchPage /></PageTransition>
+            </PrivateRoute>
+          } />
+          <Route path="email-sender" element={
+            <PrivateRoute>
+              <PageTransition><EmailSenderPage /></PageTransition>
+            </PrivateRoute>
+          } />
+          <Route path="campaign-detail" element={
+            <PrivateRoute>
+              <PageTransition><CampaignDetailPage /></PageTransition>
+            </PrivateRoute>
+          } />
+          <Route path="*" element={
+            <PrivateRoute>
+              <PageTransition><NotFoundPage /></PageTransition>
+            </PrivateRoute>
+          } />
         </Route>
       </Routes>
     </Suspense>
   );
 }
-
-

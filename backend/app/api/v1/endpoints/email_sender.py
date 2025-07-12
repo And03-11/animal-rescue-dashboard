@@ -12,6 +12,9 @@ from typing import List, Dict, Any
 from app.services.airtable_service import AirtableService
 from app.services.gmail_service import GmailService
 
+from fastapi import Depends
+from app.core.security import get_current_user
+
 router = APIRouter()
 
 CAMPAIGN_DATA_DIR = "campaign_data"
@@ -55,7 +58,10 @@ def run_campaign_task(campaign_id: str):
     # El resto sigue igual...
 
 @router.post("/sender/campaigns", status_code=201, response_model=Dict[str, Any])
-def create_campaign(req: CampaignRequest):
+def create_campaign(
+    req: CampaignRequest,
+    current_user: str = Depends(get_current_user)
+    ):
     """
     Crea una campaña: obtiene contactos y genera archivo CSV.
     """
@@ -84,7 +90,7 @@ def create_campaign(req: CampaignRequest):
     return campaign_config
 
 @router.get("/sender/campaigns", response_model=List[Dict[str, Any]])
-def list_campaigns():
+def list_campaigns(current_user: str = Depends(get_current_user)):
     """
     Lista las campañas en disco con progreso.
     """
@@ -119,7 +125,10 @@ def list_campaigns():
     return campaigns
 
 @router.get("/sender/campaigns/{campaign_id}/details")
-def get_campaign_details(campaign_id: str):
+def get_campaign_details(
+    campaign_id: str,
+    current_user: str = Depends(get_current_user)
+    ):
     """
     Detalles de envíos por contacto.
     """
@@ -150,7 +159,10 @@ def get_campaign_details(campaign_id: str):
     return {"details": campaign_details, "contacts": contact_list_with_status}
 
 @router.post("/sender/campaigns/{campaign_id}/launch")
-def launch_campaign(campaign_id: str, background_tasks: BackgroundTasks):
+def launch_campaign(
+    campaign_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: str = Depends(get_current_user)):
     """
     Lanza la tarea de envío para una campaña.
     """

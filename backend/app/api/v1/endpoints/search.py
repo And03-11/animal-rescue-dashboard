@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Dict, Any
 from datetime import datetime
+from app.core.security import get_current_user
 
 from app.schemas import (
     SearchResponse, MailchimpDetail, BrevoDetail, AirtableSummary
@@ -28,7 +29,8 @@ def search_unified_contact(
     email: str,
     airtable: AirtableService = Depends(get_airtable_service),
     mailchimp: MailchimpService = Depends(get_mailchimp_service),
-    brevo: BrevoService = Depends(get_brevo_service)
+    brevo: BrevoService = Depends(get_brevo_service),
+    current_user: str = Depends(get_current_user)
 ) -> SearchResponse:
     """
     Busca un contacto por email en Airtable, Mailchimp y Brevo para construir un perfil unificado.
