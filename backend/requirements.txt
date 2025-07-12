@@ -14,5 +14,6 @@ python-jose[cryptography]
 passlib[bcrypt]
 sqlalchemy
 python-multipart
+jwt-decode
 
 

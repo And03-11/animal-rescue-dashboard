@@ -29,7 +29,7 @@ export default function LoginForm() {
     })
       const { access_token } = response.data;
       localStorage.setItem("token", access_token);
-      navigate("/"); // redirigir al dashboard o ruta protegida
+      navigate("/dashboard"); // redirigir al dashboard o ruta protegida
     } catch (err: any) {
       setError("Credenciales inválidas");
     } finally {

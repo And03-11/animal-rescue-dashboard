@@ -1,10 +1,11 @@
-// src/api/axiosConfig.ts
+// --- Archivo: src/api/axiosConfig.ts ---
 import axios from "axios";
 
 const apiClient = axios.create({
   baseURL: "/api/v1",
 });
 
+// ➕ Añadir token automáticamente
 apiClient.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem("token");
@@ -21,6 +22,18 @@ apiClient.interceptors.request.use(
     return config;
   },
   (error) => Promise.reject(error)
+);
+
+// 🚨 Manejar errores 401 globalmente
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem("token");
+      window.location.href = "/login";
+    }
+    return Promise.reject(error);
+  }
 );
 
 export default apiClient;

@@ -27,6 +27,10 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         )
 
     access_token = create_access_token(
-        data={"sub": user.email}, expires_delta=timedelta(minutes=30)
+        data={
+            "sub": user.email,
+            "is_admin": user.is_admin  # ✅ ahora sí estará en el token
+        },
+        expires_delta=timedelta(minutes=30)
     )
     return TokenResponse(access_token=access_token)

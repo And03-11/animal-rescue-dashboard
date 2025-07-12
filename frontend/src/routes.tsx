@@ -1,4 +1,4 @@
-// src/routes.tsx
+// --- Archivo: src/routes.tsx ---
 import { lazy, Suspense } from 'react';
 import { Route, Routes, useLocation } from 'react-router-dom';
 import { Box, CircularProgress } from '@mui/material';
@@ -6,7 +6,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 import { Layout } from './components/Layout';
 import PrivateRoute from './components/PrivateRoute';
+import PrivateAdminRoute from './components/PrivateAdminRoute'; // ✅ nuevo
 import LoginForm from './pages/LoginForm';
+import UserManagementPage from './pages/UserManagementPage';
 
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 const DashboardHomePage = lazy(() => import('./pages/DashboardHomePage'));
@@ -49,7 +51,7 @@ export function AppRoutes() {
     <Suspense fallback={<SpinnerFallback />}>
       <Routes>
         <Route path="/login" element={<LoginForm />} />
-        <Route path="/" element={<Layout />}>
+        <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
           <Route
             index
             element={
@@ -58,6 +60,11 @@ export function AppRoutes() {
               </PrivateRoute>
             }
           />
+          <Route path="dashboard" element={
+            <PrivateRoute>
+              <PageTransition><DashboardHomePage /></PageTransition>
+            </PrivateRoute>
+          } />
           <Route path="campaign-stats" element={
             <PrivateRoute>
               <PageTransition><CampaignStatsPage /></PageTransition>
@@ -82,6 +89,11 @@ export function AppRoutes() {
             <PrivateRoute>
               <PageTransition><CampaignDetailPage /></PageTransition>
             </PrivateRoute>
+          } />
+          <Route path="admin/users" element={
+            <PrivateAdminRoute>
+              <PageTransition><UserManagementPage /></PageTransition>
+            </PrivateAdminRoute>
           } />
           <Route path="*" element={
             <PrivateRoute>
