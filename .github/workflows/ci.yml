@@ -37,6 +37,12 @@ jobs:
           cd backend
           pip install --upgrade pip
           pip install -r requirements.txt
+          
+      - name: Check for missing dependencies
+        run: |
+          cd backend
+          python check_missing_deps.py
+
 
       - name: Run backend tests
         run: |
