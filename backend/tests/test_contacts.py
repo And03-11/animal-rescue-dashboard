@@ -9,13 +9,16 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.schemas import Contact
 from app.services.airtable_service import AirtableService
+from app.core.security import get_current_user  # 🔐 importante para override
+
+# 🚀 Simula autenticación para todos los tests
+app.dependency_overrides[get_current_user] = lambda: "test@example.com"
 
 client = TestClient(app)
 
 @pytest.fixture(autouse=True)
 def override_airtable(monkeypatch):
     """Stubear métodos de AirtableService para contactos."""
-    # Parchear instancia donors_table en cada instanciación
     class FakeTable:
         def all(self):
             return [
@@ -24,7 +27,6 @@ def override_airtable(monkeypatch):
         def create(self, data):
             return {"id": "recNew", "fields": data}
 
-    # Sobrescribir __init__ para inyectar fake_table
     orig_init = AirtableService.__init__
     def fake_init(self):
         orig_init(self)
@@ -35,9 +37,6 @@ def override_airtable(monkeypatch):
 
 
 def test_list_contacts_returns_array_and_cors():
-    """
-    GET /api/v1/contacts/ debe retornar 200 y una lista de Contact.
-    """
     response = client.get(
         "/api/v1/contacts/",
         headers={"Origin": "http://localhost:5173"}
@@ -53,9 +52,6 @@ def test_list_contacts_returns_array_and_cors():
 
 
 def test_create_contact_returns_created_and_cors():
-    """
-    POST /api/v1/contacts/ con payload válido devuelve 201 y el Contact creado.
-    """
     payload = {"name": "New User", "email": "new@example.com", "phone": "67890"}
     response = client.post(
         "/api/v1/contacts/",
