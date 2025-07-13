@@ -1,4 +1,4 @@
-// --- File: src/pages/UserManagementPage.tsx ---
+// --- File: src/pages/UserManagementPage.tsx (Versión Corregida) ---
 import { useEffect, useState } from "react";
 import {
   Box, Button, Dialog, DialogActions, DialogContent,
@@ -12,7 +12,7 @@ import apiClient from "../api/axiosConfig";
 
 interface User {
   id: number;
-  email: string;
+  username: string;
   is_admin: boolean;
 }
 
@@ -21,7 +21,7 @@ export default function UserManagementPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ id: 0, email: "", password: "", is_admin: false });
+  const [form, setForm] = useState({ id: 0, username: "", password: "", is_admin: false });
   const [editMode, setEditMode] = useState(false);
 
   const fetchUsers = async () => {
@@ -43,10 +43,10 @@ export default function UserManagementPage() {
 
   const handleOpen = (user?: User) => {
     if (user) {
-      setForm({ id: user.id, email: user.email, password: "", is_admin: user.is_admin });
+      setForm({ id: user.id, username: user.username, password: "", is_admin: user.is_admin });
       setEditMode(true);
     } else {
-      setForm({ id: 0, email: "", password: "", is_admin: false });
+      setForm({ id: 0, username: "", password: "", is_admin: false });
       setEditMode(false);
     }
     setOpen(true);
@@ -54,11 +54,12 @@ export default function UserManagementPage() {
 
   const handleClose = () => {
     setOpen(false);
+    setError("");
   };
 
   const handleSubmit = async () => {
-    if (!form.email) {
-        setError("Email cannot be empty.");
+    if (!form.username) {
+        setError("Username cannot be empty.");
         return;
     }
     if (!editMode && !form.password) {
@@ -68,13 +69,20 @@ export default function UserManagementPage() {
 
     try {
       if (editMode) {
-        const payload: any = { email: form.email, is_admin: form.is_admin };
+        const payload: any = { username: form.username, is_admin: form.is_admin };
         if (form.password) {
             payload.password = form.password;
         }
+        // La petición PUT para actualizar ya espera JSON por defecto, no necesita cambio.
         await apiClient.put(`/users/${form.id}`, payload);
       } else {
-        await apiClient.post("/users/register", form);
+        // ✅ CORRECCIÓN: Especificamos que el Content-Type para esta petición es JSON.
+        // Esto sobreescribe la configuración del interceptor de axios y soluciona el error 422.
+        await apiClient.post("/users/register", form, {
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
       }
       handleClose();
       fetchUsers();
@@ -88,22 +96,25 @@ export default function UserManagementPage() {
     try {
       await apiClient.delete(`/users/${id}`);
       fetchUsers();
-    } catch {
-      setError("Error deleting user");
+    } catch (err: any) {
+       setError(err.response?.data?.detail || "Error deleting user");
     }
   };
 
+  // ... el resto del componente (JSX) no necesita cambios ...
   return (
     <Box sx={{ p: 4 }}>
       <Typography variant="h4" gutterBottom>User Management</Typography>
       <Button variant="contained" onClick={() => handleOpen()}>New User</Button>
+
+      {error && !open && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
 
       {loading ? <CircularProgress sx={{ mt: 4, display: 'block' }} /> : (
         <TableContainer component={Paper} sx={{ mt: 3 }}>
           <Table>
             <TableHead>
               <TableRow>
-                <TableCell>Email</TableCell>
+                <TableCell>Username</TableCell>
                 <TableCell>Admin</TableCell>
                 <TableCell align="right">Actions</TableCell>
               </TableRow>
@@ -111,7 +122,7 @@ export default function UserManagementPage() {
             <TableBody>
               {users.map(user => (
                 <TableRow key={user.id}>
-                  <TableCell>{user.email}</TableCell>
+                  <TableCell>{user.username}</TableCell>
                   <TableCell>{user.is_admin ? "Yes" : "No"}</TableCell>
                   <TableCell align="right">
                     <IconButton onClick={() => handleOpen(user)} aria-label="edit"><EditIcon /></IconButton>
@@ -132,13 +143,12 @@ export default function UserManagementPage() {
             autoFocus
             required
             margin="dense"
-            label="Email Address"
-            type="email"
+            label="Username"
+            type="text"
             fullWidth
             variant="outlined"
-            value={form.email}
-            onChange={(e) => setForm({ ...form, email: e.target.value })}
-            // ✅ SOLUCIÓN: Desactivar autocompletado de email
+            value={form.username}
+            onChange={(e) => setForm({ ...form, username: e.target.value })}
             autoComplete="off"
           />
           <TextField
@@ -151,7 +161,6 @@ export default function UserManagementPage() {
             onChange={(e) => setForm({ ...form, password: e.target.value })}
             placeholder={editMode ? "Leave blank to keep current password" : ""}
             required={!editMode}
-            // ✅ SOLUCIÓN: Usar "new-password" para evitar que el navegador sugiera la contraseña guardada
             autoComplete="new-password"
           />
           <FormControlLabel
@@ -165,10 +174,12 @@ export default function UserManagementPage() {
             sx={{ mt: 1, display: 'block' }}
           />
         </DialogContent>
-        <DialogActions sx={{ p: '0 24px 16px' }}>
-          {error && <Typography color="error" sx={{ mr: 'auto', fontSize: '0.9rem' }}>{error}</Typography>}
-          <Button onClick={handleClose}>Cancel</Button>
-          <Button variant="contained" onClick={handleSubmit}>Save</Button>
+        <DialogActions sx={{ p: '0 24px 16px', justifyContent: 'space-between' }}>
+          {error && <Typography color="error" sx={{ mr: 'auto', fontSize: '0.9rem', flexGrow: 1 }}>{error}</Typography>}
+          <Box>
+            <Button onClick={handleClose}>Cancel</Button>
+            <Button variant="contained" onClick={handleSubmit}>Save</Button>
+          </Box>
         </DialogActions>
       </Dialog>
     </Box>

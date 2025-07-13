@@ -24,8 +24,16 @@ export default defineConfig({
     exclude: [],
   },
   server: {
+    // Escucha en todas las interfaces de red, no solo en localhost.
+    // Es una buena práctica para que contenedores o máquinas virtuales puedan acceder.
+    host: true,
+    // Permite que las peticiones que vienen del túnel de ngrok no sean bloqueadas.
+    // El punto al inicio actúa como un comodín para todos los subdominios.
+    allowedHosts: ['.ngrok-free.app'],
+    // Mantenemos la configuración del proxy que ya tenías.
     proxy: {
       '/api': 'http://localhost:8001',
     },
   },
 });
+

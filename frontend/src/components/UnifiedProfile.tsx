@@ -1,4 +1,3 @@
-// src/components/UnifiedProfile.tsx
 import React from 'react';
 import { Card, CardContent, Typography, Box, Chip, Divider, List, ListItem, ListItemIcon, ListItemText } from '@mui/material';
 import Grid from '@mui/material/Grid';
@@ -13,18 +12,23 @@ interface UnifiedProfileProps {
 }
 
 export const UnifiedProfile: React.FC<UnifiedProfileProps> = ({ profileData }) => {
-  const { contact_details, airtable_summary, mailchimp_summary, brevo_summary } = profileData;
+  // ✅ CORRECCIÓN: Usamos los nombres de propiedad correctos que envía la API.
+  const { contact, airtable_summary, mailchimp, brevo } = profileData;
 
-  const averageDonation = airtable_summary.donation_count > 0 
-    ? airtable_summary.total_donated / airtable_summary.donation_count 
+  // Accedemos a los campos del donante desde el objeto 'contact'
+  const contactFields = contact?.fields || {};
+
+  const averageDonation = airtable_summary.count > 0 
+    ? airtable_summary.total / airtable_summary.count 
     : 0;
 
   return (
-    <Card variant="outlined" sx={{ p: 1 }}> {/* Añadimos un poco de padding general */}
+    <Card variant="outlined" sx={{ p: 1 }}>
       <CardContent>
         {/* --- SECCIÓN DE IDENTIDAD --- */}
         <Typography variant="h5" component="div">
-          {contact_details?.Name} {contact_details?.["Last Name"]}
+          {/* ✅ CORRECCIÓN: Leemos el nombre desde 'contactFields' */}
+          {contactFields.Name} {contactFields["Last Name"]}
         </Typography>
         <Typography color="text.secondary" gutterBottom>
           Unified Donor Profile
@@ -36,12 +40,14 @@ export const UnifiedProfile: React.FC<UnifiedProfileProps> = ({ profileData }) =
         <Grid container spacing={2} sx={{ textAlign: 'center', mb: 2 }}>
           <Grid size={{ xs: 4 }}>
             <MonetizationOnIcon color="primary" sx={{ fontSize: 40 }}/>
-            <Typography variant="h6">${airtable_summary.total_donated.toFixed(2)}</Typography>
-            <Typography variant="caption" color="text.secondary">Total Donated since {airtable_summary.first_donation_date ? new Date(airtable_summary.first_donation_date).toLocaleDateString('en-US') : 'N/A'}</Typography>
+            {/* ✅ CORRECCIÓN: Usamos 'airtable_summary.total' y 'airtable_summary.first_date' */}
+            <Typography variant="h6">${airtable_summary.total.toFixed(2)}</Typography>
+            <Typography variant="caption" color="text.secondary">Total Donated since {airtable_summary.first_date ? new Date(airtable_summary.first_date).toLocaleDateString('en-US') : 'N/A'}</Typography>
           </Grid>
           <Grid size={{ xs: 4 }}>
             <PeopleIcon color="primary" sx={{ fontSize: 40 }}/>
-            <Typography variant="h6">{airtable_summary.donation_count}</Typography>
+            {/* ✅ CORRECCIÓN: Usamos 'airtable_summary.count' */}
+            <Typography variant="h6">{airtable_summary.count}</Typography>
             <Typography variant="caption" color="text.secondary">Total Donations</Typography>
           </Grid>
            <Grid size={{ xs: 4 }}>
@@ -53,34 +59,27 @@ export const UnifiedProfile: React.FC<UnifiedProfileProps> = ({ profileData }) =
 
         <Divider sx={{ my: 2 }} />
         
-        {/* --- NUEVA SECCIÓN DE IDENTIFICADORES (DISEÑO MEJORADO) --- */}
+        {/* --- SECCIÓN DE IDENTIFICADORES --- */}
+        {/* No necesita cambios, ya que lee de 'contactFields' que ya corregimos */}
         <Box sx={{ mb: 2 }}>
             <Typography color="text.secondary" gutterBottom sx={{fontSize: '0.9rem'}}>Platform Identifiers</Typography>
             <Grid container spacing={1} alignItems="center">
-                {/* Brevo Big Campaign */}
-                {brevo_summary.campaign !== "None" && (
-                    <>
-                        <Grid size={{ xs: 3 }} textAlign="right"><Typography variant="body2" color="text.secondary">Brevo Campaign:</Typography></Grid>
-                        <Grid size={{ xs: 9 }}><Chip label={brevo_summary.campaign} size="small" variant="outlined" /></Grid>
-                    </>
-                )}
                 {/* Mailchimp Tag */}
-                {contact_details?.["Tag (Mailchimp)"] && (
+                {contactFields?.["Tag (Mailchimp)"] && (
                      <>
                         <Grid size={{ xs: 3 }} textAlign="right"><Typography variant="body2" color="text.secondary">Mailchimp Tag:</Typography></Grid>
-                        <Grid size={{ xs: 9 }}><Chip label={contact_details["Tag (Mailchimp)"]} size="small" color="primary" /></Grid>
+                        <Grid size={{ xs: 9 }}><Chip label={contactFields["Tag (Mailchimp)"]} size="small" color="primary" /></Grid>
                     </>
                 )}
                 {/* Airtable Tag */}
-                {contact_details?.Tag && (
+                {contactFields?.Tag && (
                      <>
                         <Grid size={{ xs: 3 }} textAlign="right"><Typography variant="body2" color="text.secondary">Airtable Tag:</Typography></Grid>
-                        <Grid size={{ xs: 9 }}><Chip label={contact_details.Tag} size="small" /></Grid>
+                        <Grid size={{ xs: 9 }}><Chip label={contactFields.Tag} size="small" /></Grid>
                     </>
                 )}
             </Grid>
         </Box>
-
 
         <Divider sx={{ my: 2 }} />
 
@@ -90,7 +89,8 @@ export const UnifiedProfile: React.FC<UnifiedProfileProps> = ({ profileData }) =
             <Grid size={{ xs: 12, md: 6 }}>
                 <Typography color="text.secondary" gutterBottom>Mailchimp Email Status</Typography>
                 <List dense sx={{p: 0}}>
-                    {mailchimp_summary.details.map((detail: any, index: number) => (
+                    {/* ✅ CORRECCIÓN: Iteramos sobre el array 'mailchimp' */}
+                    {mailchimp.map((detail: any, index: number) => (
                         <ListItem key={index} disablePadding>
                             <ListItemIcon sx={{minWidth: '32px'}}>
                                 {detail.found ? <CheckCircleIcon fontSize="small" color="success" /> : <CancelIcon fontSize="small" color="error" />}
@@ -104,7 +104,8 @@ export const UnifiedProfile: React.FC<UnifiedProfileProps> = ({ profileData }) =
             <Grid size={{ xs: 12, md: 6 }}>
                  <Typography color="text.secondary" gutterBottom>Brevo Email Status</Typography>
                 <List dense sx={{p: 0}}>
-                    {brevo_summary.details.map((detail: any, index: number) => (
+                    {/* ✅ CORRECCIÓN: Iteramos sobre el array 'brevo' */}
+                    {brevo.map((detail: any, index: number) => (
                         <ListItem key={index} disablePadding>
                             <ListItemIcon sx={{minWidth: '32px'}}>
                                 {detail.found ? <CheckCircleIcon fontSize="small" color="success" /> : <CancelIcon fontSize="small" color="error" />}
