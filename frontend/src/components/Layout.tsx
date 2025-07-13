@@ -17,10 +17,11 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import logo from '../assets/Logo.png';
 import { DarkModeToggleButton } from './DarkModeToggleButton';
 import { FloatingThemeFab } from './FloatingThemeFab';
-import { logout } from '../auth';
+import { logout, isAdmin } from '../auth';
 
 const drawerWidth = 240;
 
+// ...
 export const Layout: React.FC = () => {
   const isMobile = useMediaQuery('(max-width:600px)');
 
@@ -28,16 +29,9 @@ export const Layout: React.FC = () => {
     logout();
   };
 
-  const isUserAdmin = useMemo(() => {
-    try {
-      const token = localStorage.getItem("token");
-      if (!token) return false;
-      const payload = JSON.parse(atob(token.split('.')[1]));
-      return payload?.is_admin === true;
-    } catch {
-      return false;
-    }
-  }, []);
+  // ✅ ¡CORRECCIÓN! Usamos la función robusta y centralizada.
+  const isUserAdmin = useMemo(() => isAdmin(), []);
+// ...
 
   const menuItems = [
     { text: 'Dashboard', icon: <HomeIcon />, path: '/' },

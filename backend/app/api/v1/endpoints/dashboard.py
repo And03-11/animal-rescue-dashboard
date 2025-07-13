@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends
-from app.services.airtable_service import AirtableService
+from backend.app.services.airtable_service import AirtableService
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 from typing import List, Dict, Any, Optional
-from app.core.security import get_current_user
+from backend.app.core.security import get_current_user
 
 router = APIRouter()
 COSTA_RICA_TZ = ZoneInfo("America/Costa_Rica")

@@ -1,19 +1,20 @@
-# --- Archivo: backend/app/api/v1/endpoints/search.py ---
+# --- File: backend/app/api/v1/endpoints/search.py (Corrected) ---
 from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Dict, Any
 from datetime import datetime
-from app.core.security import get_current_user
 
-from app.schemas import (
+# ✅ CAMBIO: Se usan rutas de importación absolutas desde la raíz 'backend'.
+from backend.app.core.security import get_current_user
+from backend.app.schemas import (
     SearchResponse, MailchimpDetail, BrevoDetail, AirtableSummary
 )
-from app.services.airtable_service import AirtableService
-from app.services.mailchimp_service import MailchimpService
-from app.services.brevo_service import BrevoService
+from backend.app.services.airtable_service import AirtableService
+from backend.app.services.mailchimp_service import MailchimpService
+from backend.app.services.brevo_service import BrevoService
 
 router = APIRouter()
 
-# Inyección de dependencias
+# --- Dependency Injection ---
 
 def get_airtable_service():
     return AirtableService()
@@ -33,13 +34,14 @@ def search_unified_contact(
     current_user: str = Depends(get_current_user)
 ) -> SearchResponse:
     """
-    Busca un contacto por email en Airtable, Mailchimp y Brevo para construir un perfil unificado.
+    Searches for a contact by email across Airtable, Mailchimp, and Brevo
+    to build a unified profile.
     """
     all_emails: List[str] = [email]
     donor_info: Dict[str, Any] = {}
     airtable_records: List[Dict[str, Any]] = []
 
-    # --- 1. Búsqueda en Airtable ---
+    # --- 1. Search in Airtable ---
     try:
         result = airtable.get_airtable_data_by_email(email)
         donor_info = result.get("donor_info") or {}
@@ -49,22 +51,22 @@ def search_unified_contact(
         if linked_ids:
             all_emails = airtable.get_emails_from_ids(linked_ids)
     except Exception as e:
-        donor_info = {"error": f"Error Airtable: {e}"}
+        donor_info = {"error": f"Airtable Error: {e}"}
 
-    # --- 2. Búsqueda en Mailchimp ---
+    # --- 2. Search in Mailchimp ---
     mailchimp_details: List[Dict[str, Any]] = []
     try:
         for em in all_emails:
             tags = mailchimp.get_contact_tags(em)
             mailchimp_details.append({
                 "email": em,
-                "found": bool(tags),            # considered found only if tags list non-empty
+                "found": bool(tags),
                 "tags": tags or []
             })
     except Exception as e:
-        mailchimp_details = [{"error": f"Error Mailchimp: {e}"}]
+        mailchimp_details = [{"error": f"Mailchimp Error: {e}"}]
 
-    # --- 3. Búsqueda en Brevo ---
+    # --- 3. Search in Brevo ---
     brevo_details: List[Dict[str, Any]] = []
     try:
         for em in all_emails:
@@ -75,19 +77,19 @@ def search_unified_contact(
                 "details": details or {}
             })
     except Exception as e:
-        brevo_details = [{"error": f"Error Brevo: {e}"}]
+        brevo_details = [{"error": f"Brevo Error: {e}"}]
 
-    # Validar si al menos uno encontró contacto
-    found_any = bool(donor_info and not donor_info.get("error")) \
-                or any(d.get('found', False) for d in mailchimp_details) \
-                or any(d.get('found', False) for d in brevo_details)
+    # --- Validate if at least one platform found the contact ---
+    found_any = (bool(donor_info and not donor_info.get("error"))
+                 or any(d.get('found', False) for d in mailchimp_details)
+                 or any(d.get('found', False) for d in brevo_details))
     if not found_any:
         raise HTTPException(
             status_code=404,
-            detail=f"Contacto '{email}' no encontrado en ninguna plataforma."
+            detail=f"Contact '{email}' not found on any platform."
         )
 
-    # --- Resumen de donaciones de Airtable ---
+    # --- Airtable Donations Summary ---
     donation_dates: List[datetime] = []
     for d in airtable_records:
         ds = d.get('fields', {}).get('Date')

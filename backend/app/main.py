@@ -1,20 +1,18 @@
-# --- Archivo: backend/app/main.py ---
+# --- File: backend/app/main.py (Corrected) ---
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware  # ◀ Importamos el middleware CORS
-from app.api.v1.endpoints.search import router as search_router
-from app.api.v1.endpoints import auth_sqlite
-from app.api.v1.endpoints import users
+from fastapi.middleware.cors import CORSMiddleware
 
-
-
-# Importar routers
-from app.api.v1.endpoints import (
+# ✅ CAMBIO: Se usan rutas de importación absolutas desde la raíz del proyecto.
+from backend.app.api.v1.endpoints import (
+    auth_sqlite,
+    users,
     dashboard,
     contacts,
     campaigns,
     form_titles,
     email_sender
 )
+from backend.app.api.v1.endpoints.search import router as search_router
 
 app = FastAPI(
     title="Animal Rescue Dashboard API",
@@ -23,32 +21,28 @@ app = FastAPI(
 )
 
 # --- Configuración CORS ---
-# Ventaja: Permite que el frontend (otro dominio/puerto) consuma la API sin bloqueos del navegador
 origins = [
-    "http://localhost:3000",  # CRA / React dev
+    "http://localhost:3000",
     "http://localhost:5173",
-    # "https://tu-dominio.com"  # Dominio en producción
+    # "https://tu-dominio.com"
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,        # Orígenes permitidos
-    allow_credentials=True,       # Permite envío de cookies/credenciales
-    allow_methods=["*"],        # Métodos HTTP permitidos (GET, POST, ...)
-    allow_headers=["*"],        # Cabeceras permitidas (Content-Type, Authorization...)
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # --- Registro de routers ---
-# Ventaja: Mantiene organización modular y rutas versionadas
+# ✅ CAMBIO: Se añade el router de autenticación que faltaba.
+# ✅ CAMBIO: Se elimina la línea duplicada para el router de usuarios.
 app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["dashboard"])
 app.include_router(contacts.router, prefix="/api/v1/contacts", tags=["contacts"])
 app.include_router(campaigns.router, prefix="/api/v1/campaigns", tags=["campaigns"])
 app.include_router(form_titles.router, prefix="/api/v1/form-titles", tags=["form-titles"])
 app.include_router(email_sender.router, prefix="/api/v1/send-email", tags=["email"])
 app.include_router(search_router, prefix="/api/v1", tags=["search"])
-app.include_router(auth_sqlite.router, prefix="/api/v1", tags=["auth"])
-app.include_router(users.router, tags=["users"])
-
-
-# Nota: Con esta configuración, tu frontend en localhost:3000 puede hacer peticiones
-#       a este backend sin problemas de CORS.
+app.include_router(auth_sqlite.router, prefix="/api/v1", tags=["auth"]) # <-- AÑADIDO
+app.include_router(users.router, prefix="/api/v1", tags=["users"])

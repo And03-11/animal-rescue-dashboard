@@ -1,13 +1,13 @@
-// src/pages/LoginForm.tsx
+// --- File: src/pages/LoginForm.tsx ---
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Box, Button, TextField, Typography, Paper, Alert, CircularProgress
 } from "@mui/material";
-import axios from "axios";
+import apiClient from "../api/axiosConfig";
 
 export default function LoginForm() {
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -18,20 +18,20 @@ export default function LoginForm() {
     setError("");
     setLoading(true);
     try {
+      // ✅ CAMBIO: Enviamos 'username' en lugar de 'email'
       const form = new URLSearchParams();
-      form.append("username", email);
+      form.append("username", username);
       form.append("password", password);
       
-      const response = await axios.post("/api/v1/login", form, {
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded"
-      }
-    })
+      const response = await apiClient.post("/login", form, {
+        headers: { "Content-Type": "application/x-www-form-urlencoded" }
+      });
+
       const { access_token } = response.data;
       localStorage.setItem("token", access_token);
-      navigate("/dashboard"); // redirigir al dashboard o ruta protegida
+      navigate("/dashboard");
     } catch (err: any) {
-      setError("Credenciales inválidas");
+      setError(err.response?.data?.detail || "Invalid credentials");
     } finally {
       setLoading(false);
     }
@@ -41,17 +41,19 @@ export default function LoginForm() {
     <Paper sx={{ maxWidth: 400, mx: "auto", mt: 8, p: 4 }}>
       <Typography variant="h5" mb={2}>Login</Typography>
       <form onSubmit={handleLogin}>
+        {/* ✅ CAMBIO: El campo ahora es para 'Username' y de tipo 'text' */}
         <TextField
-          label="Email"
+          label="Username"
           fullWidth
           margin="normal"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          type="email"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          type="text"
           required
+          autoFocus
         />
         <TextField
-          label="Contraseña"
+          label="Password"
           fullWidth
           margin="normal"
           value={password}
@@ -67,7 +69,7 @@ export default function LoginForm() {
             disabled={loading}
             fullWidth
           >
-            {loading ? <CircularProgress size={24} /> : "Ingresar"}
+            {loading ? <CircularProgress size={24} /> : "Login"}
           </Button>
         </Box>
       </form>

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
-from app.services.airtable_service import AirtableService
+from backend.app.services.airtable_service import AirtableService
 from typing import List, Dict, Optional
-from app.core.security import get_current_user
+from backend.app.core.security import get_current_user
 
 router = APIRouter()
 

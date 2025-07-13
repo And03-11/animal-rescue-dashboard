@@ -1,4 +1,5 @@
-import * as jwt from "jwt-decode";
+// --- Archivo: frontend/src/auth.ts (Versión Final Corregida) ---
+import { jwtDecode } from "jwt-decode"; // <-- CAMBIO 1: La forma de importar
 
 interface DecodedToken {
   sub: string;
@@ -9,28 +10,36 @@ interface DecodedToken {
 export const getCurrentUser = (): DecodedToken | null => {
   const token = localStorage.getItem("token");
   if (!token) return null;
+
   try {
-    return (jwt as any).default(token) as DecodedToken;
-  } catch {
+    // CAMBIO 2: La forma de llamar a la función
+    return jwtDecode<DecodedToken>(token);
+  } catch (error) {
+    console.error("Failed to decode token:", error);
     return null;
   }
 };
 
 export const isAdmin = (): boolean => {
   const user = getCurrentUser();
+  // Esta comprobación ahora funcionará porque `getCurrentUser` devolverá el payload correcto
   return user?.is_admin === true;
 };
 
 export const logout = () => {
   localStorage.removeItem("token");
+  // Redirigir a login para forzar un estado limpio
   window.location.replace("/login");
 };
 
 export const isTokenValid = (): boolean => {
   const token = localStorage.getItem("token");
   if (!token) return false;
+
   try {
-    const decoded = (jwt as any).default(token) as DecodedToken; // ✅ usar default correctamente
+    // CAMBIO 3: Corregir también aquí
+    const decoded = jwtDecode<DecodedToken>(token);
+    // Comprobar que el token no ha expirado
     return decoded.exp * 1000 > Date.now();
   } catch {
     return false;

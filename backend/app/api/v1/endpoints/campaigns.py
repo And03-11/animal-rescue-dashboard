@@ -3,9 +3,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Any
-from app.core.security import get_current_user
+from backend.app.core.security import get_current_user
 
-from app.services.airtable_service import AirtableService
+from backend.app.services.airtable_service import AirtableService
 
 router = APIRouter()
 

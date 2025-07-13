@@ -1,10 +1,10 @@
 # --- Archivo: backend/app/api/v1/endpoints/contacts.py ---
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, status
-from app.schemas import ContactCreate, Contact
-from app.services.airtable_service import AirtableService, DONORS_FIELDS
+from backend.app.schemas import ContactCreate, Contact
+from backend.app.services.airtable_service import AirtableService, DONORS_FIELDS
 from fastapi import Depends
-from app.core.security import get_current_user
+from backend.app.core.security import get_current_user
 
 router = APIRouter()
 
