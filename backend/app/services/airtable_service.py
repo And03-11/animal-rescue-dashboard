@@ -372,6 +372,37 @@ class AirtableService:
         
 
 
+
+    def autocomplete_email(self, query: str) -> List[str]:
+        """
+        Busca en Airtable los emails que comienzan con el texto de la consulta.
+        Es case-insensitive y está limitado a 10 resultados para ser eficiente.
+        """
+        if not query:
+            return []
+        try:
+            # Esta fórmula busca si la consulta (en minúsculas) se encuentra
+            # al inicio del campo de email (también en minúsculas).
+            formula = f"SEARCH(LOWER('{query}'), LOWER({{{EMAILS_FIELDS['email']}}})) = 1"
+            
+            records = self.emails_table.all(
+                formula=formula,
+                fields=[EMAILS_FIELDS["email"]],
+                max_records=10
+            )
+            
+            return [
+                rec.get("fields", {}).get(EMAILS_FIELDS["email"]) 
+                for rec in records 
+                if "fields" in rec and rec.get("fields", {}).get(EMAILS_FIELDS["email"])
+            ]
+        except Exception as e:
+            # Si hay un error con la fórmula o la conexión, no rompemos la app,
+            # simplemente no devolvemos sugerencias.
+            print(f"Error en autocomplete_email de Airtable: {e}")
+            return []
+        
+
     def get_dashboard_data(self) -> Dict[str, Any]:
         """
         Devuelve métricas de donaciones: total y tendencia diaria.
@@ -390,6 +421,9 @@ class AirtableService:
         # Formatear daily_trend como lista
         daily_trend = [{"date": dt, "amount": trend[dt]} for dt in sorted(trend)]
         return {"total_donations": total, "daily_trend": daily_trend}
+
+
+    
 
 
     
