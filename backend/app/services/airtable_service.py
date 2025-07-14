@@ -154,14 +154,26 @@ class AirtableService:
 
 
          
-    def get_donations_for_form_title(self, form_title_id: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> List[Dict]:
+    def get_donations_for_form_title(self, form_title_ids: List[str], start_date: Optional[str] = None, end_date: Optional[str] = None) -> List[Dict]:
         """
-        Retrieves donations for a form title and enriches them with donor name and email.
+        Retrieves donations for a list of form titles and enriches them with donor name and email.
         """
         try:
-            form_title_record = self.form_titles_table.get(form_title_id)
-            if not form_title_record or "fields" not in form_title_record: return []
-            donation_ids = form_title_record.get("fields", {}).get(FORM_TITLES_FIELDS["donations_link"], [])
+            if not form_title_ids:
+                return []
+            
+            title_id_formulas = [f"RECORD_ID() = '{title_id}'" for title_id in form_title_ids]
+            form_titles_records = self.form_titles_table.all(formula=f"OR({','.join(title_id_formulas)})")
+            
+            if not form_titles_records:
+                return []
+
+            donation_ids = {
+                donation_id
+                for rec in form_titles_records
+                for donation_id in rec.get("fields", {}).get(FORM_TITLES_FIELDS["donations_link"], [])
+            }
+
             if not donation_ids: return []
 
             id_formulas = [f"RECORD_ID() = '{id}'" for id in donation_ids]
@@ -221,6 +233,7 @@ class AirtableService:
             return sorted(enriched_donations, key=lambda x: x.get('date', ''), reverse=True)
         except Exception as e:
             print(f"¡ERROR GRAVE en get_donations_for_form_title!: {e}")
+            traceback.print_exc()
             return []
 
     def get_donations(self, start_utc: Optional[str] = None, end_utc: Optional[str] = None) -> List[Dict]:

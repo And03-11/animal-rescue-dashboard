@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { 
+import {
     Box, Typography, Paper, Divider, Button, CircularProgress, Alert,
-    FormControl, InputLabel, Select, MenuItem,
-    Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Collapse
+    FormControl, InputLabel, Select, MenuItem, ListItemText, OutlinedInput, Collapse,
+    Table, TableBody, TableCell, TableContainer, TableHead, TableRow, useTheme // Importar useTheme
 } from '@mui/material';
 import Grid from '@mui/material/Grid';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
@@ -12,14 +12,14 @@ import { StatCard } from '../components/StatCard';
 import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 
-// Interfaces actualizadas
+// --- Interfaces (sin cambios) ---
 interface ApiListItem { id: string; name: string; }
 interface Donation {
   id: string;
   date: string;
   amount: number;
   donorName: string;
-  donorEmail: string; // <-- Nuevo campo para el email del donante
+  donorEmail: string;
 }
 interface DonationData {
   donations: Donation[];
@@ -27,73 +27,83 @@ interface DonationData {
   donationsCount: number;
 }
 
+// --- Constantes para el menú (sin cambios) ---
+const ITEM_HEIGHT = 48;
+const ITEM_PADDING_TOP = 8;
+const MenuProps = {
+  PaperProps: {
+    style: {
+      maxHeight: ITEM_HEIGHT * 5.5 + ITEM_PADDING_TOP,
+      width: 350,
+    },
+  },
+};
+
 export const FormTitleSearchPage = () => {
-  // La lógica de estado y de fetch no necesita cambios
+  const theme = useTheme(); // ✅ CAMBIO 1: Hook para acceder al tema de MUI
   const [sources, setSources] = useState<string[]>([]);
   const [campaigns, setCampaigns] = useState<ApiListItem[]>([]);
   const [formTitles, setFormTitles] = useState<ApiListItem[]>([]);
   const [selectedSource, setSelectedSource] = useState('');
   const [selectedCampaign, setSelectedCampaign] = useState('');
-  const [selectedTitle, setSelectedTitle] = useState('');
+  const [selectedTitles, setSelectedTitles] = useState<string[]>([]);
   const [startDate, setStartDate] = useState<Dayjs | null>(null);
   const [endDate, setEndDate] = useState<Dayjs | null>(null);
   const [donationData, setDonationData] = useState<DonationData | null>(null);
   const [loading, setLoading] = useState({ sources: true, campaigns: false, titles: false, donations: false });
   const [error, setError] = useState('');
 
+  // ... Lógica de carga de datos y búsqueda sin cambios ...
   useEffect(() => {
-    const fetchSources = async () => {
-      try {
-        const response = await apiClient.get<string[]>('/campaigns/sources');
-        setSources(response.data);
-      } catch (err) { setError('Failed to load sources.'); } 
-      finally { setLoading(prev => ({ ...prev, sources: false })); }
-    };
-    fetchSources();
+    setLoading(prev => ({ ...prev, sources: true }));
+    apiClient.get<string[]>('/campaigns/sources')
+      .then(res => setSources(res.data))
+      .catch(() => setError('Failed to load sources.'))
+      .finally(() => setLoading(prev => ({ ...prev, sources: false })));
   }, []);
 
   useEffect(() => {
     if (!selectedSource) return;
-    setCampaigns([]); setFormTitles([]); setSelectedCampaign(''); setSelectedTitle('');
+    setCampaigns([]); setFormTitles([]); setSelectedCampaign(''); setSelectedTitles([]);
     setLoading(prev => ({ ...prev, campaigns: true }));
-    const fetchCampaigns = async () => {
-      try {
-        const response = await apiClient.get<ApiListItem[]>(`/campaigns?source=${selectedSource}`);
-        setCampaigns(response.data);
-      } catch (err) { setError('Failed to load campaigns.'); }
-      finally { setLoading(prev => ({ ...prev, campaigns: false })); }
-    };
-    fetchCampaigns();
+    apiClient.get<ApiListItem[]>(`/campaigns?source=${selectedSource}`)
+      .then(res => setCampaigns(res.data))
+      .catch(() => setError('Failed to load campaigns.'))
+      .finally(() => setLoading(prev => ({ ...prev, campaigns: false })));
   }, [selectedSource]);
 
   useEffect(() => {
     if (!selectedCampaign) return;
-    setFormTitles([]); setSelectedTitle('');
+    setFormTitles([]); setSelectedTitles([]);
     setLoading(prev => ({ ...prev, titles: true }));
-    const fetchFormTitles = async () => {
-      try {
-        const response = await apiClient.get<ApiListItem[]>(`/form-titles?campaign_id=${selectedCampaign}`);
-        setFormTitles(response.data);
-      } catch (err) { setError('Failed to load form titles.'); }
-      finally { setLoading(prev => ({ ...prev, titles: false })); }
-    };
-    fetchFormTitles();
+    apiClient.get<ApiListItem[]>(`/form-titles?campaign_id=${selectedCampaign}`)
+      .then(res => setFormTitles(res.data))
+      .catch(() => setError('Failed to load form titles.'))
+      .finally(() => setLoading(prev => ({ ...prev, titles: false })));
   }, [selectedCampaign]);
 
   const handleSearch = useCallback(async () => {
-    if (!selectedTitle) { setError('Please select a form title to search.'); return; }
+    if (selectedTitles.length === 0) {
+      setError('Please select at least one form title to search.');
+      return;
+    }
     setLoading(prev => ({ ...prev, donations: true }));
     setError('');
     setDonationData(null);
     try {
-      const params = new URLSearchParams({ form_title_id: selectedTitle });
+      const params = new URLSearchParams();
+      selectedTitles.forEach(titleId => params.append('form_title_id', titleId));
       if (startDate) params.append('start_date', startDate.format('YYYY-MM-DD'));
       if (endDate) params.append('end_date', endDate.format('YYYY-MM-DD'));
+
       const response = await apiClient.get<DonationData>(`/form-titles/donations?${params.toString()}`);
       setDonationData(response.data);
-    } catch (err) { setError('Failed to fetch donation data.'); }
-    finally { setLoading(prev => ({ ...prev, donations: false })); }
-  }, [selectedTitle, startDate, endDate]);
+    } catch (err) {
+      setError('Failed to fetch donation data.');
+    } finally {
+      setLoading(prev => ({ ...prev, donations: false }));
+    }
+  }, [selectedTitles, startDate, endDate]);
 
   return (
     <Box sx={{ width: '100%', maxWidth: '1280px', mx: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
@@ -103,15 +113,13 @@ export const FormTitleSearchPage = () => {
         <Typography variant="h5" gutterBottom>Filters</Typography>
         <Divider sx={{ mb: 2 }} />
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {/* Step 1: Source */}
+          {/* ...otros Selects sin cambios... */}
           <FormControl fullWidth>
             <InputLabel>1. Select Source</InputLabel>
             <Select value={selectedSource} label="1. Select Source" onChange={(e) => setSelectedSource(e.target.value)} disabled={loading.sources}>
               {sources.map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
             </Select>
           </FormControl>
-
-          {/* Step 2: Campaign */}
           <Collapse in={!!selectedSource}>
             <FormControl fullWidth disabled={loading.campaigns}>
               <InputLabel>2. Select Campaign</InputLabel>
@@ -120,19 +128,50 @@ export const FormTitleSearchPage = () => {
               </Select>
             </FormControl>
           </Collapse>
-
-          {/* Step 3: Form Title */}
+          
           <Collapse in={!!selectedCampaign}>
             <FormControl fullWidth disabled={loading.titles}>
-              <InputLabel>3. Select Form Title</InputLabel>
-              <Select value={selectedTitle} label="3. Select Form Title" onChange={(e) => setSelectedTitle(e.target.value)}>
-                {formTitles.map(t => <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>)}
+              <InputLabel>3. Select Form Title(s)</InputLabel>
+              <Select
+                multiple
+                value={selectedTitles}
+                onChange={(e) => setSelectedTitles(e.target.value as string[])}
+                input={<OutlinedInput label="3. Select Form Title(s)" />}
+                renderValue={(selected) => {
+                    const selectedNames = formTitles
+                        .filter(ft => selected.includes(ft.id))
+                        .map(ft => ft.name)
+                        .join(', ');
+                    return selectedNames || 'Select Form Title(s)';
+                }}
+                MenuProps={MenuProps}
+              >
+                {formTitles.map((t) => {
+                  // ✅ CAMBIO 2: Determinar si el ítem está seleccionado
+                  const isSelected = selectedTitles.indexOf(t.id) > -1;
+                  return (
+                    <MenuItem 
+                      key={t.id} 
+                      value={t.id}
+                      // ✅ CAMBIO 3: Estilo condicional para el ítem
+                      sx={{
+                        fontWeight: isSelected ? theme.typography.fontWeightBold : theme.typography.fontWeightRegular,
+                        backgroundColor: isSelected ? theme.palette.action.selected : 'transparent',
+                        '&:hover': {
+                          backgroundColor: isSelected ? theme.palette.action.selected : theme.palette.action.hover,
+                        }
+                      }}
+                    >
+                      {/* Se elimina el Checkbox */}
+                      <ListItemText primary={t.name} />
+                    </MenuItem>
+                  );
+                })}
               </Select>
             </FormControl>
           </Collapse>
 
-          {/* Step 4: Dates and Search */}
-          <Collapse in={!!selectedTitle}>
+          <Collapse in={selectedTitles.length > 0}>
             <Grid container spacing={2} alignItems="center" sx={{ mt: 1 }}>
               <Grid size={{ xs: 12, md: 5 }}>
                 <DatePicker label="Start Date (Optional)" value={startDate} onChange={setStartDate} sx={{ width: '100%' }} />
@@ -150,6 +189,7 @@ export const FormTitleSearchPage = () => {
         </Box>
       </Paper>
 
+      {/* ...el resto del componente para mostrar resultados no cambia... */}
       {loading.donations && <CircularProgress sx={{ alignSelf: 'center', mt: 2 }} />}
       {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
       
@@ -165,7 +205,6 @@ export const FormTitleSearchPage = () => {
             <Table stickyHeader size="small">
               <TableHead>
                 <TableRow>
-                  {/* ¡COLUMNAS REORDENADAS! */}
                   <TableCell sx={{fontWeight: 'bold'}}>Donor</TableCell>
                   <TableCell sx={{fontWeight: 'bold'}}>Email</TableCell>
                   <TableCell sx={{fontWeight: 'bold'}}>Date</TableCell>
@@ -175,7 +214,6 @@ export const FormTitleSearchPage = () => {
               <TableBody>
                 {donationData.donations.map((donation) => (
                   <TableRow key={donation.id} hover>
-                    {/* ¡CELDAS REORDENADAS! */}
                     <TableCell>{donation.donorName}</TableCell>
                     <TableCell>{donation.donorEmail}</TableCell>
                     <TableCell>{dayjs(donation.date).format('DD/MM/YYYY HH:mm')}</TableCell>
@@ -191,4 +229,4 @@ export const FormTitleSearchPage = () => {
   );
 };
 
-export default FormTitleSearchPage
+export default FormTitleSearchPage;
