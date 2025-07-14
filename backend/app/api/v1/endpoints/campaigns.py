@@ -1,4 +1,4 @@
-# backend/app/api/v1/endpoints/campaigns.py
+# --- Archivo: backend/app/api/v1/endpoints/campaigns.py (Corregido) ---
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -9,8 +9,7 @@ from backend.app.services.airtable_service import AirtableService
 
 router = APIRouter()
 
-# ── Modelos de respuesta ──────────────────────────────────────────────────────
-
+# --- Modelos de respuesta (sin cambios) ---
 class DonationDetail(BaseModel):
     id: str
     donorName: str
@@ -18,7 +17,7 @@ class DonationDetail(BaseModel):
     amount: float
     date: str
 
-# ── Endpoints existentes ──────────────────────────────────────────────────────
+# --- Endpoints existentes (sin cambios) ---
 
 @router.get("/sources", response_model=List[str])
 def get_campaign_sources(
@@ -58,7 +57,7 @@ def get_campaign_stats(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ocurrió un error inesperado: {e}")
 
-# ── Nuevo endpoint para detalles de donaciones ────────────────────────────────
+# --- Endpoint para detalles de donaciones (CORREGIDO) ---
 
 @router.get(
     "/form-titles/{form_title_id}/donations",
@@ -74,7 +73,10 @@ def get_donations_for_form_title(
     para un Form Title dado.
     """
     try:
-        return airtable_service.get_donations_for_form_title(form_title_id)
+        # ✅ CORRECCIÓN: Se pasa el 'form_title_id' como una lista de un solo elemento.
+        # Esto soluciona la discrepancia entre el tipo que recibe el endpoint (str)
+        # y el que espera la función del servicio (List[str]).
+        return airtable_service.get_donations_for_form_title([form_title_id])
     except HTTPException as http_exc:
         raise http_exc
     except Exception as e:
