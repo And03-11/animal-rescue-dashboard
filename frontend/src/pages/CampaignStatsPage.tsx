@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -37,6 +37,7 @@ import apiClient from '../api/axiosConfig';
 import { StatCard } from '../components/StatCard';
 import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
+import { useWebSocket } from '../context/WebSocketProvider';
 
 // --- Interfaces ---
 interface ApiListItem {
@@ -78,6 +79,7 @@ export const CampaignStatsPage: React.FC = () => {
   const [donationDetails, setDonationDetails] = useState<DonationDetail[]>([]);
   const [loadingDonations, setLoadingDonations] = useState(false);
   const [errorDonations, setErrorDonations] = useState('');
+  const { subscribe } = useWebSocket();
 
   // formatea USD
   const formatCurrency = (amt: number) =>
@@ -107,17 +109,37 @@ export const CampaignStatsPage: React.FC = () => {
   }, [selectedSource]);
 
   // ③ cargar estadísticas al cambiar campaign
-  useEffect(() => {
+  const fetchCampaignStats = useCallback(() => {
     if (!selectedCampaign) {
       setStatsData(null);
       return;
     }
     setLoading(v => ({ ...v, stats: true }));
+    setError(''); // Limpia errores anteriores
     apiClient.get<CampaignStatsData>(`/campaigns/${selectedCampaign}/stats`)
       .then(res => setStatsData(res.data))
       .catch(() => setError('Failed to load statistics.'))
       .finally(() => setLoading(v => ({ ...v, stats: false })));
-  }, [selectedCampaign]);
+  }, [selectedCampaign]); // Se recrea solo si selectedCampaign cambia
+
+  // ③ cargar estadísticas usando la nueva función
+  useEffect(() => {
+    fetchCampaignStats();
+  }, [fetchCampaignStats]);
+
+
+  // <-- 5. AÑADE EL useEffect PARA LA SUSCRIPCIÓN DE WEBSOCKET -->
+  useEffect(() => {
+    const unsubscribe = subscribe('new_donation', () => {
+      // Solo refresca si hay una campaña seleccionada
+      if (selectedCampaign) {
+        console.log(`Notification received! Refreshing stats for campaign: ${selectedCampaign}`);
+        fetchCampaignStats();
+      }
+    });
+
+    return () => unsubscribe(); // Limpieza
+  }, [subscribe, selectedCampaign, fetchCampaignStats]);
 
   // abre el modal de donaciones
   const openDonationModal = (ftId: string, ftName: string) => {

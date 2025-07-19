@@ -10,7 +10,8 @@ from backend.app.api.v1.endpoints import (
     contacts,
     campaigns,
     form_titles,
-    email_sender
+    email_sender,
+    websockets  
 )
 from backend.app.api.v1.endpoints.search import router as search_router
 
@@ -24,7 +25,8 @@ app = FastAPI(
 origins = [
     "http://localhost:3000",
     "http://localhost:5173",
-    # "https://tu-dominio.com"
+    "https://a2a4b1a71477.ngrok-free.app",
+    #"https://tu-dominio.com"
 ]
 
 app.add_middleware(
@@ -36,8 +38,6 @@ app.add_middleware(
 )
 
 # --- Registro de routers ---
-# ✅ CAMBIO: Se añade el router de autenticación que faltaba.
-# ✅ CAMBIO: Se elimina la línea duplicada para el router de usuarios.
 app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["dashboard"])
 app.include_router(contacts.router, prefix="/api/v1/contacts", tags=["contacts"])
 app.include_router(campaigns.router, prefix="/api/v1/campaigns", tags=["campaigns"])
@@ -46,3 +46,4 @@ app.include_router(email_sender.router, prefix="/api/v1/send-email", tags=["emai
 app.include_router(search_router, prefix="/api/v1", tags=["search"])
 app.include_router(auth_sqlite.router, prefix="/api/v1", tags=["auth"]) # <-- AÑADIDO
 app.include_router(users.router, prefix="/api/v1", tags=["users"])
+app.include_router(websockets.router, prefix="/api/v1")

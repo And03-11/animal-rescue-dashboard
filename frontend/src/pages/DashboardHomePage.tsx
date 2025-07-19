@@ -10,6 +10,7 @@ import TodayIcon from '@mui/icons-material/Today';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
+import { useWebSocket } from '../context/WebSocketProvider';
 
 
 // Interfaces de datos
@@ -32,21 +33,24 @@ export const DashboardHomePage = () => {
   const [endDate, setEndDate] = useState<Dayjs | null>(null);
   const [loading, setLoading] = useState({ glance: true, filter: false });
   const [error, setError] = useState({ glance: '', filter: '' });
+  const { subscribe } = useWebSocket();
 
+  const fetchGlanceMetrics = useCallback(async () => {
+    setLoading(prev => ({ ...prev, glance: true }));
+    try {
+      const response = await apiClient.get<{ glance: GlanceData }>('/dashboard/metrics');
+      setGlanceData(response.data.glance);
+    } catch (err) {
+      setError(prev => ({ ...prev, glance: 'Failed to load initial metrics.' }));
+    } finally {
+      setLoading(prev => ({ ...prev, glance: false }));
+    }
+  }, []); // El array de dependencias vacío significa que la función no cambia
+
+  // useEffect original para la carga inicial
   useEffect(() => {
-    const fetchGlanceMetrics = async () => {
-      setLoading(prev => ({ ...prev, glance: true }));
-      try {
-        const response = await apiClient.get<{ glance: GlanceData }>('/dashboard/metrics');
-        setGlanceData(response.data.glance);
-      } catch (err) {
-        setError(prev => ({ ...prev, glance: 'Failed to load initial metrics.' }));
-      } finally {
-        setLoading(prev => ({ ...prev, glance: false }));
-      }
-    };
     fetchGlanceMetrics();
-  }, []);
+  }, [fetchGlanceMetrics]);
 
   const handleSearchByRange = useCallback(async () => {
     if (!startDate || !endDate || startDate.isAfter(endDate)) {
@@ -68,6 +72,30 @@ export const DashboardHomePage = () => {
       setLoading(prev => ({ ...prev, filter: false }));
     }
   }, [startDate, endDate]);
+
+
+  useEffect(() => {
+    console.log("Subscribing to 'new_donation' event...");
+
+    const unsubscribe = subscribe('new_donation', () => {
+      console.log('Notification received! Refreshing dashboard data...');
+      
+      // Siempre refresca los datos "At a Glance"
+      fetchGlanceMetrics();
+
+      // Si el usuario está viendo datos filtrados, los refresca también
+      if (filteredData) {
+        handleSearchByRange();
+      }
+    });
+    // Función de limpieza que se ejecuta al desmontar el componente
+    return () => {
+      console.log("Unsubscribing from 'new_donation' event.");
+      unsubscribe();
+    };
+  }, [subscribe, fetchGlanceMetrics, handleSearchByRange, filteredData]);
+
+
 
   const formatXAxis = (tickItem: string) => dayjs(tickItem).format('D/M');
   console.log("glanceData", glanceData);

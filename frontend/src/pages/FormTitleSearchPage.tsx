@@ -11,6 +11,7 @@ import apiClient from '../api/axiosConfig';
 import { StatCard } from '../components/StatCard';
 import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
+import { useWebSocket } from '../context/WebSocketProvider';
 
 // --- Interfaces (sin cambios) ---
 interface ApiListItem { id: string; name: string; }
@@ -52,6 +53,7 @@ export const FormTitleSearchPage = () => {
   const [donationData, setDonationData] = useState<DonationData | null>(null);
   const [loading, setLoading] = useState({ sources: true, campaigns: false, titles: false, donations: false });
   const [error, setError] = useState('');
+  const { subscribe } = useWebSocket();
 
   // ... Lógica de carga de datos y búsqueda sin cambios ...
   useEffect(() => {
@@ -104,6 +106,18 @@ export const FormTitleSearchPage = () => {
       setLoading(prev => ({ ...prev, donations: false }));
     }
   }, [selectedTitles, startDate, endDate]);
+  
+  useEffect(() => {
+    // No hagas nada si no hay una búsqueda activa
+    if (!donationData) return;
+
+    const unsubscribe = subscribe('new_donation', () => {
+      console.log('Notification received! Refreshing form title search results...');
+      handleSearch();
+    });
+
+    return () => unsubscribe(); // Limpieza al desmontar o cuando cambian las dependencias
+  }, [subscribe, donationData, handleSearch]);
 
   return (
     <Box sx={{ width: '100%', maxWidth: '1280px', mx: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
