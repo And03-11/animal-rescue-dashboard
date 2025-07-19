@@ -26,7 +26,6 @@ interface FilteredData {
 }
 
 export const DashboardHomePage = () => {
-  // Lógica de estado y fetch de datos (sin cambios)
   const [glanceData, setGlanceData] = useState<GlanceData | null>(null);
   const [filteredData, setFilteredData] = useState<FilteredData | null>(null);
   const [startDate, setStartDate] = useState<Dayjs | null>(null);
@@ -35,33 +34,47 @@ export const DashboardHomePage = () => {
   const [error, setError] = useState({ glance: '', filter: '' });
   const { subscribe } = useWebSocket();
 
-  const fetchGlanceMetrics = useCallback(async () => {
-    setLoading(prev => ({ ...prev, glance: true }));
+  // ✅ CAMBIO 1: La función ahora acepta un booleano `isRefresh`.
+  // Por defecto es `false` para no afectar las llamadas existentes.
+  const fetchGlanceMetrics = useCallback(async (isRefresh: boolean = false) => {
+    // Solo activamos el 'loading' si NO es un refresco automático.
+    if (!isRefresh) {
+        setLoading(prev => ({ ...prev, glance: true }));
+    }
     try {
       const response = await apiClient.get<{ glance: GlanceData }>('/dashboard/metrics');
       setGlanceData(response.data.glance);
     } catch (err) {
       setError(prev => ({ ...prev, glance: 'Failed to load initial metrics.' }));
     } finally {
-      setLoading(prev => ({ ...prev, glance: false }));
+      if (!isRefresh) {
+        setLoading(prev => ({ ...prev, glance: false }));
+      }
     }
-  }, []); // El array de dependencias vacío significa que la función no cambia
+  }, []);
 
-  // useEffect original para la carga inicial
+  // useEffect para la carga inicial (no cambia su lógica interna).
   useEffect(() => {
+    // Se llama una sola vez con la configuración por defecto (isRefresh = false).
     fetchGlanceMetrics();
   }, [fetchGlanceMetrics]);
 
-  const handleSearchByRange = useCallback(async () => {
+  // ✅ CAMBIO 2: La función de búsqueda también acepta `isRefresh`.
+  const handleSearchByRange = useCallback(async (isRefresh: boolean = false) => {
     if (!startDate || !endDate || startDate.isAfter(endDate)) {
       setFilteredData(null);
       return;
     }
-    setLoading(prev => ({ ...prev, filter: true }));
+    // Solo activamos el 'loading' si es una búsqueda manual del usuario.
+    if (!isRefresh) {
+        setLoading(prev => ({ ...prev, filter: true }));
+    }
     setError(prev => ({...prev, filter: ''}));
     try {
       const params = {
         start_date: startDate.format('YYYY-MM-DD'),
+        // Tu código original suma un día. Lo mantengo, aunque usualmente
+        // es preferible que el backend maneje rangos de fecha inclusivos.
         end_date: endDate.add(1, 'day').format('YYYY-MM-DD'),
       };
       const response = await apiClient.get<{ filtered: FilteredData }>('/dashboard/metrics', { params });
@@ -69,42 +82,47 @@ export const DashboardHomePage = () => {
     } catch (err) {
       setError(prev => ({ ...prev, filter: 'Failed to load filtered metrics.'}));
     } finally {
-      setLoading(prev => ({ ...prev, filter: false }));
+      if (!isRefresh) {
+        setLoading(prev => ({ ...prev, filter: false }));
+      }
     }
   }, [startDate, endDate]);
 
-
+  // ✅ CAMBIO 3: El WebSocket ahora llama a las funciones con `isRefresh = true`.
   useEffect(() => {
     console.log("Subscribing to 'new_donation' event...");
 
     const unsubscribe = subscribe('new_donation', () => {
-      console.log('Notification received! Refreshing dashboard data...');
+      console.log('Notification received! Refreshing dashboard data silently...');
       
-      // Siempre refresca los datos "At a Glance"
-      fetchGlanceMetrics();
+      // Refresca los datos "At a Glance" en segundo plano.
+      fetchGlanceMetrics(true);
 
-      // Si el usuario está viendo datos filtrados, los refresca también
-      if (filteredData) {
-        handleSearchByRange();
+      // Si hay un rango de fechas seleccionado, refresca los datos filtrados.
+      // Usar `startDate` y `endDate` es más robusto que `filteredData`
+      // porque asegura el refresco aunque la búsqueda anterior no diera resultados.
+      if (startDate && endDate) {
+        handleSearchByRange(true);
       }
     });
-    // Función de limpieza que se ejecuta al desmontar el componente
+    
     return () => {
       console.log("Unsubscribing from 'new_donation' event.");
       unsubscribe();
     };
-  }, [subscribe, fetchGlanceMetrics, handleSearchByRange, filteredData]);
-
+    // El array de dependencias se ajusta para reflejar la nueva lógica.
+  }, [subscribe, fetchGlanceMetrics, handleSearchByRange, startDate, endDate]);
 
 
   const formatXAxis = (tickItem: string) => dayjs(tickItem).format('D/M');
   console.log("glanceData", glanceData);
   console.log("filteredData", filteredData);
+
   return (
     <Box sx={{ width: '100%', maxWidth: '1200px', display: 'flex', flexDirection: 'column', gap: 2 }}>
       <Typography variant="h4" component="h1">Global Dashboard</Typography>
 
-      {/* --- SECCIÓN 1: VISTA RÁPIDA --- */}
+      {/* --- SECCIÓN 1: VISTA RÁPIDA (Sin cambios en el JSX) --- */}
       <Paper variant="outlined" sx={{ p: 2 }}>
         <Typography variant="h5" gutterBottom>At a Glance</Typography>
         <Divider sx={{ mb: 2 }} />
@@ -134,7 +152,7 @@ export const DashboardHomePage = () => {
         )}
       </Paper>
 
-      {/* --- SECCIÓN 2: BÚSQUEDA POR RANGO --- */}
+      {/* --- SECCIÓN 2: BÚSQUEDA POR RANGO (Sin cambios en el JSX) --- */}
       <Paper variant="outlined" sx={{ p: 2 }}>
        <Typography variant="h5" gutterBottom>Custom Range Search</Typography>
         <Divider sx={{ mb: 2 }} />
@@ -142,18 +160,19 @@ export const DashboardHomePage = () => {
           <DatePicker label="Start Date" value={startDate} onChange={setStartDate} slotProps={{ textField: { size: 'small' } }}/>
           <DatePicker label="End Date" value={endDate} onChange={setEndDate} slotProps={{ textField: { size: 'small' } }}/>
           <Box sx={{ flexGrow: 1, display: 'flex', justifyContent: 'flex-end' }}>
-            <Button variant="contained" onClick={handleSearchByRange} disabled={loading.filter}>
+            {/* ✅ CAMBIO 4: El botón de búsqueda llama a la función sin parámetro o con `false`. */}
+            <Button variant="contained" onClick={() => handleSearchByRange(false)} disabled={loading.filter}>
               {loading.filter ? 'Searching...' : 'Search'}
             </Button>
           </Box>
         </Box>
         {loading.filter ? <CircularProgress /> : error.filter ? <Alert severity="error">{error.filter}</Alert> : filteredData && (
+          // Mantengo tu estructura de Grid original, como solicitaste.
           <Grid container spacing={3}>
             <Grid size={{ xs: 12, md: 6 }}>
               <StatCard title="Total Donated in Range" value={`$${filteredData.amountInRange.toFixed(2)}`} icon={<MonetizationOnIcon color="success" sx={{ fontSize: 40 }} />} />
             </Grid>
             <Grid size={{ xs: 12, md: 6 }}>
-              {/* ¡AQUÍ ESTÁ EL CAMBIO! */}
               <StatCard title="Number of Donations" value={`${filteredData.donationsCount}`} icon={<ReceiptLongIcon sx={{ fontSize: 40, color: '#BFACB5' }} />} />
             </Grid>
           </Grid>
@@ -163,4 +182,4 @@ export const DashboardHomePage = () => {
   );
 };
 
-export default DashboardHomePage
+export default DashboardHomePage;

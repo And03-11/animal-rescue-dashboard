@@ -109,18 +109,26 @@ export const CampaignStatsPage: React.FC = () => {
   }, [selectedSource]);
 
   // ③ cargar estadísticas al cambiar campaign
-  const fetchCampaignStats = useCallback(() => {
-    if (!selectedCampaign) {
-      setStatsData(null);
-      return;
-    }
+  const fetchCampaignStats = useCallback((silent = false) => {
+  if (!selectedCampaign) {
+    setStatsData(null);
+    return;
+  }
+
+  if (!silent) {
     setLoading(v => ({ ...v, stats: true }));
-    setError(''); // Limpia errores anteriores
-    apiClient.get<CampaignStatsData>(`/campaigns/${selectedCampaign}/stats`)
-      .then(res => setStatsData(res.data))
-      .catch(() => setError('Failed to load statistics.'))
-      .finally(() => setLoading(v => ({ ...v, stats: false })));
-  }, [selectedCampaign]); // Se recrea solo si selectedCampaign cambia
+  }
+
+  setError('');
+  apiClient.get<CampaignStatsData>(`/campaigns/${selectedCampaign}/stats`)
+    .then(res => setStatsData(res.data))
+    .catch(() => setError('Failed to load statistics.'))
+    .finally(() => {
+      if (!silent) {
+        setLoading(v => ({ ...v, stats: false }));
+      }
+    });
+}, [selectedCampaign]);
 
   // ③ cargar estadísticas usando la nueva función
   useEffect(() => {
@@ -131,12 +139,11 @@ export const CampaignStatsPage: React.FC = () => {
   // <-- 5. AÑADE EL useEffect PARA LA SUSCRIPCIÓN DE WEBSOCKET -->
   useEffect(() => {
     const unsubscribe = subscribe('new_donation', () => {
-      // Solo refresca si hay una campaña seleccionada
-      if (selectedCampaign) {
-        console.log(`Notification received! Refreshing stats for campaign: ${selectedCampaign}`);
-        fetchCampaignStats();
-      }
-    });
+  if (selectedCampaign) {
+    console.log(`Notification received! Refreshing stats for campaign: ${selectedCampaign}`);
+    fetchCampaignStats(true); // 👈 Silent update
+  }
+});
 
     return () => unsubscribe(); // Limpieza
   }, [subscribe, selectedCampaign, fetchCampaignStats]);
