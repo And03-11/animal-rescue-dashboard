@@ -10,7 +10,7 @@ from fastapi.security import OAuth2PasswordBearer
 # Clave secreta y configuración del token
 SECRET_KEY = "super-secret-key"  # ⚠️ reemplazar en producción
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = 480
 
 # Contexto para hashear/verificar contraseñas
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
