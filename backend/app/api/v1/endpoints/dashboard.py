@@ -4,6 +4,7 @@ from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 from typing import List, Dict, Any, Optional
 from backend.app.core.security import get_current_user
+from collections import defaultdict
 
 router = APIRouter()
 COSTA_RICA_TZ = ZoneInfo("America/Costa_Rica")
@@ -16,10 +17,20 @@ def process_donations_for_trend(donations: List[Dict]) -> List[Dict[str, Any]]:
         try:
             utc_dt = datetime.fromisoformat(donation_date_str.replace('Z', '+00:00'))
             day_str = utc_dt.astimezone(COSTA_RICA_TZ).date().isoformat()
-            daily_trend_data.setdefault(day_str, 0)
-            daily_trend_data[day_str] += donation.get("amount", 0)
-        except (ValueError, TypeError): continue
-    return [{"date": day, "total": round(total, 2)} for day, total in sorted(daily_trend_data.items())]
+            
+            # Inicializa el día si no existe
+            if day_str not in daily_trend_data:
+                daily_trend_data[day_str] = {"total": 0, "count": 0}
+
+            # Agrega el monto y aumenta el contador
+            daily_trend_data[day_str]["total"] += donation.get("amount", 0)
+            daily_trend_data[day_str]["count"] += 1
+        except (ValueError, TypeError): 
+            continue
+    return [
+        {"date": day, "total": round(data["total"], 2), "count": data["count"]}
+        for day, data in sorted(daily_trend_data.items())
+    ]
 
 @router.get("/metrics")
 def get_dashboard_metrics(
@@ -37,10 +48,12 @@ def get_dashboard_metrics(
         end_of_today = datetime.combine(now_in_tz.date(), time.max, tzinfo=COSTA_RICA_TZ)
         donations_today = airtable_service.get_donations(start_utc=start_of_today.isoformat(), end_utc=end_of_today.isoformat())
         amount_today = sum(d.get("amount", 0) for d in donations_today)
+        count_today = len(donations_today)
 
         start_of_month = now_in_tz.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         donations_this_month = airtable_service.get_donations(start_utc=start_of_month.isoformat(), end_utc=end_of_today.isoformat())
         amount_this_month = sum(d.get("amount", 0) for d in donations_this_month)
+        count_this_month = len(donations_this_month) 
         
         start_30_days_ago = start_of_today - timedelta(days=30)
         donations_last_30_days = airtable_service.get_donations(start_utc=start_30_days_ago.isoformat(), end_utc=end_of_today.isoformat())
@@ -48,7 +61,9 @@ def get_dashboard_metrics(
         
         glance_metrics = {
             "amountToday": round(amount_today, 2),
+            "donationsCountToday": count_today, # <-- AÑADE ESTA LÍNEA
             "amountThisMonth": round(amount_this_month, 2),
+            "donationsCountThisMonth": count_this_month, # <-- AÑADE ESTA LÍNEA
             "glanceTrend": glance_trend,
         }
 
@@ -73,3 +88,51 @@ def get_dashboard_metrics(
     except Exception as e:
         print(f"Error crítico al generar las métricas del dashboard: {e}")
         return {"error": "Could not process dashboard metrics", "details": str(e)}
+    
+
+
+@router.get("/top-donors")
+def get_top_donors(
+    limit: int = 10,
+    airtable_service: AirtableService = Depends(AirtableService),
+    current_user: str = Depends(get_current_user)
+):
+    """
+    Calcula y devuelve los mejores donadores históricos basados en el monto total donado.
+    """
+    try:
+        # ✅ PASO CLAVE: Usar la nueva función que sí trae la info del donante
+        all_donations = airtable_service.get_donations_with_donor_info()
+        
+        # Usamos defaultdict para facilitar la agrupación
+        donor_stats = defaultdict(lambda: {"totalAmount": 0, "donationsCount": 0, "name": ""})
+
+        for donation in all_donations:
+            email = donation.get("email")
+            # Ignoramos donaciones sin un email asociado
+            if not email:
+                continue
+
+            amount = donation.get("amount", 0)
+            
+            # Agrupa por email, sumando montos y contando donaciones
+            donor_stats[email]["totalAmount"] += amount
+            donor_stats[email]["donationsCount"] += 1
+            # Se asegura de guardar el nombre del donante
+            if not donor_stats[email]["name"] or donor_stats[email]["name"] == "Anonymous":
+                 donor_stats[email]["name"] = donation.get("name", "Anonymous")
+
+        # Convierte el diccionario a una lista de objetos
+        top_donors_list = [
+            {"email": email, **stats} for email, stats in donor_stats.items()
+        ]
+
+        # Ordena la lista de mayor a menor por el monto total
+        sorted_donors = sorted(top_donors_list, key=lambda x: x["totalAmount"], reverse=True)
+        
+        # Devuelve el top N (el frontend espera este formato)
+        return sorted_donors[:limit]
+
+    except Exception as e:
+        print(f"Error crítico al generar el top de donadores: {e}")
+        return {"error": "Could not process top donors", "details": str(e)}

@@ -258,6 +258,67 @@ class AirtableService:
             print(f"Error en get_donations: {e}")
             return []  # fallback seguro
         
+    def get_donations_with_donor_info(self) -> List[Dict]:
+        """
+        Obtiene todas las donaciones y las enriquece con el nombre y email del donante.
+        Esta función es más completa que get_donations() y es ideal para reportes.
+        """
+        try:
+            # 1. Obtener todas las donaciones con el enlace al donante
+            donation_records = self.donations_table.all(
+                fields=[DONATIONS_FIELDS["amount"], DONATIONS_FIELDS["donor_link"], DONATIONS_FIELDS["date"]]
+            )
+
+            if not donation_records:
+                return []
+
+            # 2. Mapear donaciones y recopilar IDs de donantes
+            donor_ids = {
+                rec["fields"][DONATIONS_FIELDS["donor_link"]][0]
+                for rec in donation_records
+                if DONATIONS_FIELDS["donor_link"] in rec.get("fields", {}) and rec["fields"][DONATIONS_FIELDS["donor_link"]]
+            }
+
+            if not donor_ids:
+                return [
+                    {**d.get("fields", {}), "name": "Anonymous", "email": None}
+                    for d in donation_records
+                ]
+
+            # 3. Obtener los donantes y sus emails en bloque para eficiencia
+            donor_map = {donor["id"]: donor["fields"] for donor in self.donors_table.all() if donor["id"] in donor_ids}
+            email_ids = {
+                email_id
+                for donor in donor_map.values()
+                for email_id in donor.get(DONORS_FIELDS["emails_link"], [])
+            }
+            email_map = {email["id"]: email["fields"] for email in self.emails_table.all() if email["id"] in email_ids}
+
+            # 4. Unir toda la información
+            enriched_donations = []
+            for rec in donation_records:
+                fields = rec.get("fields", {})
+                donor_id_list = fields.get(DONATIONS_FIELDS["donor_link"], [])
+                donor_id = donor_id_list[0] if donor_id_list else None
+                
+                donor_info = donor_map.get(donor_id, {})
+                name = f"{donor_info.get(DONORS_FIELDS['name'], '')} {donor_info.get(DONORS_FIELDS['last_name'], '')}".strip() or "Anonymous"
+                
+                email_id_list = donor_info.get(DONORS_FIELDS['emails_link'], [])
+                email_id = email_id_list[0] if email_id_list else None
+                email_info = email_map.get(email_id, {})
+                email = email_info.get(EMAILS_FIELDS['email'])
+
+                enriched_donations.append({
+                    "amount": fields.get(DONATIONS_FIELDS["amount"], 0),
+                    "name": name,
+                    "email": email,
+                })
+            return enriched_donations
+        except Exception as e:
+            print(f"Error en get_donations_with_donor_info: {e}")
+            return []
+        
 
 
         # En backend/app/services/airtable_service.py
