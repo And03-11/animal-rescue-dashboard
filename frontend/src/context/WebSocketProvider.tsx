@@ -22,9 +22,11 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     if (ws.current && ws.current.readyState === WebSocket.OPEN) return;
 
     // Obtiene la URL de la API de las variables de entorno de Vite
-    const apiUrl = import.meta.env.VITE_API_URL || 'ws://127.0.0.1:8001';
+    const isSecure = window.location.protocol === 'https:';
+    const wsProtocol = isSecure ? 'wss' : 'ws';
+    const wsHost = window.location.host;
+    const wsUrl = `${wsProtocol}://${wsHost}/api/v1/ws/updates`;
     // Construye la URL del WebSocket, reemplazando http con ws
-    const wsUrl = apiUrl.replace(/^http/, 'ws') + '/api/v1/ws/updates';
 
     console.log('Connecting to WebSocket:', wsUrl);
     ws.current = new WebSocket(wsUrl);

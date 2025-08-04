@@ -32,7 +32,12 @@ export default defineConfig({
     allowedHosts: ['.ngrok-free.app'],
     // Mantenemos la configuración del proxy que ya tenías.
     proxy: {
-      '/api': 'http://localhost:8001',
+      '/api': {
+        target: 'http://localhost:8001',
+        changeOrigin: true,
+        // ✅ Añade esta línea para habilitar el proxy para WebSockets
+        ws: true,
+      },
     },
   },
 });
