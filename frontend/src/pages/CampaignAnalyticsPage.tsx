@@ -2,10 +2,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
     Box, Typography, Paper, Divider, Button, CircularProgress, Alert,
-    FormControl, InputLabel, Select, MenuItem, ListItemText, OutlinedInput, Collapse,
-    Table, TableBody, TableCell, TableContainer, TableHead, TableRow, useTheme
+    FormControl, InputLabel, Select, MenuItem, Collapse,
+    Table, TableBody, TableCell, TableContainer, TableHead, TableRow, useTheme, Chip 
 } from '@mui/material';
 import Grid from '@mui/material/Grid';
+import TuneIcon from '@mui/icons-material/Tune'; 
+import ClearIcon from '@mui/icons-material/Clear';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import dayjs, { Dayjs } from 'dayjs';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -14,6 +16,7 @@ import { StatCard } from '../components/StatCard';
 import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import { useWebSocket } from '../context/WebSocketProvider';
+import { FormTitleSelector } from '../components/FormTitleSelector';
 
 // --- Interfaces ---
 interface ApiListItem { id: string; name: string; }
@@ -40,9 +43,6 @@ interface CustomReportData {
     donationsCount: number;
 }
 
-const MenuProps = {
-  PaperProps: { style: { maxHeight: 224, width: 350 } },
-};
 
 export const CampaignAnalyticsPage: React.FC = () => {
   const theme = useTheme();
@@ -57,12 +57,12 @@ export const CampaignAnalyticsPage: React.FC = () => {
   const [selectedTitles, setSelectedTitles] = useState<string[]>([]);
   const [startDate, setStartDate] = useState<Dayjs | null>(null);
   const [endDate, setEndDate] = useState<Dayjs | null>(null);
+  const [selectorKey, setSelectorKey] = useState(0);
 
   // --- Estados de Datos (Unificados) ---
   const [campaignStats, setCampaignStats] = useState<CampaignStatsData | null>(null);
   const [reportData, setReportData] = useState<CustomReportData | null>(null);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
-  const [isInitialTitleSelection, setIsInitialTitleSelection] = useState(true);
   // --- Estados de Carga y Errores (Unificados) ---
   const [loading, setLoading] = useState({ sources: true, campaigns: false, titles: false, report: false });
   const [error, setError] = useState('');
@@ -111,8 +111,7 @@ export const CampaignAnalyticsPage: React.FC = () => {
       setFormTitles(titlesRes.data);
       setCampaignStats(statsRes.data);
       // Seleccionar todos los títulos por defecto
-      setSelectedTitles(titlesRes.data.map(t => t.id));
-      setIsInitialTitleSelection(true); // Activa el modo inicial cada vez que se carga una nueva campaña
+      
     } catch {
       setError('Failed to load campaign data.');
     } finally {
@@ -166,15 +165,16 @@ export const CampaignAnalyticsPage: React.FC = () => {
     });
     return () => unsubscribe();
   }, [subscribe, selectedCampaign, reportData, fetchCampaignBaseData, handleGenerateReport]);
+
+  const handleClearFilters = () => {
+    setStartDate(null);
+    setEndDate(null);
+    setReportData(null); // Esto oculta la tabla de reporte y revierte los StatCards
+    setSelectorKey(prev => prev + 1); // Esto fuerza el remount y reseteo del selector de títulos
+  };
   
   // Función para renderizar los valores seleccionados en el Select
-  const renderSelectedTitles = (selectedIds: string[]) => {
-    if (selectedIds.length === formTitles.length) return "All Form Titles";
-    return formTitles
-      .filter(t => selectedIds.includes(t.id))
-      .map(t => t.name)
-      .join(', ');
-  };
+
   
   
   return (
@@ -211,65 +211,67 @@ export const CampaignAnalyticsPage: React.FC = () => {
             </Grid>
 
             {/* ✅ NUEVO: Botón para mostrar los filtros avanzados */}
-            <Collapse in={!!selectedCampaign && !showAdvancedFilters}>
-                <Box sx={{ display: 'flex', justifyContent: 'center', pt: 2 }}>
-                    <Button 
-                        variant="text" 
-                        onClick={() => setShowAdvancedFilters(true)}
-                    >
-                        Advanced Filters
-                    </Button>
-                </Box>
-            </Collapse>
+             <Collapse in={!!selectedCampaign} timeout="auto" unmountOnExit>
+                <Divider sx={{ my: 2, '&::before, &::after': { top: '50%', transform: 'translateY(-50%)' } }}>
+                    <Chip 
+                        icon={<TuneIcon />} 
+                        label="Advanced Filters"
+                        // ✅ PASO 4: Añadimos el onClick y el estilo de cursor
+                        onClick={() => setShowAdvancedFilters(prev => !prev)}
+                        sx={{ cursor: 'pointer' }}
+                    />
+                </Divider>
 
-            {/* ✅ CAMBIO: El Collapse ahora depende de 'showAdvancedFilters' */}
-            {/* ✅ CAMBIO: El Collapse ahora depende de 'showAdvancedFilters' */}
-            <Collapse in={showAdvancedFilters} timeout="auto" unmountOnExit>
-                <Divider sx={{ my: 2 }}>Advanced Filters</Divider>
-                <Grid container spacing={2} alignItems="center">
-                    <Grid size={{ xs: 12 }}>
-                        <FormControl fullWidth disabled={loading.titles}>
-                            <InputLabel>3. Filter by Form Title(s)</InputLabel>
-                            <Select
-                                multiple
-                                value={selectedTitles}
-                                onChange={e => setSelectedTitles(e.target.value as string[])}
-                                input={<OutlinedInput label="3. Filter by Form Title(s)" />}
-                                renderValue={renderSelectedTitles}
-                                MenuProps={MenuProps}
+                {/* Este Collapse interno controla los filtros detallados */}
+                <Collapse in={showAdvancedFilters} timeout="auto" unmountOnExit>
+                    <Grid container spacing={2} alignItems="center" sx={{ mt: 1 }}>
+                        <Grid size={{ xs: 12 }}>
+                            <FormTitleSelector
+                                key={selectorKey} // Esta key fuerza el reseteo
+                                titles={formTitles}
+                                onSelectionChange={setSelectedTitles}
+                            />
+                        </Grid>
+                        <Grid size={{ xs: 12, md: 5 }}>
+                            <DatePicker 
+                                label="Start Date (Optional)" 
+                                value={startDate} 
+                                onChange={setStartDate} 
+                                sx={{ width: '100%' }}
+                            />
+                        </Grid>
+                        <Grid size={{ xs: 12, md: 5 }}>
+                            <DatePicker 
+                                label="End Date (Optional)" 
+                                value={endDate} 
+                                onChange={setEndDate} 
+                                sx={{ width: '100%' }}
+                            />
+                        </Grid>
+                   
+                        <Grid size={{ xs: 12, md: 2 }} sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                            {/* ✅ CAMBIO: Usamos renderizado condicional directo en lugar de Collapse */}
+                            {!!reportData && (
+                                <Button 
+                                    variant="text" 
+                                    onClick={handleClearFilters} 
+                                    sx={{ height: '56px', mr: 1 }} // Añadimos un pequeño margen derecho
+                                    startIcon={<ClearIcon />}
+                                >
+                                    Clear
+                                </Button>
+                            )}
+                            <Button 
+                                variant="contained" 
+                                onClick={() => handleGenerateReport(false)} 
+                                disabled={loading.report || selectedTitles.length === 0}
+                                sx={{ height: '56px', flexGrow: 1 }}
                             >
-                                {formTitles.map(t => <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>)}
-                            </Select>
-                        </FormControl>
+                                {loading.report ? <CircularProgress size={24} /> : 'Apply'}
+                            </Button>
+                        </Grid>
                     </Grid>
-                    <Grid size={{ xs: 12, md: 5 }}>
-                        <DatePicker 
-                            label="Start Date (Optional)" 
-                            value={startDate} 
-                            onChange={setStartDate} 
-                            sx={{ width: '100%' }}
-                        />
-                    </Grid>
-                    <Grid size={{ xs: 12, md: 5 }}>
-                        <DatePicker 
-                            label="End Date (Optional)" 
-                            value={endDate} 
-                            onChange={setEndDate} 
-                            sx={{ width: '100%' }}
-                        />
-                    </Grid>
-                    <Grid size={{ xs: 12, md: 2 }}>
-                        <Button 
-                            fullWidth 
-                            variant="contained" 
-                            onClick={() => handleGenerateReport(false)} 
-                            disabled={loading.report} 
-                            sx={{ height: '56px' }}
-                        >
-                            {loading.report ? <CircularProgress size={24} /> : 'Apply'}
-                        </Button>
-                    </Grid>
-                </Grid>
+                </Collapse>
             </Collapse>
         </Paper>
 
