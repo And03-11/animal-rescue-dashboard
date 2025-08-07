@@ -12,8 +12,7 @@ import UserManagementPage from './pages/UserManagementPage';
 
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 const DashboardHomePage = lazy(() => import('./pages/DashboardHomePage'));
-const CampaignStatsPage = lazy(() => import('./pages/CampaignStatsPage'));
-const FormTitleSearchPage = lazy(() => import('./pages/FormTitleSearchPage'));
+const CampaignAnalyticsPage = lazy(() => import('./pages/CampaignAnalyticsPage'));
 const ContactSearchPage = lazy(() => import('./pages/ContactSearchPage'));
 const EmailSenderPage = lazy(() => import('./pages/EmailSenderPage'));
 const CampaignDetailPage = lazy(() => import('./pages/CampaignDetailPage'));
@@ -65,14 +64,9 @@ export function AppRoutes() {
               <PageTransition><DashboardHomePage /></PageTransition>
             </PrivateRoute>
           } />
-          <Route path="campaign-stats" element={
+          <Route path="analytics" element={
             <PrivateRoute>
-              <PageTransition><CampaignStatsPage /></PageTransition>
-            </PrivateRoute>
-          } />
-          <Route path="form-title-search" element={
-            <PrivateRoute>
-              <PageTransition><FormTitleSearchPage /></PageTransition>
+              <PageTransition><CampaignAnalyticsPage /></PageTransition>
             </PrivateRoute>
           } />
           <Route path="contact-search" element={
@@ -85,7 +79,7 @@ export function AppRoutes() {
               <PageTransition><EmailSenderPage /></PageTransition>
             </PrivateRoute>
           } />
-          <Route path="campaign-detail" element={
+          <Route path="campaign/:campaignId" element={
             <PrivateRoute>
               <PageTransition><CampaignDetailPage /></PageTransition>
             </PrivateRoute>

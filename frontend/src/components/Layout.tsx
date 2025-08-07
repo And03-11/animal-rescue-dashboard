@@ -35,8 +35,7 @@ export const Layout: React.FC = () => {
 
   const menuItems = [
     { text: 'Dashboard', icon: <HomeIcon />, path: '/' },
-    { text: 'Campaign Stats', icon: <BarChartIcon />, path: '/campaign-stats' },
-    { text: 'Custom Reports', icon: <AssessmentIcon />, path: '/form-title-search' },
+    { text: 'Campaign Analytics', icon: <AssessmentIcon />, path: '/analytics' },
     { text: 'Contact Search', icon: <SearchIcon />, path: '/contact-search' },
     { text: 'Send Email', icon: <MailIcon />, path: '/email-sender' },
   ];
