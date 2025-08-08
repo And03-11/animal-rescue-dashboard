@@ -5,12 +5,10 @@ import {
     FormControl, InputLabel, Select, MenuItem, Collapse,
     Table, TableBody, TableCell, TableContainer, TableHead, TableRow, useTheme, Chip 
 } from '@mui/material';
-import Grid from '@mui/material/Grid';
 import TuneIcon from '@mui/icons-material/Tune'; 
-import ClearIcon from '@mui/icons-material/Clear';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import dayjs, { Dayjs } from 'dayjs';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer} from 'recharts';
 import apiClient from '../api/axiosConfig';
 import { StatCard } from '../components/StatCard';
 import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
@@ -36,6 +34,16 @@ interface CampaignStatsData {
     total_amount: number;
     donation_count: number;
   }[];
+}
+interface SourceStatsData {
+    source_total_amount: number;
+    source_total_count: number;
+    stats_by_campaign: {
+        campaign_id: string;
+        campaign_name: string;
+        total_amount: number;
+        donation_count: number;
+    }[];
 }
 interface CustomReportData {
     donations: Donation[];
@@ -64,8 +72,10 @@ export const CampaignAnalyticsPage: React.FC = () => {
   const [reportData, setReportData] = useState<CustomReportData | null>(null);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   // --- Estados de Carga y Errores (Unificados) ---
-  const [loading, setLoading] = useState({ sources: true, campaigns: false, titles: false, report: false });
+  const [loading, setLoading] = useState({ sources: true, campaigns: false, stats: false, report: false });
   const [error, setError] = useState('');
+  const [sourceStats, setSourceStats] = useState<SourceStatsData | null>(null);
+
   
   // --- Carga inicial de Fuentes ---
   useEffect(() => {
@@ -75,55 +85,61 @@ export const CampaignAnalyticsPage: React.FC = () => {
       .finally(() => setLoading(prev => ({ ...prev, sources: false })));
   }, []);
 
-  // --- Carga de Campañas al cambiar Fuente ---
-  useEffect(() => {
+
+  // --- Carga de Títulos y Estadísticas Generales al cambiar Campaña ---
+  const fetchData = useCallback(async (isSilent = false) => {
+    // Si no hay fuente seleccionada, reseteamos todo y salimos.
     if (!selectedSource) {
       setCampaigns([]);
       setSelectedCampaign('');
-      return;
-    }
-    setLoading(prev => ({ ...prev, campaigns: true }));
-    apiClient.get<ApiListItem[]>(`/campaigns?source=${selectedSource}`)
-      .then(res => setCampaigns(res.data))
-      .catch(() => setError('Failed to load campaigns.'))
-      .finally(() => setLoading(prev => ({ ...prev, campaigns: false })));
-  }, [selectedSource]);
-
-  // --- Carga de Títulos y Estadísticas Generales al cambiar Campaña ---
-  const fetchCampaignBaseData = useCallback(async (isSilent = false) => {
-    if (!selectedCampaign) {
-      setFormTitles([]);
+      setSourceStats(null);
       setCampaignStats(null);
-      setReportData(null);
-      setShowAdvancedFilters(false);
       return;
     }
-    if (!isSilent) {
-        setLoading(prev => ({ ...prev, titles: true }));
-    }
+
+    if (!isSilent) setLoading(prev => ({ ...prev, stats: true }));
     setError('');
 
+    // Preparamos los parámetros de fecha para enviarlos a la API
+    const params = new URLSearchParams();
+    if (startDate) params.append('start_date', startDate.format('YYYY-MM-DD'));
+    if (endDate) params.append('end_date', endDate.format('YYYY-MM-DD'));
+    const dateQuery = params.toString();
+
     try {
-      const [titlesRes, statsRes] = await Promise.all([
-        apiClient.get<ApiListItem[]>(`/form-titles?campaign_id=${selectedCampaign}`),
-        apiClient.get<CampaignStatsData>(`/campaigns/${selectedCampaign}/stats`)
-      ]);
-      setFormTitles(titlesRes.data);
-      setCampaignStats(statsRes.data);
-      // Seleccionar todos los títulos por defecto
-      
+        // 1. Siempre obtenemos la lista de campañas para la fuente seleccionada.
+        const campaignsRes = await apiClient.get<ApiListItem[]>(`/campaigns?source=${selectedSource}`);
+        setCampaigns(campaignsRes.data);
+
+        if (selectedCampaign) {
+            // 2A. SI hay una campaña seleccionada, pedimos sus estadísticas detalladas.
+            const statsRes = await apiClient.get<CampaignStatsData>(`/campaigns/${selectedCampaign}/stats?${dateQuery}`);
+            setCampaignStats(statsRes.data);
+            setSourceStats(null); // Limpiamos los datos de la fuente para no mezclarlos.
+            
+            // También cargamos los form titles para el filtro avanzado
+            const titlesRes = await apiClient.get<ApiListItem[]>(`/form-titles?campaign_id=${selectedCampaign}`);
+            setFormTitles(titlesRes.data);
+
+        } else {
+            // 2B. SI NO hay campaña seleccionada, pedimos las estadísticas de la FUENTE COMPLETA.
+            const statsRes = await apiClient.get<SourceStatsData>(`/campaigns/source/${selectedSource}/stats?${dateQuery}`);
+            setSourceStats(statsRes.data);
+            setCampaignStats(null); // Limpiamos los datos de la campaña.
+            setFormTitles([]); // No hay form titles en la vista de fuente.
+        }
     } catch {
-      setError('Failed to load campaign data.');
+        setError('Failed to load analytics data.');
     } finally {
-      if (!isSilent) {
-        setLoading(prev => ({ ...prev, titles: false }));
-      }
+        if (!isSilent) setLoading(prev => ({ ...prev, stats: false }));
     }
-  }, [selectedCampaign]);
-  
+  }, [selectedSource, selectedCampaign, startDate, endDate]);
+
+  // Este único useEffect ahora controla toda la carga de datos principal.
   useEffect(() => {
-    fetchCampaignBaseData();
-  }, [fetchCampaignBaseData]);
+    fetchData(false);
+  }, [fetchData]);
+
 
   // --- Búsqueda/Generación del Reporte Detallado ---
   const handleGenerateReport = useCallback(async (isSilent = false) => {
@@ -155,25 +171,35 @@ export const CampaignAnalyticsPage: React.FC = () => {
   }, [selectedTitles, startDate, endDate]);
 
   // --- WebSocket para actualizaciones en tiempo real ---
-  useEffect(() => {
-    const unsubscribe = subscribe('new_donation', () => {
-      console.log('New donation detected! Refreshing analytics...');
-      // Si hay una campaña seleccionada, refresca sus datos base
-      if (selectedCampaign) fetchCampaignBaseData(true);
-      // Si hay un reporte activo en pantalla, lo refresca también
-      if (reportData) handleGenerateReport(true);
-    });
-    return () => unsubscribe();
-  }, [subscribe, selectedCampaign, reportData, fetchCampaignBaseData, handleGenerateReport]);
+  // frontend/src/pages/CampaignAnalyticsPage.tsx
 
-  const handleClearFilters = () => {
-    setStartDate(null);
-    setEndDate(null);
-    setReportData(null); // Esto oculta la tabla de reporte y revierte los StatCards
-    setSelectorKey(prev => prev + 1); // Esto fuerza el remount y reseteo del selector de títulos
-  };
+// --- WebSocket para actualizaciones en tiempo real ---
+    useEffect(() => {
+        const unsubscribe = subscribe('new_donation', () => {
+            console.log('New donation detected! Refreshing analytics...');
+            // Si hay una fuente seleccionada, refresca la vista actual (sea de fuente o de campaña)
+            if (selectedSource) fetchData(true);
+            // Si hay un reporte detallado visible, también lo refresca
+            if (reportData) handleGenerateReport(true);
+        });
+        return () => unsubscribe();
+    }, [subscribe, selectedSource, reportData, fetchData, handleGenerateReport]);
+
+    const handleClearFilters = () => {
+        setStartDate(null);
+        setEndDate(null);
+        setReportData(null); // Esto oculta la tabla de reporte y revierte los StatCards
+        setSelectorKey(prev => prev + 1); // Esto fuerza el remount y reseteo del selector de títulos
+    };
   
   // Función para renderizar los valores seleccionados en el Select
+  const displayData = campaignStats || sourceStats;
+  const totalAmount = reportData?.totalAmount ?? (campaignStats?.campaign_total_amount ?? sourceStats?.source_total_amount ?? 0);
+  const totalCount = reportData?.donationsCount ?? (campaignStats?.campaign_total_count ?? sourceStats?.source_total_count ?? 0);
+  
+  const chartData = campaignStats?.stats_by_form_title 
+    ? campaignStats.stats_by_form_title.map(d => ({ name: d.form_title_name, ...d }))
+    : sourceStats?.stats_by_campaign.map(d => ({ name: d.campaign_name, ...d }));
 
   
   
@@ -184,109 +210,106 @@ export const CampaignAnalyticsPage: React.FC = () => {
         {/* --- SECCIÓN 1: PANEL DE CONTROL (FILTROS) --- */}
         {/* --- SECCIÓN 1: PANEL DE CONTROL (FILTROS) --- */}
         <Paper variant="outlined" sx={{ p: 2 }}>
-            <Typography variant="h5" gutterBottom>Filters</Typography>
+            <Typography variant="h5" gutterBottom>Analytics Filters</Typography>
             <Divider sx={{ mb: 2 }} />
-            <Grid container spacing={2}>
-                {/* Selector de Fuente (sin cambios) */}
-                <Grid size={{ xs: 12, md: 12 }}>
-                    <FormControl fullWidth>
-                        <InputLabel>1. Select Source</InputLabel>
-                        <Select value={selectedSource} label="1. Select Source" onChange={e => setSelectedSource(e.target.value)} disabled={loading.sources}>
-                            {sources.map(s => <MenuItem key={s.id} value={s.id}>{s.name}</MenuItem>)}
-                        </Select>
-                    </FormControl>
-                </Grid>
 
-                {/* Selector de Campaña (sin cambios) */}
-                <Grid size={{ xs: 12, md: 12 }}>
-                    <Collapse in={!!selectedSource} timeout="auto" unmountOnExit>
+            {/* Usamos un Box con flexbox para un control vertical limpio */}
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+
+                {/* --- PASO 1: SELECCIONAR FUENTE (Siempre visible) --- */}
+                <FormControl fullWidth>
+                    <InputLabel>1. Select Source</InputLabel>
+                    <Select 
+                        value={selectedSource} 
+                        label="1. Select Source" 
+                        onChange={e => {
+                            setSelectedSource(e.target.value); 
+                            setSelectedCampaign('');
+                        }} 
+                        disabled={loading.sources}
+                    >
+                        {sources.map(s => <MenuItem key={s.id} value={s.id}>{s.name}</MenuItem>)}
+                    </Select>
+                </FormControl>
+
+                {/* --- PASO 2: FILTROS PRINCIPALES (Aparecen al seleccionar fuente) --- */}
+                <Collapse in={!!selectedSource} timeout="auto" sx={{ width: '100%' }}>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
                         <FormControl fullWidth disabled={!selectedSource || loading.campaigns}>
-                            <InputLabel>2. Select Campaign</InputLabel>
-                            <Select value={selectedCampaign} label="2. Select Campaign" onChange={e => setSelectedCampaign(e.target.value)}>
+                            <InputLabel>2. Drill Down by Campaign (Optional)</InputLabel>
+                            <Select value={selectedCampaign} label="2. Drill Down by Campaign (Optional)" onChange={e => setSelectedCampaign(e.target.value)}>
+                                <MenuItem value=""><em>-- View All Campaigns in Source --</em></MenuItem>
                                 {campaigns.map(c => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
                             </Select>
                         </FormControl>
-                    </Collapse>
-                </Grid>
-            </Grid>
 
-            {/* ✅ NUEVO: Botón para mostrar los filtros avanzados */}
-             <Collapse in={!!selectedCampaign} timeout="auto" unmountOnExit>
-                <Divider sx={{ my: 2, '&::before, &::after': { top: '50%', transform: 'translateY(-50%)' } }}>
-                    <Chip 
-                        icon={<TuneIcon />} 
-                        label="Advanced Filters"
-                        // ✅ PASO 4: Añadimos el onClick y el estilo de cursor
-                        onClick={() => setShowAdvancedFilters(prev => !prev)}
-                        sx={{ cursor: 'pointer' }}
-                    />
-                </Divider>
-
-                {/* Este Collapse interno controla los filtros detallados */}
-                <Collapse in={showAdvancedFilters} timeout="auto" unmountOnExit>
-                    <Grid container spacing={2} alignItems="center" sx={{ mt: 1 }}>
-                        <Grid size={{ xs: 12 }}>
-                            <FormTitleSelector
-                                key={selectorKey} // Esta key fuerza el reseteo
-                                titles={formTitles}
-                                onSelectionChange={setSelectedTitles}
-                            />
-                        </Grid>
-                        <Grid size={{ xs: 12, md: 5 }}>
+                        <Box sx={{ display: 'flex', gap: 2, flexDirection: { xs: 'column', md: 'row' } }}>
                             <DatePicker 
-                                label="Start Date (Optional)" 
+                                label="Start Date" 
                                 value={startDate} 
                                 onChange={setStartDate} 
                                 sx={{ width: '100%' }}
                             />
-                        </Grid>
-                        <Grid size={{ xs: 12, md: 5 }}>
                             <DatePicker 
-                                label="End Date (Optional)" 
+                                label="End Date" 
                                 value={endDate} 
                                 onChange={setEndDate} 
                                 sx={{ width: '100%' }}
                             />
-                        </Grid>
-                   
-                        <Grid size={{ xs: 12, md: 2 }} sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                            {/* ✅ CAMBIO: Usamos renderizado condicional directo en lugar de Collapse */}
-                            {!!reportData && (
-                                <Button 
-                                    variant="text" 
-                                    onClick={handleClearFilters} 
-                                    sx={{ height: '56px', mr: 1 }} // Añadimos un pequeño margen derecho
-                                    startIcon={<ClearIcon />}
-                                >
-                                    Clear
-                                </Button>
-                            )}
-                            <Button 
-                                variant="contained" 
-                                onClick={() => handleGenerateReport(false)} 
-                                disabled={loading.report || selectedTitles.length === 0}
-                                sx={{ height: '56px', flexGrow: 1 }}
-                            >
-                                {loading.report ? <CircularProgress size={24} /> : 'Apply'}
-                            </Button>
-                        </Grid>
-                    </Grid>
+                        </Box>
+                    </Box>
                 </Collapse>
-            </Collapse>
+
+                {/* --- PASO 3: REPORTE DETALLADO (Desplegable y solo si hay campaña) --- */}
+                <Collapse in={!!selectedCampaign} timeout="auto" unmountOnExit>
+                    <Divider sx={{ my: 2, mt: 3 }}>
+                        <Chip 
+                            icon={<TuneIcon />} 
+                            label="Generate Detailed Report"
+                            onClick={() => setShowAdvancedFilters(prev => !prev)} // Esto controla el despliegue
+                            sx={{ cursor: 'pointer', p: 2, fontSize: '1rem' }}
+                        />
+                    </Divider>
+                    <Collapse in={showAdvancedFilters}>
+                        <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2, alignItems: 'center', mt: 2 }}>
+                            <Box sx={{ flexGrow: 1, width: '100%' }}>
+                            <FormTitleSelector
+                                    key={selectorKey}
+                                    titles={formTitles}
+                                    onSelectionChange={setSelectedTitles}
+                                />
+                            </Box>
+                            <Box sx={{ display: 'flex', gap: 1 }}>
+                            {!!reportData && (
+                                    <Button variant="text" onClick={handleClearFilters}>Clear</Button>
+                                )}
+                                <Button 
+                                    variant="contained" 
+                                    onClick={() => handleGenerateReport(false)} 
+                                    disabled={loading.report || selectedTitles.length === 0}
+                                    sx={{ height: '56px' }}
+                                >
+                                    {loading.report ? <CircularProgress size={24} /> : 'Generate'}
+                                </Button>
+                            </Box>
+                        </Box>
+                    </Collapse>
+                </Collapse>
+            </Box>
         </Paper>
 
         {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
 
         {/* ✅ AÑADE ESTE BLOQUE DE CÓDIGO AQUÍ */}
         {/* Este spinner se mostrará mientras cargan los datos base de la campaña */}
-        {loading.titles && (
+        {loading.stats && (
             <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
                 <CircularProgress />
             </Box>
         )}
 
         {/* --- SECCIÓN 2 y 3 UNIFICADAS --- */}
-        <Collapse in={!!selectedCampaign && !loading.titles} timeout="auto">
+        <Collapse in={!loading.stats && !!displayData} timeout="auto">
             {/* Contenedor principal para todos los resultados */}
             <Paper variant="outlined" sx={{ p: 3 }}>
 
@@ -297,22 +320,46 @@ export const CampaignAnalyticsPage: React.FC = () => {
                 <Divider sx={{ mb: 3 }} />
                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3, justifyContent: 'center', mb: 3 }}>
                     <StatCard title="Total Amount"
-                        value={`$${(reportData?.totalAmount ?? campaignStats?.campaign_total_amount ?? 0).toFixed(2)}`}
+                        value={`$${totalAmount.toFixed(2)}`}
                         icon={<MonetizationOnIcon color="success" sx={{ fontSize: 40 }} />} />
                     <StatCard title="Donations"
-                        value={`${(reportData?.donationsCount ?? campaignStats?.campaign_total_count ?? 0)}`}
+                        value={`${totalCount}`}
                         icon={<ReceiptLongIcon color="action" sx={{ fontSize: 40 }} />} />
                 </Box>
-                {campaignStats && (
+                {chartData && chartData.length > 0 && (
                     <Paper variant="outlined" sx={{ width: '100%', height: 450, p: 2, mt: 2 }}>
-                        <Typography variant="h6" gutterBottom>Revenue by Form Title</Typography>
+                        <Typography variant="h6" gutterBottom>
+                            {selectedCampaign ? 'Revenue by Form Title' : 'Revenue by Campaign'}
+                        </Typography>
                         <ResponsiveContainer width="100%" height="90%">
-                            <BarChart data={campaignStats?.stats_by_form_title ?? []} margin={{ top: 5, right: 30, left: 20, bottom: 120 }}>
+                            <BarChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 120 }}>
                                 <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis dataKey="form_title_name" angle={-45} textAnchor="end" interval={0} tick={{ fill: theme.palette.text.secondary, fontSize: 12 }} />
-                                <YAxis tickFormatter={tick => `$${tick.toLocaleString()}`} tick={{ fill: theme.palette.text.secondary }} />
-                                <Tooltip formatter={(value: number) => `$${value.toFixed(2)}`} cursor={{ fill: 'rgba(128,128,128,0.1)' }} />
-                                <Bar dataKey="total_amount" fill={theme.palette.primary.main} />
+                                <XAxis 
+                                    dataKey="name" 
+                                    angle={-45} 
+                                    textAnchor="end" 
+                                    interval={0} 
+                                    tick={{ fill: theme.palette.text.secondary, fontSize: 12 }} 
+                                />
+
+                                {/* ✅ Volvemos a un único eje Y a la izquierda para el monto */}
+                                <YAxis 
+                                    tickFormatter={tick => `$${tick.toLocaleString()}`} 
+                                    tick={{ fill: theme.palette.text.secondary }} 
+                                />
+
+                                {/* ✅ Tooltip simplificado solo para el monto */}
+                                <Tooltip 
+                                    formatter={(value: number) => [`$${value.toFixed(2)}`, 'Amount']}
+                                    contentStyle={{ 
+                                        backgroundColor: theme.palette.background.paper, 
+                                        border: `1px solid ${theme.palette.divider}` 
+                                    }}
+                                    cursor={{ fill: 'rgba(128,128,128,0.1)' }}
+                                />
+
+                                {/* ✅ Una única barra para el monto total */}
+                                <Bar dataKey="total_amount" name="Amount" fill={theme.palette.primary.main} />
                             </BarChart>
                         </ResponsiveContainer>
                     </Paper>

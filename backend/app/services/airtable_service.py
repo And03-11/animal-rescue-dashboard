@@ -329,7 +329,7 @@ class AirtableService:
 
     # En backend/app/services/airtable_service.py, reemplaza ÚNICAMENTE esta función:
 
-    def get_campaign_stats(self, campaign_id: str) -> Dict[str, Any]:
+    def get_campaign_stats(self, campaign_id: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict[str, Any]:
         """
         Estadísticas de campaña, ordenadas por fecha de creación de cada Form Title
         (más nuevos arriba).
@@ -364,16 +364,32 @@ class AirtableService:
                 }
 
             # — Paso 3: unificar donation IDs y traer donaciones —
+            # backend/app/services/airtable_service.py
+
+            # — Paso 3: unificar donation IDs y traer donaciones con filtro de fecha —
             all_donation_ids = {did for ft in form_titles for did in ft["donation_ids"]}
             if not all_donation_ids:
                 return {
-                    "campaign_total_amount": 0,
-                    "campaign_total_count":  0,
-                    "stats_by_form_title":   []
+                    "campaign_total_amount": 0, "campaign_total_count": 0, "stats_by_form_title": []
                 }
-            formula_donations = "OR(" + ",".join(f"RECORD_ID()='{did}'" for did in all_donation_ids) + ")"
+
+            # Construimos la fórmula de la consulta dinámicamente
+            formula_parts = ["OR(" + ",".join(f"RECORD_ID()='{did}'" for did in all_donation_ids) + ")"]
+            date_field = f"{{{DONATIONS_FIELDS['date']}}}"
+
+            if start_date:
+                start_dt_local = datetime.combine(datetime.fromisoformat(start_date).date(), time.min, tzinfo=COSTA_RICA_TZ)
+                formula_parts.append(f"IS_AFTER({date_field}, DATETIME_PARSE('{start_dt_local.isoformat()}'))")
+            if end_date:
+                end_dt_obj = datetime.fromisoformat(end_date).date()
+                end_dt_local = datetime.combine(end_dt_obj, time.max, tzinfo=COSTA_RICA_TZ)
+                formula_parts.append(f"IS_BEFORE({date_field}, DATETIME_PARSE('{end_dt_local.isoformat()}'))")
+
+            # Unimos las partes: si hay fechas, usa AND, si no, solo la fórmula de IDs
+            final_formula = f"AND({', '.join(formula_parts)})" if len(formula_parts) > 1 else formula_parts[0]
+
             donation_records = self.donations_table.all(
-                formula=formula_donations,
+                formula=final_formula,
                 fields=[DONATIONS_FIELDS["amount"], DONATIONS_FIELDS["donor_link"]]
             )
 
@@ -496,6 +512,69 @@ class AirtableService:
         daily_trend = [{"date": dt, "amount": trend[dt]} for dt in sorted(trend)]
         return {"total_donations": total, "daily_trend": daily_trend}
 
+    # --- ✅ AÑADE ESTA NUEVA FUNCIÓN ---
+    def get_source_stats(self, source: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Calcula las estadísticas agregadas para una 'source' completa
+        y las desglosa por campaña, aplicando un filtro de fecha opcional.
+        """
+        try:
+            # 1. Encontrar todas las campañas para la 'source' dada.
+            campaign_formula = f"{{{CAMPAIGNS_FIELDS['source']}}} = '{source}'"
+            campaign_records = self.campaigns_table.all(formula=campaign_formula)
+            campaign_ids = {rec['id'] for rec in campaign_records}
+
+            if not campaign_ids:
+                return {
+                    "source_total_amount": 0,
+                    "source_total_count": 0,
+                    "stats_by_campaign": []
+                }
+
+            # 2. Obtener estadísticas para CADA campaña de forma concurrente (más eficiente en un futuro)
+            # Por ahora, lo hacemos secuencialmente para simplicidad.
+            stats_by_campaign = []
+            source_grand_total = 0
+            source_grand_count = 0
+
+            for campaign_id in campaign_ids:
+                # Reutilizamos la lógica de `get_campaign_stats` para cada campaña
+                # Pasamos los filtros de fecha para que cada total sea correcto.
+                stats = self.get_campaign_stats(campaign_id, start_date, end_date)
+                
+                campaign_name = next((c['fields'].get(CAMPAIGNS_FIELDS['name']) for c in campaign_records if c['id'] == campaign_id), 'Unknown Campaign')
+                
+                total_amount = stats.get("campaign_total_amount", 0)
+                donation_count = stats.get("campaign_total_count", 0)
+
+                # Solo incluimos campañas que tienen donaciones en el período seleccionado
+                if donation_count > 0:
+                    stats_by_campaign.append({
+                        "campaign_id": campaign_id,
+                        "campaign_name": campaign_name,
+                        "total_amount": total_amount,
+                        "donation_count": donation_count,
+                    })
+                
+                source_grand_total += total_amount
+                source_grand_count += donation_count
+
+            # Ordenar por monto total descendente para el gráfico
+            stats_by_campaign.sort(key=lambda x: x['total_amount'], reverse=True)
+            
+            return {
+                "source_total_amount": round(source_grand_total, 2),
+                "source_total_count": source_grand_count,
+                "stats_by_campaign": stats_by_campaign,
+            }
+
+        except Exception as e:
+            print(f"Error grave en get_source_stats: {e}")
+            traceback.print_exc()
+            raise HTTPException(
+                status_code=500,
+                detail="Ocurrió un error al calcular las estadísticas de la fuente."
+            )
 
     
 

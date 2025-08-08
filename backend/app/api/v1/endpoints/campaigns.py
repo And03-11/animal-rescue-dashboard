@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from backend.app.core.security import get_current_user
 
 from backend.app.services.airtable_service import AirtableService
@@ -39,6 +39,21 @@ def get_campaigns_by_source(
     Endpoint to get campaigns filtered by a specific source.
     """
     return airtable_service.get_campaigns(source=source)
+
+
+@router.get("/source/{source_name}/stats")
+def get_source_stats(
+    source_name: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    airtable_service: AirtableService = Depends(AirtableService),
+    current_user: str = Depends(get_current_user)
+):
+    """
+    Obtiene estadísticas agregadas para una 'source' completa, con filtro de fecha.
+    """
+    return airtable_service.get_source_stats(source_name, start_date, end_date)
+
 
 @router.get("/{campaign_id}/stats", response_model=Dict[str, Any])
 def get_campaign_stats(
