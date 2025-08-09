@@ -8,22 +8,12 @@ from backend.app.core.security import get_current_user
 from backend.app.schemas import (
     SearchResponse, MailchimpDetail, BrevoDetail, AirtableSummary
 )
-from backend.app.services.airtable_service import AirtableService
-from backend.app.services.mailchimp_service import MailchimpService
-from backend.app.services.brevo_service import BrevoService
+from backend.app.services.airtable_service import AirtableService, get_airtable_service
+from backend.app.services.mailchimp_service import MailchimpService, get_mailchimp_service
+from backend.app.services.brevo_service import BrevoService, get_brevo_service
 
 router = APIRouter()
 
-# --- Dependency Injection ---
-
-def get_airtable_service():
-    return AirtableService()
-
-def get_mailchimp_service():
-    return MailchimpService()
-
-def get_brevo_service():
-    return BrevoService()
 
 @router.get("/search/{email}", response_model=SearchResponse, tags=["search"])
 def search_unified_contact(

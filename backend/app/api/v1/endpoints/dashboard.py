@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends
-from backend.app.services.airtable_service import AirtableService
+from backend.app.services.airtable_service import AirtableService, get_airtable_service
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 from typing import List, Dict, Any, Optional
@@ -36,40 +36,59 @@ def process_donations_for_trend(donations: List[Dict]) -> List[Dict[str, Any]]:
 def get_dashboard_metrics(
     start_date: Optional[str] = None, 
     end_date: Optional[str] = None,
-    airtable_service: AirtableService = Depends(AirtableService),
-    current_user: str = Depends(get_current_user)  # 🔐 protección con JWT
-
+    airtable_service: AirtableService = Depends(get_airtable_service),
+    current_user: str = Depends(get_current_user)
 ):
     try:
         now_in_tz = datetime.now(COSTA_RICA_TZ)
+        today_date = now_in_tz.date()
         
-        # 1. Métricas fijas: "Hoy", "Este Mes" y tendencia de 30 días
-        start_of_today = datetime.combine(now_in_tz.date(), time.min, tzinfo=COSTA_RICA_TZ)
-        end_of_today = datetime.combine(now_in_tz.date(), time.max, tzinfo=COSTA_RICA_TZ)
-        donations_today = airtable_service.get_donations(start_utc=start_of_today.isoformat(), end_utc=end_of_today.isoformat())
-        amount_today = sum(d.get("amount", 0) for d in donations_today)
-        count_today = len(donations_today)
+        # --- LÓGICA OPTIMIZADA ---
+        # 1. Hacemos UNA SOLA LLAMADA para los últimos 30 días.
+        start_of_today_dt = datetime.combine(today_date, time.min, tzinfo=COSTA_RICA_TZ)
+        end_of_today_dt = datetime.combine(today_date, time.max, tzinfo=COSTA_RICA_TZ)
+        start_30_days_ago_dt = start_of_today_dt - timedelta(days=30)
+        
+        # Esta es ahora nuestra única fuente de datos para las métricas "glance".
+        donations_last_30_days = airtable_service.get_donations(
+            start_utc=start_30_days_ago_dt.isoformat(), 
+            end_utc=end_of_today_dt.isoformat()
+        )
 
-        start_of_month = now_in_tz.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        donations_this_month = airtable_service.get_donations(start_utc=start_of_month.isoformat(), end_utc=end_of_today.isoformat())
-        amount_this_month = sum(d.get("amount", 0) for d in donations_this_month)
-        count_this_month = len(donations_this_month) 
+        # 2. Calculamos todas las métricas en Python a partir de esos datos.
+        amount_today = 0
+        count_today = 0
+        amount_this_month = 0
+        count_this_month = 0
+
+        for d in donations_last_30_days:
+            donation_dt_utc = datetime.fromisoformat(d.get("date").replace('Z', '+00:00'))
+            donation_dt_local = donation_dt_utc.astimezone(COSTA_RICA_TZ)
+
+            # Sumar al total del mes
+            if donation_dt_local.year == today_date.year and donation_dt_local.month == today_date.month:
+                amount_this_month += d.get("amount", 0)
+                count_this_month += 1
+            
+            # Sumar al total de hoy
+            if donation_dt_local.date() == today_date:
+                amount_today += d.get("amount", 0)
+                count_today += 1
         
-        start_30_days_ago = start_of_today - timedelta(days=30)
-        donations_last_30_days = airtable_service.get_donations(start_utc=start_30_days_ago.isoformat(), end_utc=end_of_today.isoformat())
         glance_trend = process_donations_for_trend(donations_last_30_days)
         
         glance_metrics = {
             "amountToday": round(amount_today, 2),
-            "donationsCountToday": count_today, # <-- AÑADE ESTA LÍNEA
+            "donationsCountToday": count_today,
             "amountThisMonth": round(amount_this_month, 2),
-            "donationsCountThisMonth": count_this_month, # <-- AÑADE ESTA LÍNEA
+            "donationsCountThisMonth": count_this_month,
             "glanceTrend": glance_trend,
         }
 
-        # 2. Métricas filtradas por rango
+        # --- El cálculo de métricas filtradas sigue igual ---
         filtered_metrics = {}
         if start_date and end_date:
+            # ... (esta parte no cambia)
             start_dt = datetime.fromisoformat(start_date).replace(tzinfo=COSTA_RICA_TZ)
             end_dt = datetime.combine(datetime.fromisoformat(end_date), time.max, tzinfo=COSTA_RICA_TZ)
             donations_in_range = airtable_service.get_donations(start_utc=start_dt.isoformat(), end_utc=end_dt.isoformat())
@@ -94,7 +113,7 @@ def get_dashboard_metrics(
 @router.get("/top-donors")
 def get_top_donors(
     limit: int = 10,
-    airtable_service: AirtableService = Depends(AirtableService),
+    airtable_service: AirtableService = Depends(get_airtable_service),
     current_user: str = Depends(get_current_user)
 ):
     """

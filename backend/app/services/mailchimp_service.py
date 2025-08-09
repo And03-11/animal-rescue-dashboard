@@ -63,3 +63,7 @@ class MailchimpService:
                     return None
         
         return None
+    
+mailchimp_service_instance = MailchimpService()
+def get_mailchimp_service():
+    return mailchimp_service_instance

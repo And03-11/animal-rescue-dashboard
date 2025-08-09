@@ -46,3 +46,7 @@ class BrevoService:
         except requests.exceptions.RequestException as e:
             print(f"Error de red al contactar Brevo: {e}")
             return None
+        
+brevo_service_instance = BrevoService()
+def get_brevo_service():
+    return brevo_service_instance

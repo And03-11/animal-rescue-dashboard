@@ -551,6 +551,11 @@ class AirtableService:
                 status_code=500,
                 detail="Ocurrió un error al calcular las estadísticas de la fuente."
             )
+        
+airtable_service_instance = AirtableService()
+
+def get_airtable_service():
+    return airtable_service_instance
 
     
 

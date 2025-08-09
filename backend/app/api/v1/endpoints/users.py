@@ -1,45 +1,70 @@
-# --- File: backend/app/api/v1/endpoints/users.py ---
-from fastapi import APIRouter, Depends, HTTPException
+# --- File: backend/app/api/v1/endpoints/users.py (Refactorizado) ---
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, EmailStr # EmailStr ya no es necesario para el usuario
+from pydantic import BaseModel
+from typing import List
+
 from backend.app.db.database import get_db
 from backend.app.db.models import User
 from backend.app.core.security import get_password_hash, get_current_user
 
 router = APIRouter()
 
-# --- Schemas ---
-class UserBase(BaseModel):
-    # ✅ CAMBIO: de 'email' a 'username'
-    username: str
-    is_admin: bool = False
+# --- Schemas (Modelos Pydantic) ---
 
-class UserCreate(UserBase):
+# Schema para la respuesta pública, NUNCA incluye la contraseña.
+class UserPublic(BaseModel):
+    id: int
+    username: str
+    is_admin: bool
+
+    class Config:
+        orm_mode = True
+
+class UserCreate(BaseModel):
+    username: str
     password: str
+    is_admin: bool = False
 
 class UserUpdate(BaseModel):
     username: str | None = None
     password: str | None = None
     is_admin: bool | None = None
 
-class UserInDB(UserBase):
-    id: int
-
-    class Config:
-        orm_mode = True
-
-# --- Endpoints ---
-@router.post("/users/register", status_code=201)
-def register_user(user: UserCreate, db: Session = Depends(get_db), current_username: str = Depends(get_current_user)):
-    # ✅ CAMBIO: Verificamos los permisos del usuario actual por su username
+# --- ✅ NUEVA DEPENDENCIA PARA LA AUTORIZACIÓN ---
+def get_current_admin_user(
+    db: Session = Depends(get_db),
+    current_username: str = Depends(get_current_user)
+) -> User:
+    """
+    Dependencia que verifica si el usuario actual es administrador.
+    Si no lo es, lanza una excepción 403.
+    Devuelve el objeto del usuario administrador.
+    """
     admin_user = db.query(User).filter(User.username == current_username).first()
     if not admin_user or not admin_user.is_admin:
-        raise HTTPException(status_code=403, detail="Not authorized to register users")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Operation not permitted. Requires admin privileges."
+        )
+    return admin_user
 
-    # ✅ CAMBIO: Verificamos si el nuevo usuario ya existe por username
+# --- Endpoints ---
+
+@router.post("/users/register", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
+def register_user(
+    user: UserCreate,
+    db: Session = Depends(get_db),
+    # ✅ Se usa la nueva dependencia para simplificar el código y asegurar que solo admins pueden registrar.
+    admin_user: User = Depends(get_current_admin_user)
+):
+    """Crea un nuevo usuario. Solo accesible por administradores."""
     db_user = db.query(User).filter(User.username == user.username).first()
     if db_user:
-        raise HTTPException(status_code=400, detail="Username already registered")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username already registered"
+        )
 
     new_user = User(
         username=user.username,
@@ -49,54 +74,66 @@ def register_user(user: UserCreate, db: Session = Depends(get_db), current_usern
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
-    return {"message": "User registered successfully"}
+    # ✅ Se devuelve el objeto del usuario creado (sin contraseña).
+    return new_user
 
-@router.get("/users/list", response_model=list[UserInDB])
-def list_users(db: Session = Depends(get_db), current_username: str = Depends(get_current_user)):
-    # ✅ CAMBIO: Verificamos los permisos
-    current_user = db.query(User).filter(User.username == current_username).first()
-    if not current_user or not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
+@router.get("/users/list", response_model=List[UserPublic])
+def list_users(
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_current_admin_user)
+):
+    """Lista todos los usuarios. Solo accesible por administradores."""
     return db.query(User).all()
 
-# El resto de endpoints (PUT, DELETE) ya usan el user_id, por lo que solo necesitan
-# el cambio de autorización y el modelo de respuesta si aplica. Aquí te los dejo ya ajustados.
+@router.put("/users/{user_id}", response_model=UserPublic)
+def update_user(
+    user_id: int,
+    update_data: UserUpdate,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_current_admin_user)
+):
+    """Actualiza un usuario. Solo accesible por administradores."""
+    user_to_update = db.query(User).filter(User.id == user_id).first()
+    if not user_to_update:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-@router.put("/users/{user_id}", response_model=UserInDB)
-def update_user(user_id: int, update: UserUpdate, db: Session = Depends(get_db), current_username: str = Depends(get_current_user)):
-    admin_user = db.query(User).filter(User.username == current_username).first()
-    if not admin_user or not admin_user.is_admin:
-        raise HTTPException(status_code=403, detail="Access denied")
+    # ✅ Se añade validación de username duplicado al actualizar.
+    if update_data.username and update_data.username != user_to_update.username:
+        existing_user = db.query(User).filter(User.username == update_data.username).first()
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Username already in use."
+            )
+        user_to_update.username = update_data.username
 
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    if update.username:
-        user.username = update.username
-    if update.password:
-        user.hashed_password = get_password_hash(update.password)
-    if update.is_admin is not None:
-        user.is_admin = update.is_admin
+    if update_data.password:
+        user_to_update.hashed_password = get_password_hash(update_data.password)
+    
+    if update_data.is_admin is not None:
+        user_to_update.is_admin = update_data.is_admin
     
     db.commit()
-    db.refresh(user)
-    return user
+    db.refresh(user_to_update)
+    return user_to_update
 
-@router.delete("/users/{user_id}", status_code=204)
-def delete_user(user_id: int, db: Session = Depends(get_db), current_username: str = Depends(get_current_user)):
-    admin_user = db.query(User).filter(User.username == current_username).first()
-    if not admin_user or not admin_user.is_admin:
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(get_current_admin_user)
+):
+    """Elimina un usuario. Solo accesible por administradores."""
+    user_to_delete = db.query(User).filter(User.id == user_id).first()
+    if not user_to_delete:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
         
-    if user.username == admin_user.username:
-        raise HTTPException(status_code=400, detail="Cannot delete your own user account")
+    if user_to_delete.id == admin_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete your own user account"
+        )
 
-    db.delete(user)
+    db.delete(user_to_delete)
     db.commit()
-    return
+    return None # Para el status 204, no se devuelve contenido.

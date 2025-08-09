@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from backend.app.core.security import get_current_user
+from backend.app.services.airtable_service import AirtableService, get_airtable_service
 
-from backend.app.services.airtable_service import AirtableService
 
 router = APIRouter()
 
@@ -21,7 +21,7 @@ class DonationDetail(BaseModel):
 
 @router.get("/sources", response_model=List[str])
 def get_campaign_sources(
-    airtable_service: AirtableService = Depends(AirtableService),
+    airtable_service: AirtableService = Depends(get_airtable_service),
     current_user: str = Depends(get_current_user)
 ):
     """
@@ -32,7 +32,7 @@ def get_campaign_sources(
 @router.get("", response_model=List[Dict[str, Any]])
 def get_campaigns_by_source(
     source: str,
-    airtable_service: AirtableService = Depends(AirtableService),
+    airtable_service: AirtableService = Depends(get_airtable_service),
     current_user: str = Depends(get_current_user)
 ):
     """
@@ -46,7 +46,7 @@ def get_source_stats(
     source_name: str,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    airtable_service: AirtableService = Depends(AirtableService),
+    airtable_service: AirtableService = Depends(get_airtable_service),
     current_user: str = Depends(get_current_user)
 ):
     """
@@ -64,7 +64,7 @@ def get_campaign_stats(
     form_title_id: Optional[List[str]] = Query(None),
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    airtable_service: AirtableService = Depends(AirtableService),
+    airtable_service: AirtableService = Depends(get_airtable_service),
     current_user: str = Depends(get_current_user)
 ):
     """
@@ -92,7 +92,7 @@ def get_campaign_stats(
 )
 def get_donations_for_form_title(
     form_title_id: str,
-    airtable_service: AirtableService = Depends(AirtableService),
+    airtable_service: AirtableService = Depends(get_airtable_service),
     current_user: str = Depends(get_current_user)
 ):
     """

@@ -1,6 +1,6 @@
 # --- Archivo: backend/app/api/v1/endpoints/form_titles.py (Contenido completo y corregido) ---
 from fastapi import APIRouter, Depends, Query
-from backend.app.services.airtable_service import AirtableService
+from backend.app.services.airtable_service import AirtableService, get_airtable_service
 from typing import List, Dict, Optional
 from backend.app.core.security import get_current_user
 
@@ -9,7 +9,7 @@ router = APIRouter()
 @router.get("", response_model=List[Dict])
 def get_form_titles(
     campaign_id: Optional[str] = None,
-    airtable_service: AirtableService = Depends(AirtableService),
+    airtable_service: AirtableService = Depends(get_airtable_service),
     current_user: str = Depends(get_current_user)
 ) -> List[Dict]:
     """
@@ -24,7 +24,7 @@ def get_donations_by_form_title(
     form_title_id: List[str] = Query(..., alias="form_title_id"),
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    airtable_service: AirtableService = Depends(AirtableService),
+    airtable_service: AirtableService = Depends(get_airtable_service),
     current_user: str = Depends(get_current_user)
 ) -> Dict:
     """

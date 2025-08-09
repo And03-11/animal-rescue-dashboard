@@ -2,7 +2,7 @@
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, status
 from backend.app.schemas import ContactCreate, Contact
-from backend.app.services.airtable_service import AirtableService, DONORS_FIELDS
+from backend.app.services.airtable_service import AirtableService, get_airtable_service, DONORS_FIELDS
 from fastapi import Depends
 from backend.app.core.security import get_current_user
 
@@ -12,12 +12,12 @@ router = APIRouter()
 @router.post("", response_model=Contact, status_code=status.HTTP_201_CREATED)
 def create_contact(
     contact: ContactCreate,
+    airtable: AirtableService = Depends(get_airtable_service),
     current_user: str = Depends(get_current_user)
     ):
     """
     Crea un nuevo contacto en Airtable (tabla Donors).
     """
-    airtable = AirtableService()
     try:
         record = airtable.create_record(
             table_name="Contacts",
@@ -35,11 +35,14 @@ def create_contact(
 
 # --- Endpoint GET (Sin cambios) ---
 @router.get("", response_model=List[Contact])
-def list_contacts(current_user: str = Depends(get_current_user)):
+def list_contacts(
+    # ✅ 2. Inyecta el servicio como dependencia
+    airtable: AirtableService = Depends(get_airtable_service),
+    current_user: str = Depends(get_current_user)
+):
     """
     Obtiene la lista de contactos (donors) desde Airtable y su email.
     """
-    airtable = AirtableService()
     try:
         records = airtable.donors_table.all()
     except Exception as e:
@@ -68,7 +71,13 @@ def list_contacts(current_user: str = Depends(get_current_user)):
 
 # ✅ CORRECCIÓN COMPLETA: Este es el nuevo y correcto endpoint para autocompletado.
 @router.get("/autocomplete", response_model=List[str])
-def autocomplete_contact_email(q: str = "", airtable: AirtableService = Depends(AirtableService)):
+def autocomplete_contact_email(
+    q: str = "", 
+    # ✅ 2. Usa el 'getter' correcto para la inyección de dependencias
+    airtable: AirtableService = Depends(get_airtable_service),
+    # ✅ 3. (IMPORTANTE) Se añade la protección de autenticación que faltaba
+    current_user: str = Depends(get_current_user)
+):
     """
     Provee sugerencias de email para autocompletar, consultando Airtable.
     """
