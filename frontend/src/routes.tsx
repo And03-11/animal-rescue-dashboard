@@ -49,51 +49,52 @@ export function AppRoutes() {
   return (
     <Suspense fallback={<SpinnerFallback />}>
       <Routes>
+        {/* --- Ruta Pública --- */}
         <Route path="/login" element={<LoginForm />} />
+
+        {/* --- Rutas Protegidas con Layout --- */}
+        {/* ✅ El Layout ya protege a TODAS las rutas hijas que se definen dentro */}
         <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
-          <Route
-            index
-            element={
-              <PrivateRoute>
-                <PageTransition><DashboardHomePage /></PageTransition>
-              </PrivateRoute>
-            }
+          
+          {/* ✅ La ruta "index" es la página por defecto del layout */}
+          <Route 
+            index 
+            element={<PageTransition><DashboardHomePage /></PageTransition>} 
           />
-          <Route path="dashboard" element={
-            <PrivateRoute>
-              <PageTransition><DashboardHomePage /></PageTransition>
-            </PrivateRoute>
-          } />
-          <Route path="analytics" element={
-            <PrivateRoute>
-              <PageTransition><CampaignAnalyticsPage /></PageTransition>
-            </PrivateRoute>
-          } />
-          <Route path="contact-search" element={
-            <PrivateRoute>
-              <PageTransition><ContactSearchPage /></PageTransition>
-            </PrivateRoute>
-          } />
-          <Route path="email-sender" element={
-            <PrivateRoute>
-              <PageTransition><EmailSenderPage /></PageTransition>
-            </PrivateRoute>
-          } />
-          <Route path="campaign/:campaignId" element={
-            <PrivateRoute>
-              <PageTransition><CampaignDetailPage /></PageTransition>
-            </PrivateRoute>
-          } />
-          <Route path="admin/users" element={
-            <PrivateAdminRoute>
-              <PageTransition><UserManagementPage /></PageTransition>
-            </PrivateAdminRoute>
-          } />
-          <Route path="*" element={
-            <PrivateRoute>
-              <PageTransition><NotFoundPage /></PageTransition>
-            </PrivateRoute>
-          } />
+          
+          {/* ✅ Ya no se necesita el <PrivateRoute> en las rutas hijas */}
+          <Route 
+            path="analytics" 
+            element={<PageTransition><CampaignAnalyticsPage /></PageTransition>} 
+          />
+          <Route 
+            path="contact-search" 
+            element={<PageTransition><ContactSearchPage /></PageTransition>} 
+          />
+          <Route 
+            path="email-sender" 
+            element={<PageTransition><EmailSenderPage /></PageTransition>} 
+          />
+          <Route 
+            path="campaign/:campaignId" 
+            element={<PageTransition><CampaignDetailPage /></PageTransition>} 
+          />
+
+          {/* ✅ Ruta de admin, protegida por su propio wrapper específico */}
+          <Route 
+            path="admin/users" 
+            element={
+              <PrivateAdminRoute>
+                <PageTransition><UserManagementPage /></PageTransition>
+              </PrivateAdminRoute>
+            } 
+          />
+
+          {/* ✅ El 404 también queda protegido por el Layout */}
+          <Route 
+            path="*" 
+            element={<PageTransition><NotFoundPage /></PageTransition>} 
+          />
         </Route>
       </Routes>
     </Suspense>

@@ -323,19 +323,14 @@ class AirtableService:
 
         # En backend/app/services/airtable_service.py
 
-    # En backend/app/services/airtable_service.py, reemplaza el método existente
-
     # En backend/app/services/airtable_service.py, reemplaza ÚNICAMENTE esta función:
 
-    # En backend/app/services/airtable_service.py, reemplaza ÚNICAMENTE esta función:
-
-    def get_campaign_stats(self, campaign_id: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict[str, Any]:
+    def get_campaign_stats(self, campaign_id: str, start_date: Optional[str] = None, end_date: Optional[str] = None, form_title_ids: Optional[List[str]] = None) -> Dict[str, Any]:
         """
-        Estadísticas de campaña, ordenadas por fecha de creación de cada Form Title
-        (más nuevos arriba).
+        Estadísticas de campaña, opcionalmente filtradas por form_title_ids.
         """
         try:
-            # — Paso 1: traer todos los form-titles con enlaces y createdTime —
+            # --- Paso 1: traer todos los form-titles con enlaces y createdTime (sin cambios) ---
             title_records = self.form_titles_table.all(
                 fields=[
                     FORM_TITLES_FIELDS["name"],
@@ -344,7 +339,7 @@ class AirtableService:
                 ]
             )
 
-            # — Paso 2: filtrar solo los de esta campaña y guardar createdTime —
+            # --- Paso 2: filtrar solo los de esta campaña y guardar createdTime (sin cambios) ---
             form_titles = []
             for rec in title_records:
                 f = rec.get("fields", {})
@@ -353,8 +348,14 @@ class AirtableService:
                         "id": rec["id"],
                         "name": f.get(FORM_TITLES_FIELDS["name"], ""),
                         "donation_ids": f.get(FORM_TITLES_FIELDS["donations_link"], []),
-                        "createdTime": rec.get("createdTime")  # ISO string
+                        "createdTime": rec.get("createdTime")
                     })
+            
+            # ✅ PASO 2.5: AÑADIR NUEVO BLOQUE DE FILTRADO
+            # Si el frontend nos envió una lista de IDs de títulos específicos,
+            # filtramos nuestra lista `form_titles` para quedarnos solo con esos.
+            if form_title_ids:
+                form_titles = [ft for ft in form_titles if ft["id"] in form_title_ids]
 
             if not form_titles:
                 return {
@@ -363,8 +364,9 @@ class AirtableService:
                     "stats_by_form_title":   []
                 }
 
-            # — Paso 3: unificar donation IDs y traer donaciones —
-            # backend/app/services/airtable_service.py
+            # --- El resto de la función (Pasos 3 a 8) no necesita cambios ---
+            # La lógica siguiente ya es dinámica y funcionará perfectamente
+            # con la lista `form_titles` (ya sea completa o filtrada).
 
             # — Paso 3: unificar donation IDs y traer donaciones con filtro de fecha —
             all_donation_ids = {did for ft in form_titles for did in ft["donation_ids"]}
@@ -373,7 +375,6 @@ class AirtableService:
                     "campaign_total_amount": 0, "campaign_total_count": 0, "stats_by_form_title": []
                 }
 
-            # Construimos la fórmula de la consulta dinámicamente
             formula_parts = ["OR(" + ",".join(f"RECORD_ID()='{did}'" for did in all_donation_ids) + ")"]
             date_field = f"{{{DONATIONS_FIELDS['date']}}}"
 
@@ -384,46 +385,19 @@ class AirtableService:
                 end_dt_obj = datetime.fromisoformat(end_date).date()
                 end_dt_local = datetime.combine(end_dt_obj, time.max, tzinfo=COSTA_RICA_TZ)
                 formula_parts.append(f"IS_BEFORE({date_field}, DATETIME_PARSE('{end_dt_local.isoformat()}'))")
-
-            # Unimos las partes: si hay fechas, usa AND, si no, solo la fórmula de IDs
+            
             final_formula = f"AND({', '.join(formula_parts)})" if len(formula_parts) > 1 else formula_parts[0]
-
+            
             donation_records = self.donations_table.all(
                 formula=final_formula,
                 fields=[DONATIONS_FIELDS["amount"], DONATIONS_FIELDS["donor_link"]]
             )
-
-            # — Paso 4: traer donantes en bloque —
-            donor_ids = {
-                rec.get("fields", {}).get(DONATIONS_FIELDS["donor_link"], [None])[0]
-                for rec in donation_records
-            } - {None}
-            donor_records = []
-            if donor_ids:
-                formula_donors = "OR(" + ",".join(f"RECORD_ID()='{did}'" for did in donor_ids) + ")"
-                donor_records = self.donors_table.all(
-                    formula=formula_donors,
-                    fields=[DONORS_FIELDS["name"], DONORS_FIELDS["last_name"], DONORS_FIELDS["emails_link"]]
-                )
-
-            # — Paso 5: traer emails en bloque —
-            email_ids = {
-                eid for dr in donor_records for eid in dr.get("fields", {}).get(DONORS_FIELDS["emails_link"], [])
-            }
-            email_records = []
-            if email_ids:
-                formula_emails = "OR(" + ",".join(f"RECORD_ID()='{eid}'" for eid in email_ids) + ")"
-                email_records = self.emails_table.all(
-                    formula=formula_emails,
-                    fields=[EMAILS_FIELDS["email"]]
-                )
-
-            # — Paso 6: construir map de montos por donation ID —
+            
             donations_map = {
                 rec["id"]: rec["fields"].get(DONATIONS_FIELDS["amount"], 0)
                 for rec in donation_records
             }
-
+            
             # — Paso 7: armar lista de stats incluyendo form_title_id —
             stats = []
             grand_total = 0
@@ -431,6 +405,7 @@ class AirtableService:
             for ft in form_titles:
                 tot = sum(donations_map.get(did, 0) for did in ft["donation_ids"])
                 cnt = sum(1 for did in ft["donation_ids"] if did in donations_map)
+                # Solo añadimos títulos que realmente tuvieron donaciones en el periodo filtrado
                 if cnt > 0:
                     stats.append({
                         "form_title_id":   ft["id"],
@@ -441,13 +416,13 @@ class AirtableService:
                 grand_total += tot
                 grand_count += cnt
 
-            # — Paso 8: ordenar POR createdTime (más recientes primero) —
+            # — Paso 8: ordenar POR createdTime (sin cambios) —
             ft_map = {ft["id"]: ft for ft in form_titles}
             stats.sort(
                 key=lambda x: ft_map[x["form_title_id"]]["createdTime"],
-                reverse=False
+                reverse=True # Cambiado a True para mostrar más nuevos primero
             )
-
+            
             return {
                 "campaign_total_amount": grand_total,
                 "campaign_total_count":  grand_count,
@@ -455,9 +430,10 @@ class AirtableService:
             }
 
         except Exception as e:
+            traceback.print_exc() # Imprime el error completo en la consola del servidor
             raise HTTPException(
                 status_code=500,
-                detail="Ocurrió un error al calcular las estadísticas de la campaña."
+                detail=f"Ocurrió un error al calcular las estadísticas de la campaña: {e}"
             )
         
 

@@ -1,6 +1,6 @@
 # --- Archivo: backend/app/api/v1/endpoints/campaigns.py (Corregido) ---
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from backend.app.core.security import get_current_user
@@ -58,15 +58,27 @@ def get_source_stats(
 @router.get("/{campaign_id}/stats", response_model=Dict[str, Any])
 def get_campaign_stats(
     campaign_id: str,
+    # ✅ PASO 1: AÑADE EL NUEVO PARÁMETRO AQUÍ
+    # Usamos Query(None) para indicar que es un parámetro de consulta opcional
+    # que puede venir varias veces (y FastAPI lo agrupará en una lista).
+    form_title_id: Optional[List[str]] = Query(None),
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     airtable_service: AirtableService = Depends(AirtableService),
     current_user: str = Depends(get_current_user)
 ):
     """
     Obtiene estadísticas detalladas para una campaña específica,
-    incluyendo el total de donaciones y un desglose por título de formulario.
+    opcionalmente filtradas por títulos de formulario y fechas.
     """
     try:
-        return airtable_service.get_campaign_stats(campaign_id)
+        # ✅ PASO 2: PASA EL NUEVO PARÁMETRO A LA FUNCIÓN DEL SERVICIO
+        return airtable_service.get_campaign_stats(
+            campaign_id, 
+            start_date, 
+            end_date, 
+            form_title_id
+        )
     except HTTPException as http_exc:
         raise http_exc
     except Exception as e:
