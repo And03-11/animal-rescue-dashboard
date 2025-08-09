@@ -5,6 +5,7 @@ from backend.app.schemas import ContactCreate, Contact
 from backend.app.services.airtable_service import AirtableService, get_airtable_service, DONORS_FIELDS
 from fastapi import Depends
 from backend.app.core.security import get_current_user
+from fastapi_cache.decorator import cache
 
 router = APIRouter()
 
@@ -35,6 +36,7 @@ def create_contact(
 
 # --- Endpoint GET (Sin cambios) ---
 @router.get("", response_model=List[Contact])
+@cache(expire=120)
 def list_contacts(
     # ✅ 2. Inyecta el servicio como dependencia
     airtable: AirtableService = Depends(get_airtable_service),

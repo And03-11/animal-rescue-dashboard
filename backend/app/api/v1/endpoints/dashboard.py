@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+from fastapi_cache.decorator import cache
 from backend.app.services.airtable_service import AirtableService, get_airtable_service
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -33,6 +34,8 @@ def process_donations_for_trend(donations: List[Dict]) -> List[Dict[str, Any]]:
     ]
 
 @router.get("/metrics")
+# ✅ Un caché de 3 minutos es un buen balance.
+@cache(expire=180)
 def get_dashboard_metrics(
     start_date: Optional[str] = None, 
     end_date: Optional[str] = None,
@@ -111,6 +114,8 @@ def get_dashboard_metrics(
 
 
 @router.get("/top-donors")
+# 15 mins de caché es perfecto.
+@cache(expire=900)
 def get_top_donors(
     limit: int = 10,
     airtable_service: AirtableService = Depends(get_airtable_service),

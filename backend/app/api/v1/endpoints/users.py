@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List
+from fastapi_cache.decorator import cache
 
 from backend.app.db.database import get_db
 from backend.app.db.models import User
@@ -78,6 +79,8 @@ def register_user(
     return new_user
 
 @router.get("/users/list", response_model=List[UserPublic])
+# ✅ 2. AÑADE CACHÉ: La lista de usuarios cambia muy raramente. 10 minutos es un buen caché.
+@cache(expire=600)
 def list_users(
     db: Session = Depends(get_db),
     admin_user: User = Depends(get_current_admin_user)

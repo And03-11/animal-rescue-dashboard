@@ -1,5 +1,6 @@
 # --- Archivo: backend/app/api/v1/endpoints/form_titles.py (Contenido completo y corregido) ---
 from fastapi import APIRouter, Depends, Query
+from fastapi_cache.decorator import cache
 from backend.app.services.airtable_service import AirtableService, get_airtable_service
 from typing import List, Dict, Optional
 from backend.app.core.security import get_current_user
@@ -7,6 +8,8 @@ from backend.app.core.security import get_current_user
 router = APIRouter()
 
 @router.get("", response_model=List[Dict])
+# Un caché de 10 minutos es seguro y muy eficiente.
+@cache(expire=600)
 def get_form_titles(
     campaign_id: Optional[str] = None,
     airtable_service: AirtableService = Depends(get_airtable_service),

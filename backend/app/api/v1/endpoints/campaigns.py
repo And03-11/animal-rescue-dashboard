@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from backend.app.core.security import get_current_user
 from backend.app.services.airtable_service import AirtableService, get_airtable_service
+from fastapi_cache.decorator import cache
 
 
 router = APIRouter()
@@ -20,6 +21,8 @@ class DonationDetail(BaseModel):
 # --- Endpoints existentes (sin cambios) ---
 
 @router.get("/sources", response_model=List[str])
+#15 minutos de caché es ideal.
+@cache(expire=900)
 def get_campaign_sources(
     airtable_service: AirtableService = Depends(get_airtable_service),
     current_user: str = Depends(get_current_user)
@@ -30,6 +33,8 @@ def get_campaign_sources(
     return airtable_service.get_unique_campaign_sources()
 
 @router.get("", response_model=List[Dict[str, Any]])
+#10 mins de caché.
+@cache(expire=600)
 def get_campaigns_by_source(
     source: str,
     airtable_service: AirtableService = Depends(get_airtable_service),
@@ -42,6 +47,7 @@ def get_campaigns_by_source(
 
 
 @router.get("/source/{source_name}/stats")
+@cache(expire=120)
 def get_source_stats(
     source_name: str,
     start_date: Optional[str] = None,
