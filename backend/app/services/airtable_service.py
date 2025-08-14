@@ -552,6 +552,44 @@ class AirtableService:
                 detail="Ocurrió un error al calcular las estadísticas de la fuente."
             )
         
+
+    def get_campaign_donations(
+        self,
+        campaign_id: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> List[Dict]:
+        """Reúne los form_title_ids de la campaña y reutiliza get_donations_for_form_title.
+        Por qué: evita duplicar lógica de enriquecimiento (donorName, donorEmail)."""
+        try:
+            # Traer títulos con enlaces mínimos
+            title_records = self.form_titles_table.all(
+                fields=[
+                    FORM_TITLES_FIELDS["campaign_link"],
+                    FORM_TITLES_FIELDS["donations_link"],
+                ]
+            )
+
+            form_title_ids: List[str] = []
+            for rec in title_records:
+                fields = rec.get("fields", {})
+                if campaign_id in fields.get(FORM_TITLES_FIELDS["campaign_link"], []):
+                    form_title_ids.append(rec["id"])
+
+            if not form_title_ids:
+                return []
+
+            # Reusar la lógica existente (maneja fechas + enriquecimiento con donor)
+            return self.get_donations_for_form_title(
+                form_title_ids=form_title_ids,
+                start_date=start_date,
+                end_date=end_date,
+            )
+        except Exception as e:
+            # Por qué: fallback silencioso para no tumbar la API en errores de terceros
+            print(f"Error in get_campaign_donations: {e}")
+            return []
+        
 airtable_service_instance = AirtableService()
 
 def get_airtable_service():

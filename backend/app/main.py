@@ -46,6 +46,7 @@ origins = [
     "http://localhost:3000",
     "http://localhost:5173",
     "https://a2a4b1a71477.ngrok-free.app",
+    "https://mongrel-valued-gar.ngrok-free.app",
     #"https://tu-dominio.com"
 ]
 
