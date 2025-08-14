@@ -1,22 +1,44 @@
-// --- Archivo: src/api/axiosConfig.ts ---
+// =====================================================================
+// File: src/api/axiosConfig.ts  (REEMPLAZA COMPLETO)
+// =====================================================================
 import axios from "axios";
 
 const apiClient = axios.create({
   baseURL: "/api/v1",
 });
 
-// ➕ Añadir token automáticamente
 apiClient.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem("token");
     config.headers = config.headers || {};
 
     if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+      (config.headers as any).Authorization = `Bearer ${token}`;
     }
 
-    if (config.method === "post" && !config.headers["Content-Type"]) {
-      config.headers["Content-Type"] = "application/x-www-form-urlencoded";
+    // --- Content-Type correcto según el cuerpo ---
+    if (!config.headers["Content-Type"]) {
+      const method = (config.method || "").toLowerCase();
+
+      if (method === "post" || method === "put" || method === "patch") {
+        const isFormData =
+          typeof FormData !== "undefined" && config.data instanceof FormData;
+        const isUrlSearchParams =
+          typeof URLSearchParams !== "undefined" &&
+          config.data instanceof URLSearchParams;
+
+        if (isUrlSearchParams) {
+          // Solo urlencoded si el body es URLSearchParams
+          (config.headers as any)["Content-Type"] =
+            "application/x-www-form-urlencoded";
+        } else if (isFormData) {
+          // Dejar que el navegador ponga el boundary automáticamente
+          // No seteamos Content-Type aquí.
+        } else {
+          // JSON por defecto
+          (config.headers as any)["Content-Type"] = "application/json";
+        }
+      }
     }
 
     return config;
@@ -24,7 +46,7 @@ apiClient.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// 🚨 Manejar errores 401 globalmente
+// 401 global
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {

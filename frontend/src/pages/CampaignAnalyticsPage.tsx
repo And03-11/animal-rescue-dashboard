@@ -160,14 +160,13 @@ export const CampaignAnalyticsPage: React.FC = () => {
                         end_date: endDate ? endDate.format('YYYY-MM-DD') : undefined,
                         };
 
-                        // 🔧 Forzamos JSON puro (evita urlencoded)
                         reportPromise = apiClient.post<CustomReportData>(
                         '/form-titles/donations',
-                        JSON.stringify(payload),
+                        JSON.stringify(payload),               // asegura JSON "plano"
                         {
                             signal: controller.signal,
-                            headers: { 'Content-Type': 'application/json' },
-                            transformRequest: [(data) => data], // evita transformaciones globales a urlencoded
+                            headers: { 'Content-Type': 'application/json' }, // fuerza JSON en esta request
+                            transformRequest: [(data) => data],  // evita transformaciones globales
                         }
                         );
                 } else {
