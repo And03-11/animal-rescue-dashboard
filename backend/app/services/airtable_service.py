@@ -326,115 +326,107 @@ class AirtableService:
     # En backend/app/services/airtable_service.py, reemplaza ÚNICAMENTE esta función:
 
     def get_campaign_stats(self, campaign_id: str, start_date: Optional[str] = None, end_date: Optional[str] = None, form_title_ids: Optional[List[str]] = None) -> Dict[str, Any]:
-        """
-        Estadísticas de campaña, opcionalmente filtradas por form_title_ids.
-        """
-        try:
-            # --- Paso 1: traer todos los form-titles con enlaces y createdTime (sin cambios) ---
-            title_records = self.form_titles_table.all(
-                fields=[
-                    FORM_TITLES_FIELDS["name"],
-                    FORM_TITLES_FIELDS["campaign_link"],
-                    FORM_TITLES_FIELDS["donations_link"],
+            """
+            Estadísticas de campaña, opcionalmente filtradas por form_title_ids.
+            ✅ NUEVA VERSIÓN: Ahora incluye la fecha de la primera donación para cada Form Title.
+            """
+            try:
+                # --- Paso 1: Obtener todos los form-titles de la campaña (sin cambios) ---
+                title_records = self.form_titles_table.all(
+                    fields=[
+                        FORM_TITLES_FIELDS["name"],
+                        FORM_TITLES_FIELDS["campaign_link"],
+                        FORM_TITLES_FIELDS["donations_link"],
+                    ]
+                )
+                form_titles = [
+                    rec for rec in title_records 
+                    if campaign_id in rec.get("fields", {}).get(FORM_TITLES_FIELDS["campaign_link"], [])
                 ]
-            )
 
-            # --- Paso 2: filtrar solo los de esta campaña y guardar createdTime (sin cambios) ---
-            form_titles = []
-            for rec in title_records:
-                f = rec.get("fields", {})
-                if campaign_id in f.get(FORM_TITLES_FIELDS["campaign_link"], []):
-                    form_titles.append({
-                        "id": rec["id"],
-                        "name": f.get(FORM_TITLES_FIELDS["name"], ""),
-                        "donation_ids": f.get(FORM_TITLES_FIELDS["donations_link"], []),
-                        "createdTime": rec.get("createdTime")
-                    })
-            
-            # ✅ PASO 2.5: AÑADIR NUEVO BLOQUE DE FILTRADO
-            # Si el frontend nos envió una lista de IDs de títulos específicos,
-            # filtramos nuestra lista `form_titles` para quedarnos solo con esos.
-            if form_title_ids:
-                form_titles = [ft for ft in form_titles if ft["id"] in form_title_ids]
+                if form_title_ids:
+                    form_titles = [ft for ft in form_titles if ft["id"] in form_title_ids]
 
-            if not form_titles:
-                return {
-                    "campaign_total_amount": 0,
-                    "campaign_total_count":  0,
-                    "stats_by_form_title":   []
+                if not form_titles:
+                    return {"campaign_total_amount": 0, "campaign_total_count": 0, "stats_by_form_title": []}
+
+                # --- Paso 2: Obtener TODAS las donaciones y agruparlas (lógica mejorada) ---
+                all_donation_ids = {
+                    did 
+                    for ft in form_titles 
+                    for did in ft.get("fields", {}).get(FORM_TITLES_FIELDS["donations_link"], [])
+                }
+                if not all_donation_ids:
+                    return {"campaign_total_amount": 0, "campaign_total_count": 0, "stats_by_form_title": []}
+
+                # Traemos las donaciones con su fecha y monto
+                id_formulas = [f"RECORD_ID()='{did}'" for did in all_donation_ids]
+                donation_records = self.donations_table.all(
+                    formula=f"OR({','.join(id_formulas)})",
+                    fields=[DONATIONS_FIELDS["amount"], DONATIONS_FIELDS["date"]]
+                )
+                
+                # Mapeamos donaciones por su ID para acceso rápido
+                donations_map = {
+                    rec["id"]: rec["fields"] for rec in donation_records
                 }
 
-            # --- El resto de la función (Pasos 3 a 8) no necesita cambios ---
-            # La lógica siguiente ya es dinámica y funcionará perfectamente
-            # con la lista `form_titles` (ya sea completa o filtrada).
+                # --- Paso 3: Calcular estadísticas y encontrar la fecha de la primera donación ---
+                stats = []
+                grand_total = 0
+                grand_count = 0
 
-            # — Paso 3: unificar donation IDs y traer donaciones con filtro de fecha —
-            all_donation_ids = {did for ft in form_titles for did in ft["donation_ids"]}
-            if not all_donation_ids:
-                return {
-                    "campaign_total_amount": 0, "campaign_total_count": 0, "stats_by_form_title": []
-                }
+                for ft in form_titles:
+                    donation_ids_for_title = ft.get("fields", {}).get(FORM_TITLES_FIELDS["donations_link"], [])
+                    
+                    # Filtramos las donaciones relevantes para este form title
+                    relevant_donations = [donations_map[did] for did in donation_ids_for_title if did in donations_map and donations_map[did].get(DONATIONS_FIELDS["date"])]
 
-            formula_parts = ["OR(" + ",".join(f"RECORD_ID()='{did}'" for did in all_donation_ids) + ")"]
-            date_field = f"{{{DONATIONS_FIELDS['date']}}}"
+                    # Aplicamos el filtro de fecha del usuario (start_date/end_date)
+                    donations_in_range = []
+                    if relevant_donations:
+                        for d in relevant_donations:
+                            donation_dt = datetime.fromisoformat(d[DONATIONS_FIELDS["date"]].replace('Z', '+00:00')).astimezone(COSTA_RICA_TZ).date()
+                            s_date = datetime.fromisoformat(start_date).date() if start_date else None
+                            e_date = datetime.fromisoformat(end_date).date() if end_date else None
+                            
+                            if (not s_date or donation_dt >= s_date) and (not e_date or donation_dt <= e_date):
+                                donations_in_range.append(d)
 
-            if start_date:
-                start_dt_local = datetime.combine(datetime.fromisoformat(start_date).date(), time.min, tzinfo=COSTA_RICA_TZ)
-                formula_parts.append(f"IS_AFTER({date_field}, DATETIME_PARSE('{start_dt_local.isoformat()}'))")
-            if end_date:
-                end_dt_obj = datetime.fromisoformat(end_date).date()
-                end_dt_local = datetime.combine(end_dt_obj, time.max, tzinfo=COSTA_RICA_TZ)
-                formula_parts.append(f"IS_BEFORE({date_field}, DATETIME_PARSE('{end_dt_local.isoformat()}'))")
-            
-            final_formula = f"AND({', '.join(formula_parts)})" if len(formula_parts) > 1 else formula_parts[0]
-            
-            donation_records = self.donations_table.all(
-                formula=final_formula,
-                fields=[DONATIONS_FIELDS["amount"], DONATIONS_FIELDS["donor_link"]]
-            )
-            
-            donations_map = {
-                rec["id"]: rec["fields"].get(DONATIONS_FIELDS["amount"], 0)
-                for rec in donation_records
-            }
-            
-            # — Paso 7: armar lista de stats incluyendo form_title_id —
-            stats = []
-            grand_total = 0
-            grand_count = 0
-            for ft in form_titles:
-                tot = sum(donations_map.get(did, 0) for did in ft["donation_ids"])
-                cnt = sum(1 for did in ft["donation_ids"] if did in donations_map)
-                # Solo añadimos títulos que realmente tuvieron donaciones en el periodo filtrado
-                if cnt > 0:
+                    if not donations_in_range:
+                        continue
+
+                    total_amount = sum(d.get(DONATIONS_FIELDS["amount"], 0) for d in donations_in_range)
+                    donation_count = len(donations_in_range)
+                    
+                    # ✅ LÓGICA CLAVE: Encontrar la fecha más antigua entre las donaciones relevantes
+                    first_donation_date = min(d[DONATIONS_FIELDS["date"]] for d in relevant_donations)
+
                     stats.append({
                         "form_title_id":   ft["id"],
-                        "form_title_name": ft["name"],
-                        "total_amount":    tot,
-                        "donation_count":  cnt
+                        "form_title_name": ft.get("fields", {}).get(FORM_TITLES_FIELDS["name"], ""),
+                        "total_amount":    total_amount,
+                        "donation_count":  donation_count,
+                        "date_sent": first_donation_date # Usamos el nuevo campo
                     })
-                grand_total += tot
-                grand_count += cnt
+                    grand_total += total_amount
+                    grand_count += donation_count
 
-            # — Paso 8: ordenar POR createdTime (sin cambios) —
-            ft_map = {ft["id"]: ft for ft in form_titles}
-            stats.sort(
-                key=lambda x: ft_map[x["form_title_id"]]["createdTime"],
-                reverse=True # Cambiado a True para mostrar más nuevos primero
-            )
-            
-            return {
-                "campaign_total_amount": grand_total,
-                "campaign_total_count":  grand_count,
-                "stats_by_form_title":   stats
-            }
+                # Ordenar por la fecha de envío
+                stats.sort(key=lambda x: x["date_sent"], reverse=False)
+                
+                return {
+                    "campaign_total_amount": grand_total,
+                    "campaign_total_count":  grand_count,
+                    "stats_by_form_title":   stats
+                }
 
-        except Exception as e:
-            traceback.print_exc() # Imprime el error completo en la consola del servidor
-            raise HTTPException(
-                status_code=500,
-                detail=f"Ocurrió un error al calcular las estadísticas de la campaña: {e}"
-            )
+            except Exception as e:
+                traceback.print_exc()
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Ocurrió un error al calcular las estadísticas de la campaña: {e}"
+                )
         
 
 

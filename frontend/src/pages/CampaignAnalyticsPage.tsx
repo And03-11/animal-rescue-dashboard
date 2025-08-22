@@ -21,8 +21,15 @@ interface Donation { id: string; date: string; amount: number; donorName: string
 interface AnalyticsStats {
     total_amount: number;
     total_count: number;
-    breakdown: { id: string; name: string; total_amount: number; donation_count: number; }[];
+    breakdown: {
+        id: string;
+        name: string;
+        total_amount: number;
+        donation_count: number;
+        date_sent?: string; // Cambiar 'createdTime' por 'date_sent'
+    }[];
 }
+
 interface CustomReportData { donations: Donation[]; totalAmount: number; donationsCount: number; }
 interface AnalyticsData { stats: AnalyticsStats | null; report: CustomReportData | null; }
 
@@ -212,10 +219,11 @@ export const CampaignAnalyticsPage: React.FC = () => {
                     id: item.form_title_id ?? item.campaign_id,
                     name: item.form_title_name ?? item.campaign_name,
                     total_amount: item.total_amount,
-                    donation_count: item.donation_count
+                    donation_count: item.donation_count,
+                    date_sent: item.date_sent // Cambiar 'createdTime' por 'date_sent'
                 }))
             };
-
+            
             setAnalyticsData({
                 stats: newStats,
                 report: reportRes ? (reportRes as any).data : null,
@@ -333,6 +341,7 @@ export const CampaignAnalyticsPage: React.FC = () => {
                                 <StatCard title="Donations" value={`${totalCount}`} icon={<ReceiptLongIcon color="action" sx={{ fontSize: 40 }} />} />
                             </Box>
 
+                            {/* --- GRÁFICO (RESTAURADO) --- */}
                             {chartData && chartData.length > 0 && (
                                 <Paper variant="outlined" sx={{ width: '100%', height: 450, p: 2, mt: 2 }}>
                                     <Typography variant="h6" gutterBottom>{selectedCampaign ? 'Revenue by Form Title' : 'Revenue by Campaign'}</Typography>
@@ -347,13 +356,12 @@ export const CampaignAnalyticsPage: React.FC = () => {
                                     </ResponsiveContainer>
                                 </Paper>
                             )}
-
                             <Box sx={{ mt: 4 }}>
                                 {loading.report && (<Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>)}
                                 <Collapse in={!loading.report && !!report} timeout="auto">
                                     {report && (
                                         <>
-                                            <Typography variant="h5" gutterBottom>Detailed Report</Typography>
+                                            <Typography variant="h5" gutterBottom>Donors</Typography>
                                             <Divider sx={{ mb: 2 }} />
                                             <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 600 }}>
                                                 <Table stickyHeader size="small">
@@ -387,6 +395,41 @@ export const CampaignAnalyticsPage: React.FC = () => {
                                     )}
                                 </Collapse>
                             </Box>
+                            {/* --- NUEVA TABLA DETALLADA --- */}
+                            {chartData && chartData.length > 0 && (
+                                <Paper variant="outlined" sx={{ width: '100%', mt: 4 }}>
+                                    <Typography variant="h6" sx={{ p: 2 }}>Form Titles</Typography>
+                                    <TableContainer>
+                                        <Table>
+                                            <TableHead>
+                                                <TableRow>
+                                                    <TableCell>Form Title</TableCell>
+                                                    <TableCell>First Donation Date</TableCell>
+                                                    <TableCell align="right">Donations</TableCell>
+                                                    <TableCell align="right">Amount Raised</TableCell>
+                                                </TableRow>
+                                            </TableHead>
+                                            <TableBody>
+                                                {chartData.map((item) => (
+                                                    <TableRow key={item.id} hover>
+                                                        <TableCell component="th" scope="row">{item.name}</TableCell>
+                                                        <TableCell>
+                                                            {item.date_sent ? dayjs(item.date_sent).format('DD/MM/YYYY') : 'N/A'}
+                                                        </TableCell>
+                                                        <TableCell align="right">{item.donation_count}</TableCell>
+                                                        <TableCell align="right" sx={{ fontWeight: 'bold' }}>
+                                                            ${item.total_amount.toFixed(2)}
+                                                        </TableCell>
+                                                    </TableRow>
+                                                ))}
+                                            </TableBody>
+                                        </Table>
+                                    </TableContainer>
+                                </Paper>
+                            )}
+
+                            {/* --- TABLA DE DONADORES (sin cambios) --- */}
+                            
                         </Paper>
                     )}
                 </Grid>
