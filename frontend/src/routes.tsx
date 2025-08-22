@@ -58,7 +58,7 @@ export function AppRoutes() {
           
           {/* ✅ La ruta "index" es la página por defecto del layout */}
           <Route 
-            index 
+            path="dashboard" 
             element={<PageTransition><DashboardHomePage /></PageTransition>} 
           />
           
