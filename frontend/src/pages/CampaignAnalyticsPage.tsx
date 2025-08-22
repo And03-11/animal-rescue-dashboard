@@ -16,7 +16,11 @@ import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import { useWebSocket } from '../context/WebSocketProvider';
 import { FormTitleSelector } from '../components/FormTitleSelector';
 
-interface ApiListItem { id: string; name: string; }
+interface ApiListItem { 
+    id: string; 
+    name: string; 
+    createdTime?: string; // ✅ AÑADE ESTA LÍNEA
+}
 interface Donation { id: string; date: string; amount: number; donorName: string; donorEmail: string; }
 interface AnalyticsStats {
     total_amount: number;
@@ -60,6 +64,7 @@ export const CampaignAnalyticsPage: React.FC = () => {
             .map((t: any) => ({
                 id: t?.id ?? t?.form_title_id ?? t?.value ?? t?.key ?? '',
                 name: t?.name ?? t?.title ?? t?.label ?? t?.form_title_name ?? '(Untitled)',
+                createdTime: t?.createdTime, // ✅ AÑADE ESTA LÍNEA
             }))
             .filter((x: ApiListItem) => x.id);
         return Array.from(new Map(mapped.map(x => [x.id, x])).values());
@@ -97,10 +102,17 @@ export const CampaignAnalyticsPage: React.FC = () => {
         apiClient.get(`/form-titles?campaign_id=${selectedCampaign}`)
             .then(res => {
                 const normalized = normalizeFormTitles(res.data);
+                
+                // ✅ CAMBIO: Ordenamos la lista por fecha (más antiguo primero)
+                normalized.sort((a, b) => {
+                    if (!a.createdTime || !b.createdTime) return 0; // Manejo por si alguna fecha no viniera
+                    return new Date(a.createdTime).getTime() - new Date(b.createdTime).getTime();
+                });
+
                 setFormTitles(normalized);
             })
             .catch(async (err) => {
-                // why: 404 → el endpoint no existe; usamos fallback desde stats
+                // ... (el resto de la función no cambia)
                 const status = err?.response?.status;
                 if (status === 404) {
                     try {
@@ -123,6 +135,7 @@ export const CampaignAnalyticsPage: React.FC = () => {
             })
             .finally(() => setLoading(prev => ({ ...prev, dependent: false })));
     }, [selectedCampaign]);
+
 
     useEffect(() => { setError(''); }, [selectedSource, selectedCampaign, startDate, endDate, selectedTitles]);
 

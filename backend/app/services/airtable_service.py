@@ -136,9 +136,19 @@ class AirtableService:
 
     def get_form_titles(self, campaign_id: Optional[str] = None) -> List[Dict]:
         try:
-            all_records = self.form_titles_table.all(fields=[FORM_TITLES_FIELDS["name"], FORM_TITLES_FIELDS["campaign_link"]])
+            # ✅ CAMBIO: Quitamos 'fields' para traer todos los datos, incluyendo 'createdTime'
+            all_records = self.form_titles_table.all()
+            
             if not campaign_id:
-                return [{"id": rec["id"], "name": rec.get("fields", {}).get(FORM_TITLES_FIELDS["name"])} for rec in all_records]
+                # ✅ CAMBIO: Añadimos createdTime a la respuesta
+                return [
+                    {
+                        "id": rec["id"],
+                        "name": rec.get("fields", {}).get(FORM_TITLES_FIELDS["name"]),
+                        "createdTime": rec.get("createdTime")
+                    }
+                    for rec in all_records
+                ]
             
             filtered_records = []
             for rec in all_records:
@@ -147,7 +157,15 @@ class AirtableService:
                 if linked_campaign_ids and campaign_id in linked_campaign_ids:
                     filtered_records.append(rec)
             
-            return [{"id": rec["id"], "name": rec.get("fields", {}).get(FORM_TITLES_FIELDS["name"])} for rec in filtered_records]
+            # ✅ CAMBIO: Añadimos createdTime también aquí
+            return [
+                {
+                    "id": rec["id"],
+                    "name": rec.get("fields", {}).get(FORM_TITLES_FIELDS["name"]),
+                    "createdTime": rec.get("createdTime")
+                }
+                for rec in filtered_records
+            ]
         except Exception as e:
             print(f"¡ERROR en get_form_titles!: {e}")
             return []
