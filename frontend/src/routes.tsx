@@ -9,6 +9,8 @@ import PrivateRoute from './components/PrivateRoute';
 import PrivateAdminRoute from './components/PrivateAdminRoute'; // ✅ nuevo
 import LoginForm from './pages/LoginForm';
 import UserManagementPage from './pages/UserManagementPage';
+import CampaignComparisonPage from './pages/CampaignComparisonPage';
+
 
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 const DashboardHomePage = lazy(() => import('./pages/DashboardHomePage'));
@@ -66,6 +68,10 @@ export function AppRoutes() {
           <Route 
             path="analytics" 
             element={<PageTransition><CampaignAnalyticsPage /></PageTransition>} 
+          />
+          <Route 
+            path="comparison" 
+            element={<PageTransition><CampaignComparisonPage /></PageTransition>} 
           />
           <Route 
             path="contact-search" 

@@ -11,6 +11,7 @@ import HomeIcon from '@mui/icons-material/Home';
 import SearchIcon from '@mui/icons-material/Search';
 import MailIcon from '@mui/icons-material/Mail';
 import AssessmentIcon from '@mui/icons-material/Assessment';
+import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import LogoutIcon from '@mui/icons-material/Logout';
 import logo from '../assets/Logo.png';
@@ -35,6 +36,7 @@ export const Layout: React.FC = () => {
   const menuItems = [
     { text: 'Dashboard', icon: <HomeIcon />, path: '/dashboard' }, // ✅ CAMBIO AQUÍ
     { text: 'Campaign Analytics', icon: <AssessmentIcon />, path: '/analytics' },
+    { text: 'Compare Campaigns', icon: <CompareArrowsIcon />, path: '/comparison' },
     { text: 'Contact Search', icon: <SearchIcon />, path: '/contact-search' },
     { text: 'Send Email', icon: <MailIcon />, path: '/email-sender' },
   ];
