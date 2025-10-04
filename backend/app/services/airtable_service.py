@@ -129,7 +129,17 @@ class AirtableService:
         try:
             formula = f"{{{CAMPAIGNS_FIELDS['source']}}} = '{source}'"
             records = self.campaigns_table.all(formula=formula, fields=[CAMPAIGNS_FIELDS["name"]])
-            return [{"id": rec["id"], "name": rec.get("fields", {}).get(CAMPAIGNS_FIELDS["name"])} for rec in records]
+            
+            # ✅ CORRECCIÓN: Añadimos 'createdTime' a la respuesta para cada campaña.
+            # La librería pyairtable incluye este campo en el objeto 'rec' por defecto.
+            return [
+                {
+                    "id": rec["id"], 
+                    "name": rec.get("fields", {}).get(CAMPAIGNS_FIELDS["name"]),
+                    "createdTime": rec.get("createdTime") # <-- AÑADIMOS ESTA LÍNEA
+                } 
+                for rec in records
+            ]
         except Exception as e:
             print(f"Error getting campaigns for source {source}: {e}")
             return []

@@ -85,10 +85,21 @@ export const CampaignAnalyticsPage: React.FC = () => {
         }
         setLoading(prev => ({ ...prev, dependent: true }));
         apiClient.get<ApiListItem[]>(`/campaigns?source=${selectedSource}`)
-            .then(res => setCampaigns(res.data))
-            .catch(() => setError('Failed to load campaigns for the selected source.'))
-            .finally(() => setLoading(prev => ({ ...prev, dependent: false })));
-    }, [selectedSource]);
+            .then(res => {
+        // ✅ CORRECCIÓN: Ordenamos las campañas por fecha ascendente.
+        const sortedCampaigns = res.data.sort((a, b) => {
+          if (!a.createdTime || !b.createdTime) return 0;
+          
+          // ✅ CAMBIO DE LÓGICA: Simplemente invertimos 'a' y 'b'.
+          // a - b nos da un orden ascendente (la más antigua primero).
+          return new Date(a.createdTime).getTime() - new Date(b.createdTime).getTime();
+        });
+        
+        setCampaigns(sortedCampaigns);
+      })
+      .catch(() => setError('Failed to load campaigns for the selected source.'))
+      .finally(() => setLoading(prev => ({ ...prev, dependent: false })));
+  }, [selectedSource]);
 
     useEffect(() => {
         if (!selectedCampaign) {
