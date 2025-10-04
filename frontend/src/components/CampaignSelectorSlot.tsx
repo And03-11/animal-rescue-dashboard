@@ -8,7 +8,11 @@ import type { SelectChangeEvent } from '@mui/material/Select';
 import apiClient from '../api/axiosConfig';
 
 // Interfaces para un tipado fuerte y claro
-interface ApiListItem { id: string; name: string; }
+interface ApiListItem {
+  id: string;
+  name: string;
+  createdTime?: string; // Se añade la fecha de creación opcional
+}
 
 interface CampaignSelectorProps {
   slotId: number;
@@ -29,22 +33,27 @@ export const CampaignSelectorSlot: React.FC<CampaignSelectorProps> = ({
 
   // Efecto para cargar las campañas correspondientes cuando se selecciona una "Source"
   useEffect(() => {
-    // Si no hay "Source" seleccionada, limpiamos la lista de campañas
     if (!selectedSource) {
       setCampaigns([]);
       if (selectedCampaignId) {
-        onCampaignChange(slotId, null); // Notificamos al padre para limpiar la selección
+        onCampaignChange(slotId, null);
       }
       return;
     }
 
-    let isMounted = true; // Previene actualizaciones de estado en un componente desmontado
+    let isMounted = true;
     const fetchCampaigns = async () => {
       setLoadingCampaigns(true);
       try {
         const response = await apiClient.get<ApiListItem[]>(`/campaigns?source=${selectedSource}`);
         if (isMounted) {
-          setCampaigns(response.data);
+          // ✅ ¡NUEVA LÓGICA DE ORDENAMIENTO!
+          // Ordena las campañas por fecha de creación ascendente (más antiguas primero).
+          const sortedCampaigns = response.data.sort((a, b) => {
+            if (!a.createdTime || !b.createdTime) return 0;
+            return new Date(a.createdTime).getTime() - new Date(b.createdTime).getTime();
+          });
+          setCampaigns(sortedCampaigns);
         }
       } catch (error) {
         console.error(`Error al cargar campañas para la fuente ${selectedSource}:`, error);
@@ -56,7 +65,6 @@ export const CampaignSelectorSlot: React.FC<CampaignSelectorProps> = ({
 
     fetchCampaigns();
 
-    // Función de limpieza para cancelar tareas pendientes
     return () => { isMounted = false; };
   }, [selectedSource, slotId, onCampaignChange, selectedCampaignId]);
 
@@ -75,7 +83,6 @@ export const CampaignSelectorSlot: React.FC<CampaignSelectorProps> = ({
     onCampaignChange(slotId, campaign);
   };
   
-  // Etiquetas para los selectores
   const sourceLabelId = `source-label-${slotId}`;
   const campaignLabelId = `campaign-label-${slotId}`;
 
