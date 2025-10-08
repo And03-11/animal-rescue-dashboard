@@ -1,4 +1,5 @@
-// frontend/src/pages/CampaignComparisonPage.tsx (Con Scroll en la Tabla)
+// frontend/src/pages/CampaignComparisonPage.tsx
+
 import React, { useState, useEffect } from 'react';
 import {
   Box, Typography, Paper, Grid, CircularProgress, Alert,
@@ -11,34 +12,32 @@ import { CombinedStatCard } from '../components/CombinedStatCard';
 import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import dayjs from 'dayjs';
-import { CampaignSelectorSlot } from '../components/CampaignSelectorSlot';
+import { CampaignSelectorSlot, VIEW_ALL_CAMPAIGNS, type ApiListItem, type CampaignSelection } from '../components/CampaignSelectorSlot';
 
 // --- Interfaces ---
-interface ApiListItem {
-  id: string;
-  name: string;
-}
-interface FormTitleStat {
-  form_title_id: string;
-  form_title_name: string;
-  total_amount: number;
-  donation_count: number;
-  date_sent: string;
-}
-interface CampaignStatsData {
-  campaign_total_amount: number;
-  campaign_total_count: number;
-  stats_by_form_title: FormTitleStat[];
-}
-interface DonationDetail {
-  id: string;
-  donorName: string;
-  donorEmail: string;
-  amount: number;
-  date: string;
+interface ComparisonStatsData {
+  totalAmount: number;
+  totalCount: number;
+  breakdown: {
+    id: string;
+    name: string;
+    total_amount: number;
+    donation_count: number;
+    date_sent?: string;
+  }[];
+  viewType: 'form-title' | 'campaign';
+  displayName: string;
 }
 
-// --- Funciones de Formateo ---
+interface DonationDetail { id: string; donorName: string; donorEmail: string; amount: number; date: string; }
+
+interface SlotSelection {
+  source: string | null;
+  campaign: CampaignSelection;
+}
+
+
+// --- Formatting and Child Component ---
 const formatCurrency = (amt: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amt);
 const formatCompactNumber = (num: number) => {
     if (num >= 1000000) return `$${(num / 1000000).toFixed(1)}M`;
@@ -46,32 +45,37 @@ const formatCompactNumber = (num: number) => {
     return `$${num.toFixed(2)}`;
 };
 
-// --- Componente de la Tarjeta de Campaña (con la corrección de robustez) ---
-const CampaignResultCard: React.FC<{ name: string; stats: CampaignStatsData; onFormTitleClick: (formTitleId: string, formTitleName: string) => void; }> = ({ name, stats, onFormTitleClick }) => (
+const CampaignResultCard: React.FC<{ stats: ComparisonStatsData; onFormTitleClick: (formTitleId: string, formTitleName: string) => void; }> = ({ stats, onFormTitleClick }) => (
     <Paper variant="outlined" sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
-        <Typography variant="h6" gutterBottom noWrap title={name} sx={{textAlign: 'center', mb: 1}}>{name}</Typography>
+        <Typography variant="h6" gutterBottom noWrap title={stats.displayName} sx={{textAlign: 'center', mb: 1}}>{stats.displayName}</Typography>
         <Box sx={{ mb: 2 }}>
             <CombinedStatCard title="" metrics={[
-                { value: formatCompactNumber(stats.campaign_total_amount), label: 'Total Amount', icon: <MonetizationOnIcon sx={{ fontSize: 32 }} /> },
-                { value: stats.campaign_total_count.toString(), label: 'Donations', icon: <ReceiptLongIcon sx={{ fontSize: 32 }} /> }
+                { value: formatCompactNumber(stats.totalAmount), label: 'Total Amount', icon: <MonetizationOnIcon sx={{ fontSize: 32 }} /> },
+                { value: stats.totalCount.toString(), label: 'Donations', icon: <ReceiptLongIcon sx={{ fontSize: 32 }} /> }
             ]}/>
         </Box>
-        <Typography variant="subtitle2" sx={{ mt: 1, mb: 1 }}>Form Title Breakdown</Typography>
-        {/* ✅ CAMBIO CLAVE: Se añade 'maxHeight' para habilitar el scroll interno */}
+        <Typography variant="subtitle2" sx={{ mt: 1, mb: 1 }}>
+            {stats.viewType === 'form-title' ? 'Form Title Breakdown' : 'Campaign Breakdown'}
+        </Typography>
         <TableContainer component={Paper} variant="outlined" sx={{ flexGrow: 1, maxHeight: 450 }}>
             <Table stickyHeader size="small">
                 <TableHead>
                     <TableRow>
-                        <TableCell>Form Title</TableCell>
+                        <TableCell>{stats.viewType === 'form-title' ? 'Form Title' : 'Campaign'}</TableCell>
                         <TableCell>First Donation</TableCell>
                         <TableCell align="right">#</TableCell>
                         <TableCell align="right">Amount</TableCell>
                     </TableRow>
                 </TableHead>
                 <TableBody>
-                    {(stats.stats_by_form_title || []).map((row) => (
-                        <TableRow key={row.form_title_id} hover sx={{ cursor: 'pointer' }} onClick={() => onFormTitleClick(row.form_title_id, row.form_title_name)}>
-                            <TableCell component="th" scope="row">{row.form_title_name}</TableCell>
+                    {(stats.breakdown || []).map((row) => (
+                        <TableRow 
+                            key={row.id} 
+                            hover 
+                            sx={{ cursor: stats.viewType === 'form-title' ? 'pointer' : 'default' }} 
+                            onClick={() => stats.viewType === 'form-title' && onFormTitleClick(row.id, row.name)}
+                        >
+                            <TableCell component="th" scope="row">{row.name}</TableCell>
                             <TableCell>{row.date_sent ? dayjs(row.date_sent).format('DD/MM/YY') : 'N/A'}</TableCell>
                             <TableCell align="right">{row.donation_count}</TableCell>
                             <TableCell align="right" sx={{ fontWeight: 'bold' }}>{formatCurrency(row.total_amount)}</TableCell>
@@ -83,50 +87,40 @@ const CampaignResultCard: React.FC<{ name: string; stats: CampaignStatsData; onF
     </Paper>
 );
 
-// --- Componente Principal de la Página (MODIFICADO) ---
+// --- Main Page Component ---
 export const CampaignComparisonPage: React.FC = () => {
     const [sources, setSources] = useState<ApiListItem[]>([]);
-    const [selectedCampaigns, setSelectedCampaigns] = useState<(ApiListItem | null)[]>(Array(4).fill(null));
-    const [comparisonData, setComparisonData] = useState<Record<string, CampaignStatsData>>({});
+    const [selectedSlots, setSelectedSlots] = useState<SlotSelection[]>(Array(4).fill({ source: null, campaign: null }));
+    const [comparisonData, setComparisonData] = useState<Record<number, ComparisonStatsData | null>>({});
     const [loading, setLoading] = useState({ sources: true, stats: false });
     const [error, setError] = useState('');
     
-    // Estados para el modal (sin cambios)
     const [modalOpen, setModalOpen] = useState(false);
     const [modalTitle, setModalTitle] = useState('');
     const [donationDetails, setDonationDetails] = useState<DonationDetail[]>([]);
     const [loadingDonations, setLoadingDonations] = useState(false);
 
-    // Cargar todas las "Sources" una sola vez al montar el componente
     useEffect(() => {
-        const fetchSources = async () => {
-            setLoading(v => ({ ...v, sources: true }));
-            try {
-                const response = await apiClient.get<string[]>('/campaigns/sources');
-                setSources(response.data.map(s => ({ id: s, name: s })));
-            } catch {
-                setError('Failed to load the list of sources.');
-            } finally {
-                setLoading(v => ({ ...v, sources: false }));
-            }
-        };
-        fetchSources();
+        apiClient.get<string[]>('/campaigns/sources')
+            .then(res => setSources(res.data.map(s => ({ id: s, name: s }))))
+            .catch(() => setError('Failed to load sources.'))
+            .finally(() => setLoading(v => ({ ...v, sources: false })));
     }, []);
 
-    // Callback para manejar la selección de una campaña desde un slot
-    const handleCampaignChange = (slotId: number, campaign: ApiListItem | null) => {
-        setSelectedCampaigns(prev => {
+    const handleSelectionChange = (slotId: number, source: string | null, campaign: CampaignSelection) => {
+        setSelectedSlots(prev => {
             const newSelection = [...prev];
-            newSelection[slotId - 1] = campaign;
+            newSelection[slotId - 1] = { source, campaign };
             return newSelection;
         });
     };
 
-    // Efecto para cargar las estadísticas de las campañas seleccionadas
     useEffect(() => {
-        const campaignsToFetch = selectedCampaigns.filter((c): c is ApiListItem => c !== null);
+        const slotsToFetch = selectedSlots
+            .map((slot, index) => ({ ...slot, slotId: index }))
+            .filter(slot => slot.source && slot.campaign);
 
-        if (campaignsToFetch.length === 0) {
+        if (slotsToFetch.length === 0) {
             setComparisonData({});
             return;
         }
@@ -135,46 +129,57 @@ export const CampaignComparisonPage: React.FC = () => {
             setLoading(v => ({ ...v, stats: true }));
             setError('');
 
-            const statsPromises = campaignsToFetch.map(campaign =>
-                apiClient.get<CampaignStatsData>(`/campaigns/${campaign.id}/stats`)
-                    .then(res => ({ id: campaign.id, data: res.data, name: campaign.name }))
-                    .catch(() => ({ id: campaign.id, data: null, name: campaign.name }))
-            );
+            const statsPromises = slotsToFetch.map(async (slot) => {
+                const { source, campaign, slotId } = slot;
+                if (!source || !campaign) return { slotId, data: null };
+
+                try {
+                    let url = '';
+                    let displayName = 'Data';
+                    const isAllCampaignsView = campaign === VIEW_ALL_CAMPAIGNS;
+                    
+                    if (isAllCampaignsView) {
+                        url = `/campaigns/source/${source}/stats`;
+                        displayName = `${source} (All Campaigns)`;
+                    } else if (typeof campaign === 'object' && campaign.id) {
+                        url = `/campaigns/${campaign.id}/stats`;
+                        displayName = campaign.name;
+                    } else {
+                        return { slotId, data: null };
+                    }
+
+                    const res = await apiClient.get(url);
+                    
+                    const rawBreakdown = res.data.stats_by_campaign ?? res.data.stats_by_form_title;
+                    
+                    const transformedBreakdown = rawBreakdown.map((item: any) => ({
+                        id: item.campaign_id ?? item.form_title_id,
+                        name: item.campaign_name ?? item.form_title_name,
+                        total_amount: item.total_amount,
+                        donation_count: item.donation_count,
+                        date_sent: item.date_sent,
+                    }));
+
+                    const transformedData: ComparisonStatsData = {
+                        totalAmount: res.data.source_total_amount ?? res.data.campaign_total_amount,
+                        totalCount: res.data.source_total_count ?? res.data.campaign_total_count,
+                        breakdown: transformedBreakdown,
+                        viewType: isAllCampaignsView ? 'campaign' : 'form-title',
+                        displayName: displayName,
+                    };
+                    return { slotId, data: transformedData };
+                } catch {
+                    return { slotId, data: null };
+                }
+            });
             
             try {
                 const results = await Promise.all(statsPromises);
-                const newData: Record<string, CampaignStatsData> = {};
-                const newErrors: string[] = [];
-
+                const newData: Record<number, ComparisonStatsData | null> = {};
                 results.forEach(result => {
-                    if (result.data) {
-                        newData[result.id] = result.data;
-                    } else {
-                        newErrors.push(`Could not load data for campaign "${result.name}".`);
-                    }
+                    newData[result.slotId] = result.data;
                 });
-                
-                // Actualiza el estado de los datos y los errores
-                setComparisonData(prevData => {
-                    const updatedData = { ...prevData };
-                    campaignsToFetch.forEach(c => {
-                        if (newData[c.id]) {
-                            updatedData[c.id] = newData[c.id];
-                        }
-                    });
-                     // Limpia datos de campañas que ya no están seleccionadas
-                    Object.keys(updatedData).forEach(key => {
-                        if (!campaignsToFetch.some(c => c.id === key)) {
-                            delete updatedData[key];
-                        }
-                    });
-                    return updatedData;
-                });
-
-                if (newErrors.length > 0) {
-                    setError(newErrors.join(' '));
-                }
-
+                setComparisonData(newData);
             } catch {
                 setError('An unexpected error occurred while fetching statistics.');
             } finally {
@@ -183,36 +188,20 @@ export const CampaignComparisonPage: React.FC = () => {
         };
 
         fetchStats();
-    }, [selectedCampaigns]);
-
-    // Lógica para abrir y cargar el modal (sin cambios)
+    }, [selectedSlots]);
+    
     const handleOpenDonationModal = async (formTitleId: string, formTitleName: string) => {
         setModalTitle(`Donors for "${formTitleName}"`);
         setModalOpen(true);
         setLoadingDonations(true);
-        setDonationDetails([]);
-        try {
-            const response = await apiClient.get<DonationDetail[]>(`/campaigns/form-titles/${formTitleId}/donations`);
-            setDonationDetails(response.data);
-        } catch (error) {
-            console.error("Failed to load donation details", error);
-        } finally {
-            setLoadingDonations(false);
-        }
+        apiClient.get<DonationDetail[]>(`/campaigns/form-titles/${formTitleId}/donations`)
+            .then(res => setDonationDetails(res.data))
+            .catch(() => console.error("Failed to load donation details"))
+            .finally(() => setLoadingDonations(false));
     };
     const handleCloseDonationModal = () => setModalOpen(false);
-
-    const activeCampaigns = selectedCampaigns.filter(Boolean);
-    const getGridSize = () => {
-        switch (activeCampaigns.length) {
-            case 1: return { xs: 12, md: 12 };
-            case 2: return { xs: 12, md: 6 };
-            case 3: return { xs: 12, md: 6, lg: 4 };
-            case 4: return { xs: 12, md: 6 };
-            default: return {};
-        }
-    };
-    const gridItemSize = getGridSize();
+    
+    const activeSlots = Object.values(comparisonData).filter(Boolean);
 
     return (
         <Box sx={{ width: '100%', maxWidth: 1800, mx: 'auto' }}>
@@ -224,8 +213,9 @@ export const CampaignComparisonPage: React.FC = () => {
                         <CampaignSelectorSlot
                             slotId={slotId}
                             sources={sources}
-                            onCampaignChange={handleCampaignChange}
-                            selectedCampaignId={selectedCampaigns[slotId - 1]?.id || null}
+                            onSelectionChange={handleSelectionChange}
+                            selectedSource={selectedSlots[slotId - 1]?.source}
+                            selectedCampaign={selectedSlots[slotId - 1]?.campaign}
                         />
                     </Grid>
                 ))}
@@ -233,17 +223,17 @@ export const CampaignComparisonPage: React.FC = () => {
 
             {loading.stats && <CircularProgress sx={{ display: 'block', mx: 'auto', my: 4 }} />}
             {error && <Alert severity="error" sx={{ my: 2 }}>{error}</Alert>}
-            {!loading.stats && activeCampaigns.length === 0 && (
+            {!loading.stats && activeSlots.length === 0 && (
                 <Paper variant="outlined" sx={{ p: 4, textAlign: 'center' }}>
-                    <Typography color="text.secondary">Select one or more campaigns using the selectors above to see their statistics.</Typography>
+                    <Typography color="text.secondary">Select a source and a view in one or more slots to compare statistics.</Typography>
                 </Paper>
             )}
 
             <Grid container spacing={3} alignItems="stretch">
-                {activeCampaigns.map(campaign => (
-                    campaign && comparisonData[campaign.id] && (
-                        <Grid size={gridItemSize} key={campaign.id}>
-                            <CampaignResultCard name={campaign.name} stats={comparisonData[campaign.id]} onFormTitleClick={handleOpenDonationModal} />
+                {Object.entries(comparisonData).map(([slotId, data]) => (
+                    data && (
+                        <Grid size={{ xs: 12, md: 6 }} key={slotId}>
+                            <CampaignResultCard stats={data} onFormTitleClick={handleOpenDonationModal} />
                         </Grid>
                     )
                 ))}
@@ -257,14 +247,14 @@ export const CampaignComparisonPage: React.FC = () => {
                     </IconButton>
                 </DialogTitle>
                 <DialogContent dividers>
-                    {loadingDonations ? <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box> : (
+                     {loadingDonations ? <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box> : (
                         <TableContainer component={Paper} variant="outlined">
                             <Table size="small">
                                 <TableHead><TableRow><TableCell>Donor Name</TableCell><TableCell>Email</TableCell><TableCell>Date</TableCell><TableCell align="right">Amount</TableCell></TableRow></TableHead>
                                 <TableBody>
                                     {donationDetails.length > 0 ? donationDetails.map(d => (
                                         <TableRow key={d.id}><TableCell>{d.donorName}</TableCell><TableCell>{d.donorEmail}</TableCell><TableCell>{dayjs(d.date).format('DD/MM/YYYY HH:mm')}</TableCell><TableCell align="right">{formatCurrency(d.amount)}</TableCell></TableRow>
-                                    )) : <TableRow><TableCell colSpan={4} align="center">No donations found for this form title.</TableCell></TableRow>}
+                                    )) : <TableRow><TableCell colSpan={4} align="center">No donations found for this item.</TableCell></TableRow>}
                                 </TableBody>
                             </Table>
                         </TableContainer>
