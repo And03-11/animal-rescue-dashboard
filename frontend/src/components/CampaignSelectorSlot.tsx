@@ -110,10 +110,10 @@ export const CampaignSelectorSlot: React.FC<CampaignSelectorProps> = ({
         </FormControl>
 
         <FormControl fullWidth disabled={!selectedSource || loadingCampaigns}>
-          <InputLabel>View</InputLabel>
+          <InputLabel>Campaign</InputLabel>
           <Select
             value={getCampaignValue()}
-            label="View"
+            label="Campaign"
             onChange={handleCampaignChange}
           >
             {loadingCampaigns ? (
