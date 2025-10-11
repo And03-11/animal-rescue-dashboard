@@ -1,14 +1,21 @@
-# --- Archivo: backend/app/core/security.py ---
+# --- Archivo: backend/app/core/security.py (Actualizado) ---
+import os
 from datetime import datetime, timedelta
 from typing import Optional
+from dotenv import load_dotenv
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 
+# Cargar variables de entorno del archivo .env
+load_dotenv()
+
 # Clave secreta y configuración del token
-SECRET_KEY = "super-secret-key"  # ⚠️ reemplazar en producción
+# ✅ CAMBIO: Leemos la clave desde las variables de entorno.
+#    Añadimos un valor por defecto inseguro SÓLO para evitar que la app falle si no se define.
+SECRET_KEY = os.getenv("SECRET_KEY", "valor-inseguro-por-defecto")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 480
 
