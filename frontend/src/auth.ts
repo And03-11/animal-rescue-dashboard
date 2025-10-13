@@ -22,7 +22,7 @@ export const getCurrentUser = (): DecodedToken | null => {
 
 export const isAdmin = (): boolean => {
   const user = getCurrentUser();
-  // Esta comprobación ahora es más segura gracias a TypeScript
+  // Esta comprobación ahora funcionará porque `getCurrentUser` devolverá el payload correcto
   return user?.is_admin === true;
 };
 

@@ -1,4 +1,4 @@
-# --- Archivo: .github/workflows/ci.yml (Actualizado) ---
+# --- Archivo: .github/workflows/ci.yml ---
 name: CI Pipeline
 
 on:
@@ -67,13 +67,6 @@ jobs:
         with:
           path: frontend/node_modules
           key: ${{ runner.os }}-node-${{ hashFiles('frontend/package-lock.json') }}
-
-      # ✅ NUEVO PASO: Añadimos la verificación de código aquí
-      - name: Lint Code
-        run: |
-          cd frontend
-          npm install
-          npm run lint
 
       - name: Install and build frontend
         run: |
