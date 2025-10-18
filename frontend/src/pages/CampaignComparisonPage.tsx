@@ -23,7 +23,7 @@ interface ComparisonStatsData {
     name: string;
     total_amount: number;
     donation_count: number;
-    date_sent?: string;
+    start_date?: string;
   }[];
   viewType: 'form-title' | 'campaign';
   displayName: string;
@@ -62,7 +62,7 @@ const CampaignResultCard: React.FC<{ stats: ComparisonStatsData; onFormTitleClic
                 <TableHead>
                     <TableRow>
                         <TableCell>{stats.viewType === 'form-title' ? 'Form Title' : 'Campaign'}</TableCell>
-                        <TableCell>First Donation</TableCell>
+                        <TableCell>Start Date</TableCell>
                         <TableCell align="right">#</TableCell>
                         <TableCell align="right">Amount</TableCell>
                     </TableRow>
@@ -76,7 +76,7 @@ const CampaignResultCard: React.FC<{ stats: ComparisonStatsData; onFormTitleClic
                             onClick={() => stats.viewType === 'form-title' && onFormTitleClick(row.id, row.name)}
                         >
                             <TableCell component="th" scope="row">{row.name}</TableCell>
-                            <TableCell>{row.date_sent ? dayjs(row.date_sent).format('DD/MM/YY') : 'N/A'}</TableCell>
+                            <TableCell>{row.start_date ? dayjs(row.start_date).format('DD/MM/YY') : 'N/A'}</TableCell>
                             <TableCell align="right">{row.donation_count}</TableCell>
                             <TableCell align="right" sx={{ fontWeight: 'bold' }}>{formatCurrency(row.total_amount)}</TableCell>
                         </TableRow>
@@ -157,7 +157,7 @@ export const CampaignComparisonPage: React.FC = () => {
                         name: item.campaign_name ?? item.form_title_name,
                         total_amount: item.total_amount,
                         donation_count: item.donation_count,
-                        date_sent: item.date_sent,
+                        start_date: item.start_date ?? item.createdTime,
                     }));
 
                     const transformedData: ComparisonStatsData = {

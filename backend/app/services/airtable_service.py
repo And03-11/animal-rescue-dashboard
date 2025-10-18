@@ -26,14 +26,14 @@ COSTA_RICA_TZ = ZoneInfo("America/Costa_Rica")
 
 # --- Nombres de Campos ---
 DONATIONS_FIELDS = {"amount": "Amount", "date": "Date", "form_title_link": "Form Title", "donor_link": "Donor"}
-CAMPAIGNS_FIELDS = {"name": "Name", "source": "Source"}
-FORM_TITLES_FIELDS = {"name": "Name", "campaign_link": "Campaign", "donations_link": "Donations"}
+CAMPAIGNS_FIELDS = {"name": "Name", "source": "Source", "total_amount_rollup": "Total", "total_count_rollup": "Amount of donations"}
+FORM_TITLES_FIELDS = {"name": "Name", "campaign_link": "Campaign", "donations_link": "Donations", "total_amount_rollup": "Total", "total_count_rollup": "Amount of donations"}
 DONORS_FIELDS = {"name": "Name", "last_name": "Last Name", "emails_link": "Emails", "donations_link": "Donations"}
 EMAILS_FIELDS = {"email": "Email"}
 DAILY_SUMMARIES_FIELDS = {
-    "date": "Date", # Tu campo primario tipo Date
-    "total_amount": "Total Amount Today", # Tu campo Rollup de suma
-    "count": "Donations Count Today" # Tu campo Rollup de conteo
+    "date": "Date",
+    "total_amount": "Total Amount Today",
+    "count": "Donations Count Today"
 }
 
 
@@ -190,48 +190,108 @@ class AirtableService:
 
 
          
-    def get_donations_for_form_title(self, form_title_ids: List[str], start_date: Optional[str] = None, end_date: Optional[str] = None) -> List[Dict]:
+    def get_donations_for_form_title(
+        self,
+        form_title_ids: List[str],
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        page_size: Optional[int] = 50, # PAGINACIÓN: Tamaño de página por defecto
+        offset: Optional[int] = 0     # PAGINACIÓN: Offset inicial por defecto
+    ) -> Dict[str, Any]: # PAGINACIÓN: Cambiar el tipo de retorno a un diccionario
         """
-        Retrieves donations for a list of form titles and enriches them with donor name and email.
+        Retrieves a paginated list of donations for given form titles,
+        optionally filtered by date, and enriched with donor info.
+        Returns a dictionary containing the list of donations for the page
+        and the total count of donations matching the criteria.
         """
         try:
             if not form_title_ids:
-                return []
-            
-            title_id_formulas = [f"RECORD_ID() = '{title_id}'" for title_id in form_title_ids]
-            form_titles_records = self.form_titles_table.all(formula=f"OR({','.join(title_id_formulas)})")
-            
-            if not form_titles_records:
-                return []
+                return {"donations": [], "total_count": 0} # PAGINACIÓN: Devolver estructura esperada
 
-            donation_ids = {
+            # --- 1. Obtener TODOS los IDs de donaciones relevantes ---
+            title_id_formulas = [f"RECORD_ID() = '{title_id}'" for title_id in form_title_ids]
+            form_titles_records = self.form_titles_table.all(
+                formula=f"OR({','.join(title_id_formulas)})",
+                # Solo necesitamos el link a donaciones
+                fields=[FORM_TITLES_FIELDS["donations_link"]]
+            )
+
+            if not form_titles_records:
+                return {"donations": [], "total_count": 0}
+
+            all_relevant_donation_ids = {
                 donation_id
                 for rec in form_titles_records
                 for donation_id in rec.get("fields", {}).get(FORM_TITLES_FIELDS["donations_link"], [])
             }
 
-            if not donation_ids: return []
+            if not all_relevant_donation_ids:
+                 return {"donations": [], "total_count": 0}
 
-            id_formulas = [f"RECORD_ID() = '{id}'" for id in donation_ids]
+            # --- 2. Filtrar IDs por fecha (si aplica) y Ordenar ---
+            id_formulas = [f"RECORD_ID() = '{id}'" for id in all_relevant_donation_ids]
             formula_parts = [f"OR({', '.join(id_formulas)})"]
             date_field = f"{{{DONATIONS_FIELDS['date']}}}"
+
+            # Asegurar que el campo de fecha no esté vacío para el filtro y ordenamiento
+            formula_parts.append(f"NOT({date_field} = BLANK())")
 
             if start_date:
                 start_dt_local = datetime.combine(datetime.fromisoformat(start_date).date(), time.min, tzinfo=COSTA_RICA_TZ)
                 formula_parts.append(f"IS_AFTER({date_field}, DATETIME_PARSE('{start_dt_local.isoformat()}'))")
             if end_date:
-                end_dt_local = datetime.combine(datetime.fromisoformat(end_date).date(), time.max, tzinfo=COSTA_RICA_TZ)
+                end_date_obj = datetime.fromisoformat(end_date).date() + timedelta(days=1)
+                end_dt_local = datetime.combine(end_date_obj, time.min, tzinfo=COSTA_RICA_TZ)
                 formula_parts.append(f"IS_BEFORE({date_field}, DATETIME_PARSE('{end_dt_local.isoformat()}'))")
-            
+
             final_formula = f"AND({', '.join(formula_parts)})"
 
-            fields_to_get = [DONATIONS_FIELDS["date"], DONATIONS_FIELDS["amount"], DONATIONS_FIELDS["donor_link"]]
-            donation_records = self.donations_table.all(formula=final_formula, fields=fields_to_get)
+            # Obtener solo IDs y Fechas, ordenados por fecha descendente
+            donation_id_date_records = self.donations_table.all(
+                formula=final_formula,
+                fields=[DONATIONS_FIELDS["date"]], # Solo necesitamos la fecha para ordenar
+                sort=[(f"-{DONATIONS_FIELDS['date']}")] # Ordenar descendente (más recientes primero)
+            )
 
-            if not donation_records: return []
+            # Extraer solo los IDs ordenados
+            ordered_donation_ids = [rec['id'] for rec in donation_id_date_records]
+            total_matching_donations = len(ordered_donation_ids) # PAGINACIÓN: Contar el total ANTES de paginar
 
-            # Obtener Donantes y sus Emails enlazados
-            donor_ids = {fields.get(DONATIONS_FIELDS["donor_link"], [None])[0] for rec in donation_records if (fields := rec.get("fields")) and fields.get(DONATIONS_FIELDS["donor_link"])}
+            # --- 3. Aplicar Paginación (Slice de IDs) ---
+            start_index = offset or 0
+            end_index = start_index + (page_size or 50) # Usar default si no se provee
+            ids_for_page = ordered_donation_ids[start_index:end_index]
+
+            if not ids_for_page:
+                 # Si no hay IDs para esta página (puede pasar si el offset es muy grande)
+                 return {"donations": [], "total_count": total_matching_donations}
+
+            # --- 4. Obtener Detalles Completos SOLO para los IDs de la página ---
+            page_id_formulas = [f"RECORD_ID() = '{id}'" for id in ids_for_page]
+            page_formula = f"OR({', '.join(page_id_formulas)})"
+            fields_to_get_details = [DONATIONS_FIELDS["date"], DONATIONS_FIELDS["amount"], DONATIONS_FIELDS["donor_link"]]
+
+            # Usamos get_all para asegurar el orden, aunque pyairtable debería respetarlo
+            # con la fórmula OR(RECORD_ID()...). Si no, reordenaríamos después.
+            page_donation_records = self.donations_table.all(formula=page_formula, fields=fields_to_get_details)
+
+            # Mapear por ID para reordenar si es necesario (y para el enriquecimiento)
+            page_donations_map = {rec['id']: rec for rec in page_donation_records}
+            # Reordenar según el orden original de ids_for_page
+            ordered_page_donation_records = [page_donations_map[id] for id in ids_for_page if id in page_donations_map]
+
+
+            if not ordered_page_donation_records:
+                return {"donations": [], "total_count": total_matching_donations}
+
+            # --- 5. Enriquecer con Datos del Donante (lógica existente, aplicada a la página) ---
+            donor_ids = {
+                fields.get(DONATIONS_FIELDS["donor_link"], [None])[0]
+                for rec in ordered_page_donation_records # Usar los records de la página
+                if (fields := rec.get("fields")) and fields.get(DONATIONS_FIELDS["donor_link"])
+            }
+            # (El resto de la lógica de enriquecimiento con donor_info_map, email_map, etc., es igual)
+            # ...
             donor_id_formulas = [f"RECORD_ID() = '{id}'" for id in donor_ids if id]
             donor_records = self.donors_table.all(formula=f"OR({', '.join(donor_id_formulas)})") if donor_id_formulas else []
 
@@ -245,20 +305,19 @@ class AirtableService:
                 if email_ids:
                     all_email_ids.add(email_ids[0])
 
-            # Obtener los emails
             email_id_formulas = [f"RECORD_ID() = '{id}'" for id in all_email_ids if id]
             email_records = self.emails_table.all(formula=f"OR({', '.join(email_id_formulas)})") if email_id_formulas else []
             email_map = {rec["id"]: rec.get("fields", {}).get(EMAILS_FIELDS["email"], "N/A") for rec in email_records}
 
-            # Unir todo
-            enriched_donations = []
-            for d in donation_records:
+
+            enriched_donations_page = []
+            for d in ordered_page_donation_records: # Iterar sobre los records ordenados de la página
                 fields = d.get("fields", {})
                 donor_id = fields.get(DONATIONS_FIELDS["donor_link"], [None])[0]
                 donor_info = donor_info_map.get(donor_id, {"name": "Unknown Donor", "email_id": None})
                 donor_email = email_map.get(donor_info["email_id"], "N/A") if donor_info["email_id"] else "N/A"
-                
-                enriched_donations.append({
+
+                enriched_donations_page.append({
                     "id": d["id"],
                     "date": fields.get(DONATIONS_FIELDS["date"]),
                     "amount": fields.get(DONATIONS_FIELDS["amount"], 0),
@@ -266,11 +325,17 @@ class AirtableService:
                     "donorEmail": donor_email
                 })
 
-            return sorted(enriched_donations, key=lambda x: x.get('date', ''), reverse=True)
+            # --- 6. Devolver Resultados Paginados ---
+            return {
+                "donations": enriched_donations_page,
+                "total_count": total_matching_donations # PAGINACIÓN: Devolver el conteo total
+            }
+
         except Exception as e:
-            print(f"¡ERROR GRAVE en get_donations_for_form_title!: {e}")
+            print(f"¡ERROR GRAVE en get_donations_for_form_title (paginado)!: {e}")
             traceback.print_exc()
-            return []
+            # Devolver error con la estructura esperada si es posible
+            return {"donations": [], "total_count": 0, "error": str(e)}
 
     def get_donations(self, start_utc: Optional[str] = None, end_utc: Optional[str] = None) -> List[Dict]:
         try:
@@ -362,107 +427,235 @@ class AirtableService:
     # En backend/app/services/airtable_service.py, reemplaza ÚNICAMENTE esta función:
 
     def get_campaign_stats(self, campaign_id: str, start_date: Optional[str] = None, end_date: Optional[str] = None, form_title_ids: Optional[List[str]] = None) -> Dict[str, Any]:
-            """
-            Estadísticas de campaña, opcionalmente filtradas por form_title_ids.
-            ✅ NUEVA VERSIÓN: Ahora incluye la fecha de la primera donación para cada Form Title.
-            """
-            try:
-                # --- Paso 1: Obtener todos los form-titles de la campaña (sin cambios) ---
-                title_records = self.form_titles_table.all(
-                    fields=[
-                        FORM_TITLES_FIELDS["name"],
-                        FORM_TITLES_FIELDS["campaign_link"],
-                        FORM_TITLES_FIELDS["donations_link"],
-                    ]
-                )
-                form_titles = [
-                    rec for rec in title_records 
-                    if campaign_id in rec.get("fields", {}).get(FORM_TITLES_FIELDS["campaign_link"], [])
-                ]
+        """
+        Estadísticas de campaña. Usa roll-ups si no hay filtro de fecha.
+        Usa createdTime como start_date.
+        """
+        try:
+            # --- Obtener Form Titles vinculados a la campaña ---
+            # Pedimos campos básicos + rollups. createdTime viene por defecto.
+            fields_to_get_base = [
+                FORM_TITLES_FIELDS["name"],
+                FORM_TITLES_FIELDS["campaign_link"],
+            ]
+            # Si no hay filtro de fecha, pedimos rollups. Si hay, pedimos link a donaciones.
+            if not start_date and not end_date:
+                 fields_to_get = fields_to_get_base + [
+                     FORM_TITLES_FIELDS["total_amount_rollup"],
+                     FORM_TITLES_FIELDS["total_count_rollup"],
+                 ]
+            else:
+                 fields_to_get = fields_to_get_base + [FORM_TITLES_FIELDS["donations_link"]]
 
-                if form_title_ids:
-                    form_titles = [ft for ft in form_titles if ft["id"] in form_title_ids]
+            all_title_records_raw = self.form_titles_table.all(fields=fields_to_get)
 
-                if not form_titles:
-                    return {"campaign_total_amount": 0, "campaign_total_count": 0, "stats_by_form_title": []}
+            # Filtrar por campaign_id
+            form_titles_in_campaign_raw = [
+                rec for rec in all_title_records_raw
+                if campaign_id in rec.get("fields", {}).get(FORM_TITLES_FIELDS["campaign_link"], [])
+            ]
 
-                # --- Paso 2: Obtener TODAS las donaciones y agruparlas (lógica mejorada) ---
+            # Aplicar filtro opcional por form_title_ids
+            if form_title_ids:
+                target_ids = set(form_title_ids)
+                form_titles_in_campaign_raw = [ft for ft in form_titles_in_campaign_raw if ft["id"] in target_ids]
+
+            if not form_titles_in_campaign_raw:
+                return {"campaign_total_amount": 0, "campaign_total_count": 0, "stats_by_form_title": []}
+
+            # --- Procesar según si hay filtro de fecha o no ---
+            stats_breakdown = []
+            grand_total = 0.0
+            grand_count = 0
+
+            # OPTIMIZACIÓN: Rama SIN filtro de fecha (usa rollups y createdTime)
+            if not start_date and not end_date:
+                for ft_record in form_titles_in_campaign_raw:
+                    fields = ft_record.get("fields", {})
+                    amount = fields.get(FORM_TITLES_FIELDS["total_amount_rollup"], 0.0)
+                    count = fields.get(FORM_TITLES_FIELDS["total_count_rollup"], 0)
+                    creation_time = ft_record.get("createdTime") # Usar createdTime
+
+                    if count > 0: # Incluir solo si hay donaciones según rollup
+                        stats_breakdown.append({
+                            "form_title_id": ft_record["id"],
+                            "form_title_name": fields.get(FORM_TITLES_FIELDS["name"], ""),
+                            "total_amount": float(amount),
+                            "donation_count": count,
+                            "start_date": creation_time # Campo renombrado
+                        })
+                        grand_total += float(amount)
+                        grand_count += count
+
+            # Rama CON filtro de fecha (calcula desde donaciones, pero usa createdTime)
+            else:
                 all_donation_ids = {
-                    did 
-                    for ft in form_titles 
+                    did
+                    for ft in form_titles_in_campaign_raw
                     for did in ft.get("fields", {}).get(FORM_TITLES_FIELDS["donations_link"], [])
                 }
-                if not all_donation_ids:
-                    return {"campaign_total_amount": 0, "campaign_total_count": 0, "stats_by_form_title": []}
+                if not all_donation_ids: # Salir temprano si no hay donaciones vinculadas
+                     return {"campaign_total_amount": 0, "campaign_total_count": 0, "stats_by_form_title": []}
 
-                # Traemos las donaciones con su fecha y monto
+
+                # Traer donaciones relevantes con fecha y monto
                 id_formulas = [f"RECORD_ID()='{did}'" for did in all_donation_ids]
                 donation_records = self.donations_table.all(
                     formula=f"OR({','.join(id_formulas)})",
                     fields=[DONATIONS_FIELDS["amount"], DONATIONS_FIELDS["date"]]
                 )
-                
-                # Mapeamos donaciones por su ID para acceso rápido
-                donations_map = {
-                    rec["id"]: rec["fields"] for rec in donation_records
-                }
+                donations_map = {rec["id"]: rec["fields"] for rec in donation_records}
 
-                # --- Paso 3: Calcular estadísticas y encontrar la fecha de la primera donación ---
-                stats = []
-                grand_total = 0
-                grand_count = 0
+                s_date_obj = date.fromisoformat(start_date) if start_date else None
+                e_date_obj = date.fromisoformat(end_date) if end_date else None
 
-                for ft in form_titles:
-                    donation_ids_for_title = ft.get("fields", {}).get(FORM_TITLES_FIELDS["donations_link"], [])
-                    
-                    # Filtramos las donaciones relevantes para este form title
-                    relevant_donations = [donations_map[did] for did in donation_ids_for_title if did in donations_map and donations_map[did].get(DONATIONS_FIELDS["date"])]
+                for ft_record in form_titles_in_campaign_raw:
+                    fields = ft_record.get("fields", {})
+                    creation_time = ft_record.get("createdTime") # Usar createdTime
+                    donation_ids_for_title = fields.get(FORM_TITLES_FIELDS["donations_link"], [])
 
-                    # Aplicamos el filtro de fecha del usuario (start_date/end_date)
                     donations_in_range = []
-                    if relevant_donations:
-                        for d in relevant_donations:
-                            donation_dt = datetime.fromisoformat(d[DONATIONS_FIELDS["date"]].replace('Z', '+00:00')).astimezone(COSTA_RICA_TZ).date()
-                            s_date = datetime.fromisoformat(start_date).date() if start_date else None
-                            e_date = datetime.fromisoformat(end_date).date() if end_date else None
-                            
-                            if (not s_date or donation_dt >= s_date) and (not e_date or donation_dt <= e_date):
-                                donations_in_range.append(d)
+                    for did in donation_ids_for_title:
+                        donation = donations_map.get(did)
+                        if not donation: continue
 
-                    if not donations_in_range:
-                        continue
+                        donation_date_str = donation.get(DONATIONS_FIELDS["date"])
+                        if not donation_date_str: continue
 
-                    total_amount = sum(d.get(DONATIONS_FIELDS["amount"], 0) for d in donations_in_range)
-                    donation_count = len(donations_in_range)
-                    
-                    # ✅ LÓGICA CLAVE: Encontrar la fecha más antigua entre las donaciones relevantes
-                    first_donation_date = min(d[DONATIONS_FIELDS["date"]] for d in relevant_donations)
+                        try:
+                            donation_dt_aware = datetime.fromisoformat(donation_date_str.replace('Z', '+00:00'))
+                            donation_date_obj = donation_dt_aware.astimezone(COSTA_RICA_TZ).date()
 
-                    stats.append({
-                        "form_title_id":   ft["id"],
-                        "form_title_name": ft.get("fields", {}).get(FORM_TITLES_FIELDS["name"], ""),
-                        "total_amount":    total_amount,
-                        "donation_count":  donation_count,
-                        "date_sent": first_donation_date # Usamos el nuevo campo
-                    })
-                    grand_total += total_amount
-                    grand_count += donation_count
+                            start_ok = not s_date_obj or donation_date_obj >= s_date_obj
+                            end_ok = not e_date_obj or donation_date_obj <= e_date_obj
 
-                # Ordenar por la fecha de envío
-                stats.sort(key=lambda x: x["date_sent"], reverse=False)
-                
-                return {
-                    "campaign_total_amount": grand_total,
-                    "campaign_total_count":  grand_count,
-                    "stats_by_form_title":   stats
-                }
+                            if start_ok and end_ok:
+                                donations_in_range.append(donation)
+                        except (ValueError, TypeError):
+                            continue # Saltar fecha inválida
 
-            except Exception as e:
-                traceback.print_exc()
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Ocurrió un error al calcular las estadísticas de la campaña: {e}"
-                )
+                    if donations_in_range: # Solo añadir si hay donaciones en el rango
+                        total_amount = sum(d.get(DONATIONS_FIELDS["amount"], 0.0) for d in donations_in_range)
+                        donation_count = len(donations_in_range)
+
+                        stats_breakdown.append({
+                            "form_title_id":   ft_record["id"],
+                            "form_title_name": fields.get(FORM_TITLES_FIELDS["name"], ""),
+                            "total_amount":    float(total_amount),
+                            "donation_count":  donation_count,
+                            "start_date":      creation_time # Campo renombrado
+                        })
+                        grand_total += float(total_amount)
+                        grand_count += donation_count
+
+            # Ordenar por fecha de creación
+            stats_breakdown.sort(key=lambda x: x.get("start_date") or "9999", reverse=False)
+
+            return {
+                "campaign_total_amount": round(grand_total, 2),
+                "campaign_total_count": grand_count,
+                "stats_by_form_title": stats_breakdown
+            }
+
+        except Exception as e:
+            traceback.print_exc()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Ocurrió un error al calcular las estadísticas de la campaña: {e}"
+            )
+
+
+    # OPTIMIZACIÓN: Modificamos get_source_stats para usar createdTime
+    def get_source_stats(self, source: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Estadísticas agregadas para una 'source'. Usa roll-ups si no hay filtro de fecha.
+        Usa createdTime como start_date.
+        """
+        try:
+            # --- Obtener Campañas de la fuente ---
+            campaign_formula = f"{{{CAMPAIGNS_FIELDS['source']}}} = '{source}'"
+            fields_to_get = [CAMPAIGNS_FIELDS["name"]] # Base
+            if not start_date and not end_date:
+                 fields_to_get.extend([
+                     CAMPAIGNS_FIELDS["total_amount_rollup"],
+                     CAMPAIGNS_FIELDS["total_count_rollup"]
+                 ])
+            # createdTime viene por defecto si no especificamos fields, o podemos añadirlo explícitamente si es necesario
+
+            campaign_records_raw = self.campaigns_table.all(formula=campaign_formula, fields=fields_to_get)
+
+            if not campaign_records_raw:
+                return {"source_total_amount": 0, "source_total_count": 0, "stats_by_campaign": []}
+
+            # --- Procesar según si hay filtro de fecha o no ---
+            stats_breakdown = []
+            source_grand_total = 0.0
+            source_grand_count = 0
+
+            # OPTIMIZACIÓN: Rama SIN filtro de fecha (usa rollups y createdTime)
+            if not start_date and not end_date:
+                for camp_record in campaign_records_raw:
+                    fields = camp_record.get("fields", {})
+                    amount = fields.get(CAMPAIGNS_FIELDS["total_amount_rollup"], 0.0)
+                    count = fields.get(CAMPAIGNS_FIELDS["total_count_rollup"], 0)
+                    creation_time = camp_record.get("createdTime") # Usar createdTime
+
+                    if count > 0: # Incluir solo si hay donaciones según rollup
+                        stats_breakdown.append({
+                            "campaign_id": camp_record["id"],
+                            "campaign_name": fields.get(CAMPAIGNS_FIELDS["name"], ""),
+                            "total_amount": float(amount),
+                            "donation_count": count,
+                            "start_date": creation_time # Campo renombrado
+                        })
+                        source_grand_total += float(amount)
+                        source_grand_count += count
+
+            # Rama CON filtro de fecha (llama a get_campaign_stats, que ya usa createdTime)
+            else:
+                 # Necesitamos los IDs para iterar
+                 campaign_records_ids = self.campaigns_table.all(formula=campaign_formula, fields=[]) # Solo IDs
+                 campaign_map = {rec['id']: rec for rec in campaign_records_ids} # Mapeo ID -> Record (con createdTime)
+
+
+                 for campaign_id, camp_record in campaign_map.items():
+                    # Llamamos a la versión ya modificada de get_campaign_stats
+                    stats = self.get_campaign_stats(campaign_id, start_date, end_date)
+                    campaign_name_rec = self.campaigns_table.get(campaign_id, fields=[CAMPAIGNS_FIELDS["name"]]) # Obtener nombre
+                    campaign_name = campaign_name_rec.get('fields', {}).get(CAMPAIGNS_FIELDS['name'], 'Unknown Campaign') if campaign_name_rec else 'Unknown Campaign'
+
+
+                    total_amount = stats.get("campaign_total_amount", 0.0)
+                    donation_count = stats.get("campaign_total_count", 0)
+                    creation_time = camp_record.get("createdTime") # Usar createdTime del record
+
+                    if donation_count > 0: # Incluir solo si tiene donaciones en el rango
+                        stats_breakdown.append({
+                            "campaign_id": campaign_id,
+                            "campaign_name": campaign_name,
+                            "total_amount": float(total_amount),
+                            "donation_count": donation_count,
+                            "start_date": creation_time # Campo renombrado
+                        })
+                        source_grand_total += float(total_amount)
+                        source_grand_count += donation_count
+
+            # Ordenar por fecha de creación
+            stats_breakdown.sort(key=lambda x: x.get("start_date") or "9999", reverse=False)
+
+            return {
+                "source_total_amount": round(source_grand_total, 2),
+                "source_total_count": source_grand_count,
+                "stats_by_campaign": stats_breakdown,
+            }
+
+        except Exception as e:
+            print(f"Error grave en get_source_stats: {e}")
+            traceback.print_exc()
+            raise HTTPException(
+                status_code=500,
+                detail="Ocurrió un error al calcular las estadísticas de la fuente."
+            )
         
 
 
@@ -516,107 +709,42 @@ class AirtableService:
         daily_trend = [{"date": dt, "amount": trend[dt]} for dt in sorted(trend)]
         return {"total_donations": total, "daily_trend": daily_trend}
 
-    # --- ✅ AÑADE ESTA NUEVA FUNCIÓN ---
-    def get_source_stats(self, source: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Calcula las estadísticas agregadas para una 'source' completa
-        y las desglosa por campaña, aplicando un filtro de fecha opcional.
-        """
-        try:
-            # 1. Encontrar todas las campañas para la 'source' dada.
-            campaign_formula = f"{{{CAMPAIGNS_FIELDS['source']}}} = '{source}'"
-            campaign_records = self.campaigns_table.all(formula=campaign_formula)
-            campaign_ids = {rec['id'] for rec in campaign_records}
-
-            if not campaign_ids:
-                return {
-                    "source_total_amount": 0,
-                    "source_total_count": 0,
-                    "stats_by_campaign": []
-                }
-
-            # 2. Obtener estadísticas para CADA campaña de forma concurrente (más eficiente en un futuro)
-            # Por ahora, lo hacemos secuencialmente para simplicidad.
-            stats_by_campaign = []
-            source_grand_total = 0
-            source_grand_count = 0
-
-            for campaign_id in campaign_ids:
-                # Reutilizamos la lógica de `get_campaign_stats` para cada campaña
-                # Pasamos los filtros de fecha para que cada total sea correcto.
-                stats = self.get_campaign_stats(campaign_id, start_date, end_date)
-                
-                campaign_name = next((c['fields'].get(CAMPAIGNS_FIELDS['name']) for c in campaign_records if c['id'] == campaign_id), 'Unknown Campaign')
-                
-                total_amount = stats.get("campaign_total_amount", 0)
-                donation_count = stats.get("campaign_total_count", 0)
-
-                # Solo incluimos campañas que tienen donaciones en el período seleccionado
-                if donation_count > 0:
-                    stats_by_campaign.append({
-                        "campaign_id": campaign_id,
-                        "campaign_name": campaign_name,
-                        "total_amount": total_amount,
-                        "donation_count": donation_count,
-                    })
-                
-                source_grand_total += total_amount
-                source_grand_count += donation_count
-
-            # Ordenar por monto total descendente para el gráfico
-            stats_by_campaign.sort(key=lambda x: x['total_amount'], reverse=True)
-            
-            return {
-                "source_total_amount": round(source_grand_total, 2),
-                "source_total_count": source_grand_count,
-                "stats_by_campaign": stats_by_campaign,
-            }
-
-        except Exception as e:
-            print(f"Error grave en get_source_stats: {e}")
-            traceback.print_exc()
-            raise HTTPException(
-                status_code=500,
-                detail="Ocurrió un error al calcular las estadísticas de la fuente."
-            )
-        
+   
 
     def get_campaign_donations(
         self,
         campaign_id: str,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-    ) -> List[Dict]:
-        """Reúne los form_title_ids de la campaña y reutiliza get_donations_for_form_title.
-        Por qué: evita duplicar lógica de enriquecimiento (donorName, donorEmail)."""
+        page_size: Optional[int] = 50, # PAGINACIÓN: Añadir params
+        offset: Optional[int] = 0     # PAGINACIÓN: Añadir params
+    ) -> Dict[str, Any]: # PAGINACIÓN: Cambiar tipo de retorno
+        """Reúne los form_title_ids de la campaña y reutiliza get_donations_for_form_title (paginado)."""
         try:
-            # Traer títulos con enlaces mínimos
+            # (Obtener form_title_ids como antes)
             title_records = self.form_titles_table.all(
-                fields=[
-                    FORM_TITLES_FIELDS["campaign_link"],
-                    FORM_TITLES_FIELDS["donations_link"],
-                ]
+                fields=[FORM_TITLES_FIELDS["campaign_link"]] # Solo necesitamos el link
             )
-
-            form_title_ids: List[str] = []
-            for rec in title_records:
-                fields = rec.get("fields", {})
-                if campaign_id in fields.get(FORM_TITLES_FIELDS["campaign_link"], []):
-                    form_title_ids.append(rec["id"])
+            form_title_ids: List[str] = [
+                 rec["id"] for rec in title_records
+                 if campaign_id in rec.get("fields", {}).get(FORM_TITLES_FIELDS["campaign_link"], [])
+             ]
 
             if not form_title_ids:
-                return []
+                return {"donations": [], "total_count": 0}
 
-            # Reusar la lógica existente (maneja fechas + enriquecimiento con donor)
+            # Reusar la lógica existente (ahora paginada)
+            # PAGINACIÓN: Pasar page_size y offset
             return self.get_donations_for_form_title(
                 form_title_ids=form_title_ids,
                 start_date=start_date,
                 end_date=end_date,
+                page_size=page_size,
+                offset=offset
             )
         except Exception as e:
-            # Por qué: fallback silencioso para no tumbar la API en errores de terceros
-            print(f"Error in get_campaign_donations: {e}")
-            return []
+            print(f"Error in get_campaign_donations (paginado): {e}")
+            return {"donations": [], "total_count": 0, "error": str(e)}
         
 
     # --- NUEVA FUNCIÓN ---

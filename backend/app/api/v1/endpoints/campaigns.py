@@ -6,7 +6,6 @@ from backend.app.core.security import get_current_user
 from backend.app.services.airtable_service import AirtableService, get_airtable_service
 from fastapi_cache.decorator import cache
 
-router = APIRouter()
 
 class DonationDetail(BaseModel):
     id: str
@@ -14,6 +13,12 @@ class DonationDetail(BaseModel):
     donorEmail: str
     amount: float
     date: str
+
+class PaginatedDonationsResponse(BaseModel):
+    donations: List[DonationDetail]
+    total_count: int
+
+router = APIRouter()
 
 @router.get("/sources", response_model=List[str])
 @cache(expire=900)  # why: lista de fuentes cambia poco
@@ -79,54 +84,34 @@ def get_donations_for_form_title(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener las donaciones: {e}")
 
-@router.get("/{campaign_id}/donations")
-@cache(expire=60)  # why: consulta potencialmente costosa; refresco aceptable en 1min
+@router.get("/{campaign_id}/donations", response_model=PaginatedDonationsResponse) # Usar el nuevo response_model
+@cache(expire=60) # Mantener caché si aplica, pero ten en cuenta que cacheará por página/offset
 def get_campaign_donations_endpoint(
     campaign_id: str,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    # PAGINACIÓN: Añadir parámetros de query page_size y offset
+    page_size: Optional[int] = Query(50, ge=1, le=100),
+    offset: Optional[int] = Query(0, ge=0),
     airtable_service: AirtableService = Depends(get_airtable_service),
     current_user: str = Depends(get_current_user),
-) -> Dict[str, Any]:
+) -> Dict[str, Any]: # El tipo de retorno sigue siendo Dict
     """
-    Devuelve CustomReportData a nivel campaña.
-    why: evita query strings gigantes cuando se seleccionan todos los títulos.
+    Devuelve donaciones paginadas para una campaña, opcionalmente filtradas por fecha.
     """
     try:
-        # Preferir método directo si existe
-        donations = None
-        if hasattr(airtable_service, "get_campaign_donations"):
-            donations = airtable_service.get_campaign_donations(
-                campaign_id=campaign_id,
-                start_date=start_date,
-                end_date=end_date,
-            )
-        else:
-            # Fallback: derivar form_title_ids desde stats y reutilizar función existente
-            stats = airtable_service.get_campaign_stats(
-                campaign_id=campaign_id,
-                start_date=start_date,
-                end_date=end_date,
-                form_title_ids=None,
-            )
-            titles = stats.get("stats_by_form_title", []) or []
-            form_title_ids = [t.get("form_title_id") for t in titles if t.get("form_title_id")]
-            if form_title_ids:
-                donations = airtable_service.get_donations_for_form_title(
-                    form_title_ids=form_title_ids,
-                    start_date=start_date,
-                    end_date=end_date,
-                )
-            else:
-                donations = []
-
-        total_amount = round(sum(float(d.get("amount", 0)) for d in donations), 2)
-        return {
-            "donations": donations,
-            "totalAmount": total_amount,
-            "donationsCount": len(donations),
-        }
+        # PAGINACIÓN: Pasar page_size y offset al servicio
+        # La función get_campaign_donations ya fue modificada para aceptar estos params
+        donations_result = airtable_service.get_campaign_donations(
+            campaign_id=campaign_id,
+            start_date=start_date,
+            end_date=end_date,
+            page_size=page_size,
+            offset=offset
+        )
+        # PAGINACIÓN: Devolver directamente el resultado del servicio
+        return donations_result
     except HTTPException as http_exc:
         raise http_exc
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al obtener donaciones de campaña: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al obtener donaciones de campaña (paginado): {e}")

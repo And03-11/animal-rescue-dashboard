@@ -30,16 +30,24 @@ interface AnalyticsStats {
         name: string;
         total_amount: number;
         donation_count: number;
-        date_sent?: string; // Cambiar 'createdTime' por 'date_sent'
+        start_date?: string; // Cambiar 'createdTime' por 'date_sent'
     }[];
 }
 
-interface CustomReportData { donations: Donation[]; totalAmount: number; donationsCount: number; }
-interface AnalyticsData { stats: AnalyticsStats | null; report: CustomReportData | null; }
+interface PaginatedDonationsResponse {
+  donations: Donation[];
+  total_count: number; // El total general que coincide con los filtros
+}
+
+
+
+const DONATIONS_PAGE_SIZE = 50;
 
 export const CampaignAnalyticsPage: React.FC = () => {
     const theme = useTheme();
     const { subscribe } = useWebSocket();
+    const scrollObserver = useRef<IntersectionObserver | null>(null); // PAGINACIÓN: Ref para el observer
+    const loadMoreRef = useRef(null);
 
     const [sources, setSources] = useState<ApiListItem[]>([]);
     const [campaigns, setCampaigns] = useState<ApiListItem[]>([]);
@@ -50,11 +58,19 @@ export const CampaignAnalyticsPage: React.FC = () => {
     const [startDate, setStartDate] = useState<Dayjs | null>(null);
     const [endDate, setEndDate] = useState<Dayjs | null>(null);
     const [selectorKey, setSelectorKey] = useState(0);
-    const [analyticsData, setAnalyticsData] = useState<AnalyticsData>({ stats: null, report: null });
-    const [loading, setLoading] = useState({ initial: true, stats: false, report: false, dependent: false });
+    const [analyticsStats, setAnalyticsStats] = useState<AnalyticsStats | null>(null);
+    // PAGINACIÓN: Nuevos estados para la lista de donantes y paginación
+    const [donations, setDonations] = useState<Donation[]>([]);
+    const [totalDonationsCount, setTotalDonationsCount] = useState(0);
+    const [currentOffset, setCurrentOffset] = useState(0);
+    const [hasMoreDonations, setHasMoreDonations] = useState(false);
+    const [isLoadingMore, setIsLoadingMore] = useState(false);
+
+    const [loading, setLoading] = useState({ initial: true, stats: false, donations: false, dependent: false });
     const [error, setError] = useState('');
 
-    const inFlight = useRef<AbortController | null>(null);
+    const inFlightStats = useRef<AbortController | null>(null);
+    const inFlightDonations = useRef<AbortController | null>(null); // PAGINACIÓN: Ref separada
     const wsDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Normaliza y deduplica para tolerar shapes distintos
@@ -150,28 +166,122 @@ export const CampaignAnalyticsPage: React.FC = () => {
 
     useEffect(() => { setError(''); }, [selectedSource, selectedCampaign, startDate, endDate, selectedTitles]);
 
-    const fetchData = useCallback(async (isSilent = false) => {
-        if (!selectedSource) {
-            setError("Please select a source to begin.");
-            return;
-        }
-        if (inFlight.current) inFlight.current.abort();
-        const controller = new AbortController();
-        inFlight.current = controller;
 
-        if (!isSilent) setLoading(prev => ({ ...prev, stats: true, report: true }));
-        setError('');
+    const fetchMoreDonations = useCallback(async () => {
+        // Evitar llamadas múltiples si ya está cargando o no hay más
+        if (isLoadingMore || !hasMoreDonations || !selectedSource) return;
+
+        setIsLoadingMore(true);
+        if (inFlightDonations.current) inFlightDonations.current.abort(); // Abortar si hay una en curso
+        const controller = new AbortController();
+        inFlightDonations.current = controller;
 
         try {
             const dedupTitles = Array.from(new Set(selectedTitles));
+            const hasCampaign = !!selectedCampaign;
+            const currentFormTitles = formTitles; // Capturar valor actual del estado
+            const totalTitles = currentFormTitles.length;
+            const hasSubset = hasCampaign && dedupTitles.length > 0 && totalTitles > 0 && dedupTitles.length < totalTitles;
+            const usePost = hasCampaign && hasSubset;
+
+            let donationsRes: { data: PaginatedDonationsResponse };
+
+            const commonParams = {
+                start_date: startDate ? startDate.format('YYYY-MM-DD') : undefined,
+                end_date: endDate ? endDate.format('YYYY-MM-DD') : undefined,
+                page_size: DONATIONS_PAGE_SIZE,
+                offset: currentOffset // <-- Usar el offset actual para pedir la siguiente página
+            };
+
+            if (usePost) {
+                 const payload = {
+                     form_title_ids: dedupTitles,
+                     ...commonParams
+                 };
+                donationsRes = await apiClient.post<PaginatedDonationsResponse>(
+                     '/form-titles/donations',
+                     JSON.stringify(payload),
+                     {
+                        signal: controller.signal,
+                        headers: { 'Content-Type': 'application/json' },
+                        transformRequest: [(data) => data],
+                     }
+                 );
+            } else if (hasCampaign) {
+                // GET para campaña completa o si no hay títulos definidos
+                 const campaignReportUrl = `/campaigns/${selectedCampaign}/donations`;
+                 donationsRes = await apiClient.get<PaginatedDonationsResponse>(campaignReportUrl, {
+                     params: commonParams,
+                     signal: controller.signal
+                 });
+            } else {
+                 // GET para fuente completa (si se implementara paginación a nivel de fuente)
+                 // Por ahora, asumimos que esto no debería ocurrir si no hay campaña seleccionada
+                 // O podrías adaptar para llamar a /form-titles/donations con todos los títulos de la fuente
+                 console.warn("Fetching donations without a specific campaign selected - pagination might need source-level endpoint");
+                 setIsLoadingMore(false); // Detener carga si no se maneja
+                 return; // Salir por ahora
+            }
+
+
+            const { donations: newDonations, total_count } = donationsRes.data;
+
+            setDonations(prev => [...prev, ...newDonations]); // Añadir las nuevas donaciones a las existentes
+            const nextOffset = currentOffset + newDonations.length;
+            setCurrentOffset(nextOffset);
+            setHasMoreDonations(nextOffset < total_count); // Hay más si el nuevo offset es menor que el total
+            setTotalDonationsCount(total_count); // Actualizar el total por si acaso cambia
+
+
+        } catch (err: any) {
+            if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') return;
+            setError(prev => prev || 'Failed to load more donations.'); // Mostrar error si no hay uno ya
+        } finally {
+            if (inFlightDonations.current === controller) {
+                setIsLoadingMore(false);
+                inFlightDonations.current = null;
+            }
+        }
+    }, [isLoadingMore, hasMoreDonations, selectedSource, selectedCampaign, selectedTitles, startDate, endDate, formTitles, currentOffset]);
+
+    const fetchData = useCallback(async (isSilent = false) => {
+        if (!selectedSource) {
+            // ... (limpieza como antes) ...
+            setError("Please select a source to begin.");
+            setAnalyticsStats(null); setDonations([]); setTotalDonationsCount(0);
+            setCurrentOffset(0); setHasMoreDonations(false);
+            return;
+        }
+        if (inFlightStats.current) inFlightStats.current.abort();
+        if (inFlightDonations.current) inFlightDonations.current.abort();
+
+        const statsController = new AbortController();
+        const donationsController = new AbortController();
+        inFlightStats.current = statsController;
+        inFlightDonations.current = donationsController;
+
+        if (!isSilent) {
+             // CORRECCIÓN: Usar setLoading correctamente
+            setLoading(prev => ({ ...prev, stats: true, donations: true }));
+            setAnalyticsStats(null); setDonations([]); setTotalDonationsCount(0);
+            setCurrentOffset(0); setHasMoreDonations(false);
+        }
+        setError('');
+
+        const currentFormTitles = formTitles; // Usar valor estable del estado
+        const totalTitles = currentFormTitles.length;
+        const dedupTitles = Array.from(new Set(selectedTitles));
+        const hasCampaign = !!selectedCampaign;
+        const hasSubset = hasCampaign && dedupTitles.length > 0 && totalTitles > 0 && dedupTitles.length < totalTitles;
+
+
+        // --- 1. Fetch Stats ---
+        try {
+            // Ya no necesitamos definir totalTitles aquí
             const statsParams = new URLSearchParams();
             if (startDate) statsParams.append('start_date', startDate.format('YYYY-MM-DD'));
             if (endDate) statsParams.append('end_date', endDate.format('YYYY-MM-DD'));
-
-            const hasCampaign = !!selectedCampaign;
-            const totalTitles = formTitles.length;
-            const hasSubset = hasCampaign && dedupTitles.length > 0 && totalTitles > 0 && dedupTitles.length < totalTitles;
-
+            // hasCampaign y hasSubset ya están definidos arriba
             if (hasSubset) dedupTitles.forEach(id => statsParams.append('form_title_id', id));
 
             const statsQuery = statsParams.toString();
@@ -179,89 +289,123 @@ export const CampaignAnalyticsPage: React.FC = () => {
                 ? `/campaigns/${selectedCampaign}/stats?${statsQuery}`
                 : `/campaigns/source/${selectedSource}/stats?${statsQuery}`;
 
-            const statsPromise = apiClient.get(statsUrl, { signal: controller.signal });
-
-            let reportPromise: Promise<{ data: CustomReportData } | null> | null = null;
-
-            if (hasCampaign) {
-                if (hasSubset) {
-                    const payload = {
-                        form_title_ids: dedupTitles,
-                        start_date: startDate ? startDate.format('YYYY-MM-DD') : undefined,
-                        end_date: endDate ? endDate.format('YYYY-MM-DD') : undefined,
-                        };
-
-                        reportPromise = apiClient.post<CustomReportData>(
-                        '/form-titles/donations',
-                        JSON.stringify(payload),               // asegura JSON "plano"
-                        {
-                            signal: controller.signal,
-                            headers: { 'Content-Type': 'application/json' }, // fuerza JSON en esta request
-                            transformRequest: [(data) => data],  // evita transformaciones globales
-                        }
-                        );
-                } else {
-                    const baseParams = new URLSearchParams();
-                    if (startDate) baseParams.append('start_date', startDate.format('YYYY-MM-DD'));
-                    if (endDate) baseParams.append('end_date', endDate.format('YYYY-MM-DD'));
-                    const campaignReportUrl = `/campaigns/${selectedCampaign}/donations?${baseParams.toString()}`;
-
-                    reportPromise = (async () => {
-                        try {
-                            const r = await apiClient.get<CustomReportData>(campaignReportUrl, { signal: controller.signal });
-                            return r;
-                        } catch (err: any) {
-                            const status = err?.response?.status;
-                            const canFallback = status === 404 || status === 405 || status === 501;
-                            if (!canFallback) throw err;
-
-                            const idsForFallback = formTitles.length > 0 ? formTitles.map(t => t.id) : dedupTitles;
-                            const payloadFB = {
-                                form_title_ids: Array.from(new Set(idsForFallback)),
-                                start_date: startDate ? startDate.format('YYYY-MM-DD') : undefined,
-                                end_date: endDate ? endDate.format('YYYY-MM-DD') : undefined,
-                            };
-                            return await apiClient.post<CustomReportData>(
-                                '/form-titles/donations',
-                                payloadFB,
-                                { signal: controller.signal }
-                            );
-                        }
-                    })();
-                }
-            }
-
-            const [statsRes, reportRes] = await Promise.all([
-                statsPromise,
-                reportPromise ?? Promise.resolve(null)
-            ]);
-
-            const newStats: AnalyticsStats = {
-                total_amount: statsRes.data.campaign_total_amount ?? statsRes.data.source_total_amount,
-                total_count: statsRes.data.campaign_total_count ?? statsRes.data.source_total_count,
-                breakdown: (statsRes.data.stats_by_form_title ?? statsRes.data.stats_by_campaign).map((item: any) => ({
-                    id: item.form_title_id ?? item.campaign_id,
-                    name: item.form_title_name ?? item.campaign_name,
-                    total_amount: item.total_amount,
-                    donation_count: item.donation_count,
-                    date_sent: item.date_sent // Cambiar 'createdTime' por 'date_sent'
-                }))
+            const statsRes = await apiClient.get(statsUrl, { signal: statsController.signal });
+            // ... (resto del mapeo de stats como antes)...
+            const rawBreakdown = statsRes.data?.stats_by_campaign ?? statsRes.data?.stats_by_form_title ?? [];
+            const breakdown = Array.isArray(rawBreakdown) ? rawBreakdown.map((item: any) => ({
+                id: item?.campaign_id ?? item?.form_title_id ?? '',
+                name: item?.campaign_name ?? item?.form_title_name ?? 'Unknown',
+                total_amount: typeof item?.total_amount === 'number' ? item.total_amount : 0,
+                donation_count: typeof item?.donation_count === 'number' ? item.donation_count : 0,
+                start_date: item?.start_date ?? item?.createdTime,
+            })) : [];
+             const newStats: AnalyticsStats = {
+                total_amount: typeof statsRes.data?.source_total_amount === 'number' ? statsRes.data.source_total_amount :
+                              typeof statsRes.data?.campaign_total_amount === 'number' ? statsRes.data.campaign_total_amount : 0,
+                total_count: typeof statsRes.data?.source_total_count === 'number' ? statsRes.data.source_total_count :
+                             typeof statsRes.data?.campaign_total_count === 'number' ? statsRes.data.campaign_total_count : 0,
+                breakdown: breakdown
             };
+            setAnalyticsStats(newStats); // <-- Actualiza stats aquí
             
-            setAnalyticsData({
-                stats: newStats,
-                report: reportRes ? (reportRes as any).data : null,
-            });
+
         } catch (err: any) {
-            if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') return;
-            setError('Failed to load analytics data.');
-            setAnalyticsData({ stats: null, report: null });
+             if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') return;
+             setError(prev => prev || 'Failed to load analytics stats.'); // Mostrar error si no hay uno ya
+             setAnalyticsStats(null); // Limpiar en caso de error
         } finally {
-            if (inFlight.current === controller) {
-                if (!isSilent) setLoading(prev => ({ ...prev, stats: false, report: false }));
-                inFlight.current = null;
+            if (inFlightStats.current === statsController) {
+                if (!isSilent) setLoading(prev => ({ ...prev, stats: false }));
+                inFlightStats.current = null;
             }
         }
+
+        // --- 2. Fetch First Page of Donations (Solo si hay campaña o títulos seleccionados) ---
+        //    (Podrías querer cargar donaciones incluso a nivel de Fuente, ajusta la lógica si es necesario)
+        const shouldFetchDonations = !!selectedCampaign || (selectedTitles.length > 0 && formTitles.length > 0);
+
+        if (shouldFetchDonations) {
+            try {
+                const dedupTitles = Array.from(new Set(selectedTitles));
+                const hasCampaign = !!selectedCampaign;
+                const hasSubset = hasCampaign && dedupTitles.length > 0 && formTitles.length > 0 && dedupTitles.length < totalTitles;
+                const usePost = hasCampaign && hasSubset;
+
+                let donationsRes: { data: PaginatedDonationsResponse };
+
+                 const commonParams = {
+                    start_date: startDate ? startDate.format('YYYY-MM-DD') : undefined,
+                    end_date: endDate ? endDate.format('YYYY-MM-DD') : undefined,
+                    page_size: DONATIONS_PAGE_SIZE,
+                    offset: 0 // <-- Siempre 0 para la primera carga
+                 };
+
+                 if (usePost) {
+                     const payload = {
+                         form_title_ids: dedupTitles,
+                         ...commonParams
+                     };
+                     donationsRes = await apiClient.post<PaginatedDonationsResponse>(
+                         '/form-titles/donations',
+                         JSON.stringify(payload),
+                         {
+                             signal: donationsController.signal,
+                             headers: { 'Content-Type': 'application/json' },
+                             transformRequest: [(data) => data],
+                         }
+                     );
+                 } else if (hasCampaign) {
+                     const campaignReportUrl = `/campaigns/${selectedCampaign}/donations`;
+                     donationsRes = await apiClient.get<PaginatedDonationsResponse>(campaignReportUrl, {
+                         params: commonParams,
+                         signal: donationsController.signal
+                     });
+                 } else {
+                     // Lógica para fuente completa si se implementa
+                     console.warn("Attempting to fetch donations without campaign - adjust logic if needed for source-level.");
+                     // Si no se maneja, limpia el estado de donaciones
+                      setDonations([]);
+                      setTotalDonationsCount(0);
+                      setCurrentOffset(0);
+                      setHasMoreDonations(false);
+                      if (!isSilent) setLoading(prev => ({ ...prev, donations: false })); // Asegura quitar loading
+                      inFlightDonations.current = null;
+                      return; // Salir si no hay lógica para fuente
+                 }
+
+
+                const { donations: firstPageDonations, total_count } = donationsRes.data;
+
+                setDonations(firstPageDonations); // <-- Establece la primera página
+                const nextOffset = firstPageDonations.length;
+                setCurrentOffset(nextOffset); // <-- Establece el offset para la *siguiente* carga
+                setHasMoreDonations(nextOffset < total_count); // <-- Hay más si cargamos menos que el total
+                setTotalDonationsCount(total_count); // <-- Guardar el total
+
+
+            } catch (err: any) {
+                 if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') return;
+                 setError(prev => prev || 'Failed to load initial donations.');
+                 setDonations([]); // Limpiar en caso de error
+                 setTotalDonationsCount(0);
+                 setCurrentOffset(0);
+                 setHasMoreDonations(false);
+            } finally {
+                if (inFlightDonations.current === donationsController) {
+                    if (!isSilent) setLoading(prev => ({ ...prev, donations: false }));
+                    inFlightDonations.current = null;
+                }
+            }
+        } else {
+             // Si no debemos cargar donaciones (ej. solo fuente seleccionada sin lógica específica)
+             setDonations([]);
+             setTotalDonationsCount(0);
+             setCurrentOffset(0);
+             setHasMoreDonations(false);
+             if (!isSilent) setLoading(prev => ({ ...prev, donations: false })); // Asegura quitar loading
+        }
+
+
     }, [selectedSource, selectedCampaign, selectedTitles, startDate, endDate, formTitles]);
 
     const handleApplyFilters = () => { fetchData(false); };
@@ -273,12 +417,45 @@ export const CampaignAnalyticsPage: React.FC = () => {
         });
         return () => {
             unsubscribe();
-            if (wsDebounce.current) clearTimeout(wsDebounce.current);
-            if (inFlight.current) inFlight.current.abort();
+            if (inFlightStats.current) inFlightStats.current.abort();
+            if (inFlightDonations.current) inFlightDonations.current.abort();
         };
     }, [subscribe, fetchData]);
 
+    // PAGINACIÓN: useEffect para configurar el IntersectionObserver
+    useEffect(() => {
+        const options = {
+            root: null, // viewport
+            rootMargin: '0px',
+            threshold: 1.0 // Trigger cuando el elemento esté completamente visible
+        };
+
+        const callback = (entries: IntersectionObserverEntry[]) => {
+            const target = entries[0];
+            if (target.isIntersecting && !isLoadingMore && hasMoreDonations) {
+                // console.log("Reached end of list, fetching more...");
+                fetchMoreDonations();
+            }
+        };
+
+        scrollObserver.current = new IntersectionObserver(callback, options);
+
+        const currentLoadMoreRef = loadMoreRef.current; // Capturar el ref actual
+        if (currentLoadMoreRef) {
+            scrollObserver.current.observe(currentLoadMoreRef);
+        }
+
+        // Limpieza
+        return () => {
+            if (scrollObserver.current && currentLoadMoreRef) {
+                scrollObserver.current.unobserve(currentLoadMoreRef);
+            }
+        };
+    }, [fetchMoreDonations, isLoadingMore, hasMoreDonations]); // Asegúrate de incluir dependencias
+
+
     const handleClearAllFilters = () => {
+        // ... (sin cambios)
         setSelectedSource('');
         setSelectedCampaign('');
         setSelectedTitles([]);
@@ -286,16 +463,22 @@ export const CampaignAnalyticsPage: React.FC = () => {
         setFormTitles([]);
         setStartDate(null);
         setEndDate(null);
-        setAnalyticsData({ stats: null, report: null });
+        setAnalyticsStats(null); // Limpiar stats
+        setDonations([]); // Limpiar donaciones
+        setTotalDonationsCount(0);
+        setCurrentOffset(0);
+        setHasMoreDonations(false);
         setError('');
     };
 
-    const handleClearCampaign = () => { setSelectedCampaign(''); };
-    const handleClearDates = () => { setStartDate(null); setEndDate(null); };
+    const handleClearCampaign = () => { setSelectedCampaign(''); /* No limpiar donaciones aquí, fetchData lo hará */ };
+    const handleClearDates = () => { setStartDate(null); setEndDate(null); /* No limpiar donaciones aquí */ };
 
-    const { stats, report } = analyticsData;
-    const totalAmount = report?.totalAmount ?? stats?.total_amount ?? 0;
-    const totalCount = report?.donationsCount ?? stats?.total_count ?? 0;
+    // --- Variables para Renderizado (Usar nuevos estados) ---
+    const stats = analyticsStats; // Usar el estado de stats
+    const reportExists = donations.length > 0 || totalDonationsCount > 0; // Indicador si hay donaciones
+    const totalAmount = stats?.total_amount ?? 0;
+    const totalCount = stats?.total_count ?? 0;
     const chartData = stats?.breakdown;
 
     return (
@@ -381,43 +564,48 @@ export const CampaignAnalyticsPage: React.FC = () => {
                                 </Paper>
                             )}
                             <Box sx={{ mt: 4 }}>
-                                {loading.report && (<Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>)}
-                                <Collapse in={!loading.report && !!report} timeout="auto">
-                                    {report && (
-                                        <>
-                                            <Typography variant="h5" gutterBottom>Donors</Typography>
-                                            <Divider sx={{ mb: 2 }} />
-                                            <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 600 }}>
-                                                <Table stickyHeader size="small">
-                                                    <TableHead>
-                                                        <TableRow>
-                                                            <TableCell>Donor</TableCell>
-                                                            <TableCell>Email</TableCell>
-                                                            <TableCell>Date</TableCell>
-                                                            <TableCell align="right">Amount</TableCell>
+                                {loading.donations && donations.length === 0 ? ( // Indicador inicial
+                                    <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>
+                                ) : reportExists ? ( // Solo mostrar si hay donaciones (iniciales o cargadas)
+                                    <>
+                                        <Typography variant="h5" gutterBottom>Donors ({totalDonationsCount} Total)</Typography>
+                                        <Divider sx={{ mb: 2 }} />
+                                        {/* PAGINACIÓN: TableContainer con max Height para activar scroll */}
+                                        <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 600, overflow: 'auto' }}>
+                                            <Table stickyHeader size="small">
+                                                <TableHead>
+                                                    <TableRow>
+                                                        <TableCell>Donor</TableCell>
+                                                        <TableCell>Email</TableCell>
+                                                        <TableCell>Date</TableCell>
+                                                        <TableCell align="right">Amount</TableCell>
+                                                    </TableRow>
+                                                </TableHead>
+                                                <TableBody>
+                                                    {/* PAGINACIÓN: Renderizar estado 'donations' */}
+                                                    {donations.map(d => (
+                                                        <TableRow key={d.id} hover>
+                                                            <TableCell>{d.donorName}</TableCell>
+                                                            <TableCell>{d.donorEmail}</TableCell>
+                                                            <TableCell>{dayjs(d.date).format('DD/MM/YYYY HH:mm')}</TableCell>
+                                                            <TableCell align="right">${d.amount.toFixed(2)}</TableCell>
                                                         </TableRow>
-                                                    </TableHead>
-                                                    <TableBody>
-                                                        {report.donations.length === 0 ? (
-                                                            <TableRow>
-                                                                <TableCell colSpan={4} align="center">No donations found</TableCell>
-                                                            </TableRow>
-                                                        ) : (
-                                                            report.donations.map(d => (
-                                                                <TableRow key={d.id} hover>
-                                                                    <TableCell>{d.donorName}</TableCell>
-                                                                    <TableCell>{d.donorEmail}</TableCell>
-                                                                    <TableCell>{dayjs(d.date).format('DD/MM/YYYY HH:mm')}</TableCell>
-                                                                    <TableCell align="right">${d.amount.toFixed(2)}</TableCell>
-                                                                </TableRow>
-                                                            ))
-                                                        )}
-                                                    </TableBody>
-                                                </Table>
-                                            </TableContainer>
-                                        </>
-                                    )}
-                                </Collapse>
+                                                    ))}
+                                                    {/* PAGINACIÓN: Elemento sentinel invisible al final */}
+                                                     <TableRow ref={loadMoreRef} sx={{ height: '10px', visibility: hasMoreDonations ? 'visible' : 'hidden' }}>
+                                                        <TableCell colSpan={4} align="center" sx={{ border: 'none', p: 1 }}>
+                                                            {isLoadingMore && <CircularProgress size={24} />}
+                                                        </TableCell>
+                                                    </TableRow>
+                                                </TableBody>
+                                            </Table>
+                                        </TableContainer>
+                                    </>
+                                ) : !loading.donations && ( // Mensaje si no hay donaciones después de cargar
+                                    <Typography color="text.secondary" sx={{ textAlign: 'center', mt: 2 }}>
+                                        No donations found for the selected criteria.
+                                    </Typography>
+                                )}
                             </Box>
                             {/* --- NUEVA TABLA DETALLADA --- */}
                             {chartData && chartData.length > 0 && (
@@ -428,7 +616,7 @@ export const CampaignAnalyticsPage: React.FC = () => {
                                             <TableHead>
                                                 <TableRow>
                                                     <TableCell>Form Title</TableCell>
-                                                    <TableCell>First Donation Date</TableCell>
+                                                    <TableCell>Start Date</TableCell>
                                                     <TableCell align="right">Donations</TableCell>
                                                     <TableCell align="right">Amount Raised</TableCell>
                                                 </TableRow>
@@ -438,7 +626,7 @@ export const CampaignAnalyticsPage: React.FC = () => {
                                                     <TableRow key={item.id} hover>
                                                         <TableCell component="th" scope="row">{item.name}</TableCell>
                                                         <TableCell>
-                                                            {item.date_sent ? dayjs(item.date_sent).format('DD/MM/YYYY') : 'N/A'}
+                                                            {item.start_date ? dayjs(item.start_date).format('DD/MM/YYYY') : 'N/A'}
                                                         </TableCell>
                                                         <TableCell align="right">{item.donation_count}</TableCell>
                                                         <TableCell align="right" sx={{ fontWeight: 'bold' }}>
