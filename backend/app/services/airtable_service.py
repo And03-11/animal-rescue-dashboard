@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from fastapi import HTTPException
 from pyairtable import Api
 from typing import List, Dict, Optional, Any
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, date # <-- Add , date here
 from zoneinfo import ZoneInfo
 import traceback
 
@@ -19,6 +19,7 @@ CAMPAIGNS_TABLE_NAME = os.getenv("AIRTABLE_CAMPAIGNS_TABLE_NAME", "Campaigns")
 DONORS_TABLE_NAME = os.getenv("AIRTABLE_DONORS_TABLE_NAME", "Donors")
 # ¡NUEVO! Se añade la tabla de Emails
 EMAILS_TABLE_NAME = os.getenv("AIRTABLE_EMAILS_TABLE_NAME", "Emails")
+DAILY_SUMMARIES_TABLE_NAME = os.getenv("AIRTABLE_DAILYSUMMARIES_TABLE_NAME", "Daily Summaries")
 
 COSTA_RICA_TZ = ZoneInfo("America/Costa_Rica")
 
@@ -29,6 +30,11 @@ CAMPAIGNS_FIELDS = {"name": "Name", "source": "Source"}
 FORM_TITLES_FIELDS = {"name": "Name", "campaign_link": "Campaign", "donations_link": "Donations"}
 DONORS_FIELDS = {"name": "Name", "last_name": "Last Name", "emails_link": "Emails", "donations_link": "Donations"}
 EMAILS_FIELDS = {"email": "Email"}
+DAILY_SUMMARIES_FIELDS = {
+    "date": "Date", # Tu campo primario tipo Date
+    "total_amount": "Total Amount Today", # Tu campo Rollup de suma
+    "count": "Donations Count Today" # Tu campo Rollup de conteo
+}
 
 
 class AirtableService:
@@ -47,6 +53,8 @@ class AirtableService:
         self.campaigns_table = self.base.table(CAMPAIGNS_TABLE_NAME)
         self.donors_table = self.base.table(DONORS_TABLE_NAME)
         self.emails_table = self.base.table(EMAILS_TABLE_NAME)
+        # --- INICIALIZAR NUEVA TABLA ---
+        self.daily_summaries_table = self.base.table(DAILY_SUMMARIES_TABLE_NAME)
 
         print("Servicio de Airtable inicializado correctamente.")
 
@@ -610,6 +618,62 @@ class AirtableService:
             print(f"Error in get_campaign_donations: {e}")
             return []
         
+
+    # --- NUEVA FUNCIÓN ---
+    def get_daily_summaries(self, start_date: Optional[date] = None, end_date: Optional[date] = None) -> List[Dict[str, Any]]:
+        """
+        Obtiene los registros de resumen diario desde Airtable, filtrados por un rango de fechas.
+        """
+        try:
+            formula_parts = []
+            # Accede a los nombres de campo usando el diccionario DAILY_SUMMARIES_FIELDS
+            date_field = f"{{{DAILY_SUMMARIES_FIELDS['date']}}}"
+            total_amount_field = DAILY_SUMMARIES_FIELDS['total_amount']
+            count_field = DAILY_SUMMARIES_FIELDS['count']
+
+            # Construir fórmula de filtro de fecha
+            if start_date:
+                start_str = start_date.isoformat()
+                formula_parts.append(f"OR(IS_SAME({date_field}, DATETIME_PARSE('{start_str}', 'YYYY-MM-DD'), 'day'), IS_AFTER({date_field}, DATETIME_PARSE('{start_str}', 'YYYY-MM-DD')))")
+            if end_date:
+                end_str = end_date.isoformat()
+                formula_parts.append(f"OR(IS_SAME({date_field}, DATETIME_PARSE('{end_str}', 'YYYY-MM-DD'), 'day'), IS_BEFORE({date_field}, DATETIME_PARSE('{end_str}', 'YYYY-MM-DD')))")
+
+            formula = f"AND({', '.join(formula_parts)})" if formula_parts else None
+
+            # Campos a obtener
+            fields_to_get = [
+                DAILY_SUMMARIES_FIELDS["date"],
+                total_amount_field,
+                count_field
+            ]
+
+            print(f"Consultando Daily Summaries con fórmula: {formula}") # Para depuración
+            records = self.daily_summaries_table.all(formula=formula, fields=fields_to_get)
+
+            # Mapear los resultados
+            results = []
+            for rec in records:
+                fields = rec.get("fields", {})
+                record_date_str = fields.get(DAILY_SUMMARIES_FIELDS["date"]) # Viene como 'YYYY-MM-DD'
+                if record_date_str:
+                    results.append({
+                        "date": record_date_str, # String YYYY-MM-DD
+                        "total": fields.get(total_amount_field, 0),
+                        "count": fields.get(count_field, 0)
+                    })
+
+            results.sort(key=lambda x: x["date"]) # Ordenar por fecha
+            print(f"Obtenidos {len(results)} registros de Daily Summaries.") # Para depuración
+            return results
+
+        except Exception as e:
+            print(f"Error en get_daily_summaries: {e}")
+            traceback.print_exc()
+            return [] # fallback seguro
+    
+
+
 airtable_service_instance = AirtableService()
 
 def get_airtable_service():

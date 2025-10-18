@@ -6,80 +6,68 @@ from zoneinfo import ZoneInfo
 from typing import List, Dict, Any, Optional
 from backend.app.core.security import get_current_user
 from collections import defaultdict
+import traceback # Para el manejo de errores
+from fastapi import HTTPException # Para devolver errores HTTP
+from datetime import datetime, time, timedelta, date
 
 router = APIRouter()
 COSTA_RICA_TZ = ZoneInfo("America/Costa_Rica")
 
-def process_donations_for_trend(donations: List[Dict]) -> List[Dict[str, Any]]:
-    daily_trend_data = {}
-    for donation in donations:
-        donation_date_str = donation.get("date")
-        if not donation_date_str: continue
-        try:
-            utc_dt = datetime.fromisoformat(donation_date_str.replace('Z', '+00:00'))
-            day_str = utc_dt.astimezone(COSTA_RICA_TZ).date().isoformat()
-            
-            # Inicializa el día si no existe
-            if day_str not in daily_trend_data:
-                daily_trend_data[day_str] = {"total": 0, "count": 0}
-
-            # Agrega el monto y aumenta el contador
-            daily_trend_data[day_str]["total"] += donation.get("amount", 0)
-            daily_trend_data[day_str]["count"] += 1
-        except (ValueError, TypeError): 
-            continue
-    return [
-        {"date": day, "total": round(data["total"], 2), "count": data["count"]}
-        for day, data in sorted(daily_trend_data.items())
-    ]
 
 @router.get("/metrics")
-# ✅ Un caché de 3 minutos es un buen balance.
-@cache(expire=180)
+@cache(expire=180) # Mantenemos el caché
 def get_dashboard_metrics(
-    start_date: Optional[str] = None, 
-    end_date: Optional[str] = None,
+    start_date: Optional[str] = None, # Recibe YYYY-MM-DD del frontend
+    end_date: Optional[str] = None,   # Recibe YYYY-MM-DD del frontend
     airtable_service: AirtableService = Depends(get_airtable_service),
     current_user: str = Depends(get_current_user)
 ):
+    """
+    Obtiene métricas del dashboard usando la tabla pre-calculada Daily Summaries.
+    """
     try:
         now_in_tz = datetime.now(COSTA_RICA_TZ)
-        today_date = now_in_tz.date()
-        
-        # --- LÓGICA OPTIMIZADA ---
-        # 1. Hacemos UNA SOLA LLAMADA para los últimos 30 días.
-        start_of_today_dt = datetime.combine(today_date, time.min, tzinfo=COSTA_RICA_TZ)
-        end_of_today_dt = datetime.combine(today_date, time.max, tzinfo=COSTA_RICA_TZ)
-        start_30_days_ago_dt = start_of_today_dt - timedelta(days=30)
-        
-        # Esta es ahora nuestra única fuente de datos para las métricas "glance".
-        donations_last_30_days = airtable_service.get_donations(
-            start_utc=start_30_days_ago_dt.isoformat(), 
-            end_utc=end_of_today_dt.isoformat()
+        today_date_obj = now_in_tz.date() # Objeto date
+        today_str = today_date_obj.isoformat() # String 'YYYY-MM-DD'
+
+        # --- LÓGICA NUEVA CON DAILY SUMMARIES ---
+        # 1. Obtener resúmenes de los últimos 30 días para "Glance"
+        start_30_days_ago = today_date_obj - timedelta(days=30)
+        # Llamamos a la nueva función del servicio
+        daily_summaries_last_30 = airtable_service.get_daily_summaries(
+            start_date=start_30_days_ago,
+            end_date=today_date_obj
         )
 
-        # 2. Calculamos todas las métricas en Python a partir de esos datos.
+        # 2. Calcular métricas "Glance" desde los resúmenes
         amount_today = 0
         count_today = 0
         amount_this_month = 0
         count_this_month = 0
+        current_month = today_date_obj.month
+        current_year = today_date_obj.year
 
-        for d in donations_last_30_days:
-            donation_dt_utc = datetime.fromisoformat(d.get("date").replace('Z', '+00:00'))
-            donation_dt_local = donation_dt_utc.astimezone(COSTA_RICA_TZ)
+        for summary in daily_summaries_last_30:
+            summary_date_str = summary["date"]
+            try:
+                summary_date_obj = date.fromisoformat(summary_date_str)
+            except ValueError:
+                print(f"Advertencia: Formato de fecha inválido en registro de resumen: {summary_date_str}")
+                continue
 
-            # Sumar al total del mes
-            if donation_dt_local.year == today_date.year and donation_dt_local.month == today_date.month:
-                amount_this_month += d.get("amount", 0)
-                count_this_month += 1
-            
+            # Sumar al total del mes actual
+            if summary_date_obj.year == current_year and summary_date_obj.month == current_month:
+                amount_this_month += summary.get("total", 0)
+                count_this_month += summary.get("count", 0)
+
             # Sumar al total de hoy
-            if donation_dt_local.date() == today_date:
-                amount_today += d.get("amount", 0)
-                count_today += 1
-        
-        glance_trend = process_donations_for_trend(donations_last_30_days)
-        
+            if summary_date_str == today_str:
+                amount_today = summary.get("total", 0)
+                count_today = summary.get("count", 0)
+
+        # La tendencia "Glance" son directamente los datos obtenidos
+        glance_trend = daily_summaries_last_30
+
         glance_metrics = {
             "amountToday": round(amount_today, 2),
             "donationsCountToday": count_today,
@@ -88,29 +76,46 @@ def get_dashboard_metrics(
             "glanceTrend": glance_trend,
         }
 
-        # --- El cálculo de métricas filtradas sigue igual ---
+        # --- Cálculo de métricas filtradas (si se piden fechas) ---
         filtered_metrics = {}
         if start_date and end_date:
-            # ... (esta parte no cambia)
-            start_dt = datetime.fromisoformat(start_date).replace(tzinfo=COSTA_RICA_TZ)
-            end_dt = datetime.combine(datetime.fromisoformat(end_date), time.max, tzinfo=COSTA_RICA_TZ)
-            donations_in_range = airtable_service.get_donations(start_utc=start_dt.isoformat(), end_utc=end_dt.isoformat())
-            filtered_trend = process_donations_for_trend(donations_in_range)
-            amount_in_range = sum(item['total'] for item in filtered_trend)
-            filtered_metrics = {
-                "amountInRange": round(amount_in_range, 2),
-                "donationsCount": len(donations_in_range),
-                "dailyTrend": filtered_trend,
-            }
+            try:
+                s_date_obj = date.fromisoformat(start_date)
+                e_date_obj = date.fromisoformat(end_date)
 
+                # Obtener resúmenes para el rango específico
+                summaries_in_range = airtable_service.get_daily_summaries(
+                    start_date=s_date_obj,
+                    end_date=e_date_obj
+                )
+
+                amount_in_range = sum(s.get("total", 0) for s in summaries_in_range)
+                count_in_range = sum(s.get("count", 0) for s in summaries_in_range)
+                filtered_trend = summaries_in_range # Ya tiene el formato
+
+                filtered_metrics = {
+                    "amountInRange": round(amount_in_range, 2),
+                    "donationsCount": count_in_range,
+                    "dailyTrend": filtered_trend,
+                }
+            except ValueError:
+                print(f"Error: Fechas inválidas recibidas para filtro - start: {start_date}, end: {end_date}")
+                pass # Simplemente no devolvemos métricas filtradas
+            except Exception as e_filter:
+                print(f"Error calculando métricas filtradas: {e_filter}")
+                pass # Simplemente no devolvemos métricas filtradas
+
+        # Devolver la estructura combinada
         return {
             "glance": glance_metrics,
             "filtered": filtered_metrics
         }
+    # Manejo de errores (asegúrate que traceback y HTTPException estén importados)
     except Exception as e:
         print(f"Error crítico al generar las métricas del dashboard: {e}")
-        return {"error": "Could not process dashboard metrics", "details": str(e)}
-    
+        traceback.print_exc() # Imprime el detalle del error en la consola del servidor
+        # Lanza una excepción HTTP para que el frontend reciba un error 500
+        raise HTTPException(status_code=500, detail="Could not process dashboard metrics")
 
 
 @router.get("/top-donors")
