@@ -48,6 +48,7 @@ export const CampaignAnalyticsPage: React.FC = () => {
     const { subscribe } = useWebSocket();
     const scrollObserver = useRef<IntersectionObserver | null>(null); // PAGINACIÓN: Ref para el observer
     const loadMoreRef = useRef(null);
+    const tableContainerRef = useRef<HTMLDivElement | null>(null);
 
     const [sources, setSources] = useState<ApiListItem[]>([]);
     const [campaigns, setCampaigns] = useState<ApiListItem[]>([]);
@@ -168,8 +169,10 @@ export const CampaignAnalyticsPage: React.FC = () => {
 
 
     const fetchMoreDonations = useCallback(async () => {
+        console.log("fetchMoreDonations called. Current state:", { isLoadingMore, hasMoreDonations, currentOffset });
         // Evitar llamadas múltiples si ya está cargando o no hay más
         if (isLoadingMore || !hasMoreDonations || !selectedSource) return;
+        console.log("fetchMoreDonations aborted (loading, no more data, or no source)");
 
         setIsLoadingMore(true);
         if (inFlightDonations.current) inFlightDonations.current.abort(); // Abortar si hay una en curso
@@ -177,6 +180,8 @@ export const CampaignAnalyticsPage: React.FC = () => {
         inFlightDonations.current = controller;
 
         try {
+
+            console.log(`Making API call with offset: ${currentOffset}, pageSize: ${DONATIONS_PAGE_SIZE}`);
             const dedupTitles = Array.from(new Set(selectedTitles));
             const hasCampaign = !!selectedCampaign;
             const currentFormTitles = formTitles; // Capturar valor actual del estado
@@ -223,11 +228,25 @@ export const CampaignAnalyticsPage: React.FC = () => {
                  return; // Salir por ahora
             }
 
+            console.log(`Making API call with offset: ${currentOffset}, pageSize: ${DONATIONS_PAGE_SIZE}`);
+
 
             const { donations: newDonations, total_count } = donationsRes.data;
 
-            setDonations(prev => [...prev, ...newDonations]); // Añadir las nuevas donaciones a las existentes
+             // Añadir las nuevas donaciones a las existentes
             const nextOffset = currentOffset + newDonations.length;
+            const hasMore = nextOffset < total_count;
+            
+
+            console.log("fetchMoreDonations finished. Response:", {
+                newDonationsCount: newDonations.length,
+                total_count
+            }, "Calculated next state:", {
+                nextOffset,
+                hasMore // Log calculated 'hasMore' value
+            });
+
+            setDonations(prev => [...prev, ...newDonations]);
             setCurrentOffset(nextOffset);
             setHasMoreDonations(nextOffset < total_count); // Hay más si el nuevo offset es menor que el total
             setTotalDonationsCount(total_count); // Actualizar el total por si acaso cambia
@@ -424,16 +443,26 @@ export const CampaignAnalyticsPage: React.FC = () => {
 
     // PAGINACIÓN: useEffect para configurar el IntersectionObserver
     useEffect(() => {
+        // Captura la referencia actual del contenedor de la tabla
+        const currentTableContainer = tableContainerRef.current;
+        if (!currentTableContainer) return; // Salir si el contenedor aún no existe
+
         const options = {
-            root: null, // viewport
+            root: currentTableContainer, // <-- 3. USA EL CONTENEDOR COMO RAÍZ
             rootMargin: '0px',
-            threshold: 1.0 // Trigger cuando el elemento esté completamente visible
+            threshold: 0.1 // Trigger cuando el elemento esté completamente visible DENTRO DEL CONTENEDOR
         };
 
         const callback = (entries: IntersectionObserverEntry[]) => {
             const target = entries[0];
+    // DETAILED LOG
+            console.log("Observer callback:", {
+                isIntersecting: target.isIntersecting,
+                isLoadingMore: isLoadingMore, // Check loading state
+                hasMore: hasMoreDonations   // Check if it thinks there's more
+            });
             if (target.isIntersecting && !isLoadingMore && hasMoreDonations) {
-                // console.log("Reached end of list, fetching more...");
+                console.log("%c--> Triggering fetchMoreDonations", "color: green; font-weight: bold;"); // Make it stand out
                 fetchMoreDonations();
             }
         };
@@ -476,7 +505,6 @@ export const CampaignAnalyticsPage: React.FC = () => {
 
     // --- Variables para Renderizado (Usar nuevos estados) ---
     const stats = analyticsStats; // Usar el estado de stats
-    const reportExists = donations.length > 0 || totalDonationsCount > 0; // Indicador si hay donaciones
     const totalAmount = stats?.total_amount ?? 0;
     const totalCount = stats?.total_count ?? 0;
     const chartData = stats?.breakdown;
@@ -563,50 +591,64 @@ export const CampaignAnalyticsPage: React.FC = () => {
                                     </ResponsiveContainer>
                                 </Paper>
                             )}
+                            {/* --- MODIFIED section --- */}
                             <Box sx={{ mt: 4 }}>
-                                {loading.donations && donations.length === 0 ? ( // Indicador inicial
-                                    <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>
-                                ) : reportExists ? ( // Solo mostrar si hay donaciones (iniciales o cargadas)
-                                    <>
-                                        <Typography variant="h5" gutterBottom>Donors ({totalDonationsCount} Total)</Typography>
-                                        <Divider sx={{ mb: 2 }} />
-                                        {/* PAGINACIÓN: TableContainer con max Height para activar scroll */}
-                                        <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 600, overflow: 'auto' }}>
-                                            <Table stickyHeader size="small">
-                                                <TableHead>
-                                                    <TableRow>
-                                                        <TableCell>Donor</TableCell>
-                                                        <TableCell>Email</TableCell>
-                                                        <TableCell>Date</TableCell>
-                                                        <TableCell align="right">Amount</TableCell>
-                                                    </TableRow>
-                                                </TableHead>
-                                                <TableBody>
-                                                    {/* PAGINACIÓN: Renderizar estado 'donations' */}
-                                                    {donations.map(d => (
-                                                        <TableRow key={d.id} hover>
-                                                            <TableCell>{d.donorName}</TableCell>
-                                                            <TableCell>{d.donorEmail}</TableCell>
-                                                            <TableCell>{dayjs(d.date).format('DD/MM/YYYY HH:mm')}</TableCell>
-                                                            <TableCell align="right">${d.amount.toFixed(2)}</TableCell>
-                                                        </TableRow>
-                                                    ))}
-                                                    {/* PAGINACIÓN: Elemento sentinel invisible al final */}
-                                                     <TableRow ref={loadMoreRef} sx={{ height: '10px', visibility: hasMoreDonations ? 'visible' : 'hidden' }}>
-                                                        <TableCell colSpan={4} align="center" sx={{ border: 'none', p: 1 }}>
-                                                            {isLoadingMore && <CircularProgress size={24} />}
-                                                        </TableCell>
-                                                    </TableRow>
-                                                </TableBody>
-                                            </Table>
-                                        </TableContainer>
-                                    </>
-                                ) : !loading.donations && ( // Mensaje si no hay donaciones después de cargar
-                                    <Typography color="text.secondary" sx={{ textAlign: 'center', mt: 2 }}>
-                                        No donations found for the selected criteria.
-                                    </Typography>
-                                )}
-                            </Box>
+    {/* Muestra spinner inicial SOLO si se espera cargar donaciones detalladas Y AÚN NO HAY */}
+    {loading.donations && donations.length === 0 && (selectedCampaign || selectedTitles.length > 0) && (
+        <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>
+    )}
+
+    {/* Muestra Título y Contenedor SIEMPRE que se haya SELECCIONADO algo para buscar donaciones */}
+    {(selectedCampaign || selectedTitles.length > 0) && !loading.stats && ( // Puedes ajustar esta condición si prefieres mostrarlo siempre
+        <>
+            {/* Mostramos el título solo si hay donaciones o si ya terminó de cargar y no encontró */}
+            {(donations.length > 0 || totalDonationsCount > 0 || !loading.donations) && (
+                 <Typography variant="h5" gutterBottom>Donors ({totalDonationsCount} Total)</Typography>
+            )}
+             <Divider sx={{ mb: 2 }} />
+
+            {/* 👇 TableContainer SIEMPRE RENDERIZADO (si aplica la búsqueda) para que la ref exista */}
+            <TableContainer ref={tableContainerRef} component={Paper} variant="outlined" sx={{ maxHeight: 600, overflow: 'auto' }}>
+                <Table stickyHeader size="small">
+                    <TableHead>
+                        <TableRow>
+                            <TableCell>Donor</TableCell>
+                            <TableCell>Email</TableCell>
+                            <TableCell>Date</TableCell>
+                            <TableCell align="right">Amount</TableCell>
+                        </TableRow>
+                    </TableHead>
+                    <TableBody>
+                        {/* El mapeo de donaciones SÍ puede estar vacío o no */}
+                        {donations.map(d => (
+                            <TableRow key={d.id} hover>
+                                <TableCell>{d.donorName}</TableCell>
+                                <TableCell>{d.donorEmail}</TableCell>
+                                <TableCell>{dayjs(d.date).format('DD/MM/YYYY HH:mm')}</TableCell>
+                                <TableCell align="right">${d.amount.toFixed(2)}</TableCell>
+                            </TableRow>
+                        ))}
+                        {/* 👇 Fila sentinela SIEMPRE RENDERIZADA (dentro del tbody) para que la ref exista */}
+                        <TableRow ref={loadMoreRef} sx={{ height: '1px', padding: 0, border: 'none', visibility: hasMoreDonations ? 'visible' : 'hidden' }}>
+                           <TableCell colSpan={4} sx={{ padding: 0, border: 'none', textAlign: 'center' }}>
+                               {/* El spinner solo se ve si está cargando */}
+                               {isLoadingMore && <CircularProgress size={24} sx={{ my: 1}} />}
+                           </TableCell>
+                       </TableRow>
+                    </TableBody>
+                </Table>
+            </TableContainer>
+        </>
+    )}
+
+    {/* Muestra "No donations found" (condición sin cambios) */}
+    {!loading.donations && (selectedCampaign || selectedTitles.length > 0) && donations.length === 0 && totalDonationsCount === 0 && (
+        <Typography color="text.secondary" sx={{ textAlign: 'center', mt: 2 }}>
+            No donations found for the selected criteria.
+        </Typography>
+    )}
+</Box>
+                            {/* ... Rest of the component ... */}
                             {/* --- NUEVA TABLA DETALLADA --- */}
                             {chartData && chartData.length > 0 && (
                                 <Paper variant="outlined" sx={{ width: '100%', mt: 4 }}>
