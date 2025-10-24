@@ -77,6 +77,7 @@ class CampaignRequest(BaseModel):
     source_type: str # 'airtable' o 'csv'
     subject: str
     html_body: str
+    campaign_name: str = Field(..., min_length=1)
     # Campos específicos para Airtable (opcionales)
     region: Optional[str] = None
     is_bounced: Optional[bool] = None

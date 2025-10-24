@@ -96,6 +96,7 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
   const [campaignId, setCampaignId] = useState<string | null>(initialCampaignId);
   const [showMapping, setShowMapping] = useState<boolean>(false);
 
+
   // --- INICIO: NUEVOS ESTADOS para Selección de Remitente ---
   const [senderOptions, setSenderOptions] = useState<SenderOptions>({ groups: [], accounts: [] });
   const [senderSelectionMode, setSenderSelectionMode] = useState<string>('all'); // 'all', 'group', 'manual'
@@ -103,6 +104,7 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
   // Guardamos objetos completos {id, group} para que Autocomplete funcione bien
   const [selectedAccounts, setSelectedAccounts] = useState<SelectedAccount[]>([]);
   const [loadingSenders, setLoadingSenders] = useState<boolean>(true);
+  const [campaignName, setCampaignName] = useState<string>('');
   // --- FIN: NUEVOS ESTADOS ---
 
 
@@ -232,6 +234,9 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
     setFormError(''); // Limpia errores previos
 
     // --- Validaciones Comunes ---
+    if (!campaignName.trim()) {
+      setFormError('Campaign Name cannot be empty.'); return;
+    }
     if (!subject.trim()) {
       setFormError('Email Subject cannot be empty.'); return;
     }
@@ -253,6 +258,7 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
 
     // --- Construcción del Payload Base ---
     const payload: any = {
+      campaign_name: campaignName,
       source_type: sourceType,
       subject,
       html_body: htmlBody,
@@ -470,6 +476,21 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
                 sx={{ mt: 1 }}
             />
         </Collapse>
+
+
+        <TextField
+          fullWidth
+          label="Campaign Name"
+          variant="outlined"
+          value={campaignName}
+          // Limpia el error específico de este campo al escribir
+          onChange={(e) => {setCampaignName(e.target.value); setFormError('');}}
+          margin="normal"
+          required // Marcarlo como requerido visualmente
+          // Mostrar error si el formError general incluye "Name"
+          error={formError.includes('Campaign Name')}
+          sx={{ mt: 2 }} // Añadir margen superior si es necesario
+      />
         {/* --- FIN: NUEVA SECCIÓN JSX --- */}
 
 
@@ -767,6 +788,8 @@ const handlePauseCampaign = async (campaignId: string) => {
             <TableHead>
               <TableRow>
                 <TableCell>Created At</TableCell>
+                <TableCell>Campaign Name</TableCell>
+                {/* --- AÑADE ESTA LÍNEA --- */}
                 <TableCell>Subject</TableCell>
                 <TableCell>Source</TableCell>
                 <TableCell>Target Info</TableCell>
@@ -784,8 +807,11 @@ const handlePauseCampaign = async (campaignId: string) => {
                     <TableCell>{new Date(campaign.createdAt).toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' })}</TableCell>
                     <TableCell sx={{fontWeight: 500}}>
                       <Link component={RouterLink} to={`/campaign/${campaign.id}`} underline="hover" color="inherit">
-                        {campaign.subject || '(No Subject)'}
+                          {campaign.campaign_name || `(ID: ${campaign.id.substring(9)})`} {/* Muestra nombre o ID corto */}
                       </Link>
+                    </TableCell>
+                    <TableCell>
+                      {campaign.subject || '(No Subject)'}
                     </TableCell>
                     <TableCell>
                         <Chip label={campaign.source_type?.toUpperCase()} size="small"
