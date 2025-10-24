@@ -799,6 +799,78 @@ class AirtableService:
             print(f"Error en get_daily_summaries: {e}")
             traceback.print_exc()
             return [] # fallback seguro
+        
+
+    def get_campaign_contacts(self, region: str, is_bounced: bool) -> List[Dict[str, Any]]:
+        """
+        Obtiene contactos de Airtable filtrados por Donor's Region, Donor's Stage='Big Campaign',
+        y Email's Bounced Account status.
+        Devuelve una lista de diccionarios, cada uno con al menos la clave 'Email'.
+        """
+        # Nombres de campos en la tabla Donors
+        region_field = DONORS_FIELDS.get("region", "Region")
+        stage_field = DONORS_FIELDS.get("stage", "Stage")
+        emails_link_field = DONORS_FIELDS.get("emails_link", "Emails") # Campo que enlaza a la tabla Emails
+
+        # Nombres de campos en la tabla Emails
+        email_address_field = EMAILS_FIELDS.get("email", "Email")
+        bounced_account_field = EMAILS_FIELDS.get("bounced_account", "Bounced Account") # <-- Campo Checkbox
+
+        try:
+            # --- Paso 1: Filtrar Donantes por Region y Stage ---
+            donor_formula_parts = [
+                f"{{{region_field}}} = '{region}'",
+                f"{{{stage_field}}} = 'Big Campaign'"
+            ]
+            donor_formula = f"AND({', '.join(donor_formula_parts)})"
+
+            print(f"Airtable formula for Donors: {donor_formula}")
+            # Obtenemos solo el campo que enlaza a los Emails
+            donor_records = self.donors_table.all(formula=donor_formula, fields=[emails_link_field])
+
+            if not donor_records:
+                print("No donors found matching Region and Stage.")
+                return []
+
+            # --- Paso 2: Recopilar TODOS los IDs de Emails vinculados a esos Donantes ---
+            all_linked_email_ids = set()
+            for record in donor_records:
+                email_ids = record.get('fields', {}).get(emails_link_field, [])
+                if email_ids:
+                    all_linked_email_ids.update(email_ids)
+
+            if not all_linked_email_ids:
+                print("Donors found, but no linked emails.")
+                return []
+
+            # --- Paso 3: Filtrar los Emails por estado 'Bounced Account' ---
+            email_id_formulas = [f"RECORD_ID() = '{id}'" for id in all_linked_email_ids]
+            # La condición para el checkbox: {Bounced Account}=1 si buscamos los rebotados (is_bounced=True),
+            # o NOT({Bounced Account}=1) si buscamos los NO rebotados (is_bounced=False).
+            bounced_condition = f"{{{bounced_account_field}}} = 1"
+            if not is_bounced:
+                bounced_condition = f"NOT({bounced_condition})"
+
+            # Combinamos la lista de IDs con la condición de bounce
+            email_formula = f"AND(OR({', '.join(email_id_formulas)}), {bounced_condition})"
+
+            print(f"Airtable formula for Emails: {email_formula}")
+            # Obtenemos solo el campo de la dirección de email
+            email_records = self.emails_table.all(formula=email_formula, fields=[email_address_field])
+
+            # --- Paso 4: Preparar la lista final con las direcciones de email ---
+            contact_list = [
+                {"Email": rec.get('fields', {}).get(email_address_field)}
+                for rec in email_records if rec.get('fields', {}).get(email_address_field)
+            ]
+
+            print(f"Found {len(contact_list)} emails matching all criteria (Region, Stage, Bounced).")
+            return contact_list
+
+        except Exception as e:
+            print(f"Error getting campaign contacts from Airtable (linked tables): {e}")
+            traceback.print_exc()
+            return [] # Devuelve lista vacía en caso de error
     
 
 

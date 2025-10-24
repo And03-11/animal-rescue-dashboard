@@ -63,7 +63,7 @@ app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["dashboar
 app.include_router(contacts.router, prefix="/api/v1/contacts", tags=["contacts"])
 app.include_router(campaigns.router, prefix="/api/v1/campaigns", tags=["campaigns"])
 app.include_router(form_titles.router, prefix="/api/v1/form-titles", tags=["form-titles"])
-app.include_router(email_sender.router, prefix="/api/v1/send-email", tags=["email"])
+app.include_router(email_sender.router, prefix="/api/v1", tags=["email"])
 app.include_router(search_router, prefix="/api/v1", tags=["search"])
 app.include_router(auth_sqlite.router, prefix="/api/v1", tags=["auth"])
 app.include_router(users.router, prefix="/api/v1", tags=["users"])

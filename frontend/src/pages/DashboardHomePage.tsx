@@ -10,7 +10,7 @@ import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import { useWebSocket } from '../context/WebSocketProvider';
 import { CombinedStatCard } from '../components/CombinedStatCard';
-import { TopDonorsTable, Donor } from '../components/TopDonorsTable';
+import { TopDonorsTable, type Donor } from '../components/TopDonorsTable';
 
 
 // Interfaces de datos
