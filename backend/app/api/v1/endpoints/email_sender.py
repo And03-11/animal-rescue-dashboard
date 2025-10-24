@@ -9,15 +9,51 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, File
 from pydantic import BaseModel, Field
 import pandas as pd
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 
 from backend.app.services.airtable_service import AirtableService
 from backend.app.services.gmail_service import GmailService
+from backend.app.services.credentials_manager import credentials_manager_instance
 
-from fastapi import Depends
+
+from fastapi import Depends, status
 from backend.app.core.security import get_current_user
 
 import shutil
+
+
+def _update_campaign_status(campaign_id: str, new_status: str) -> Dict[str, Any]:
+    """Lee el config de la campaña, actualiza el estado y guarda el archivo."""
+    campaign_file_path = os.path.join(CAMPAIGN_DATA_DIR, f"{campaign_id}.json")
+    if not os.path.exists(campaign_file_path):
+        raise HTTPException(status_code=404, detail=f"Campaign '{campaign_id}' not found.")
+
+    try:
+        with open(campaign_file_path, 'r') as f:
+            config = json.load(f)
+    except Exception as e:
+        print(f"[{campaign_id}] Error leyendo config para actualizar estado: {e}")
+        raise HTTPException(status_code=500, detail="Could not read campaign configuration.")
+
+    # Validaciones opcionales (ej: no pausar si ya está completada)
+    # current_status = config.get('status', 'Unknown')
+    # if current_status in ['Completed', 'Cancelled']:
+    #     raise HTTPException(status_code=400, detail=f"Campaign is already {current_status}.")
+
+    config['status'] = new_status
+    config['last_updated'] = datetime.now().isoformat() # Opcional: guardar cuándo se actualizó
+
+    try:
+        with open(campaign_file_path, 'w') as f:
+            json.dump(config, f, indent=4)
+        print(f"[{campaign_id}] Estado actualizado a: {new_status}")
+        return config # Devuelve la configuración actualizada
+    except Exception as e:
+        print(f"[{campaign_id}] Error guardando config tras actualizar estado: {e}")
+        # Revierte el cambio en memoria si falla el guardado? Opcional.
+        raise HTTPException(status_code=500, detail="Could not save updated campaign status.")
+
+
 
 
 class CSVMappingPayload(BaseModel):
@@ -44,6 +80,8 @@ class CampaignRequest(BaseModel):
     # Campos específicos para Airtable (opcionales)
     region: Optional[str] = None
     is_bounced: Optional[bool] = None
+    # --- AÑADE ESTA LÍNEA ---
+    sender_config: Union[str, List[str]] = Field(default="all", description="Grupo ('all', 'normal', 'risky', etc.) o lista de IDs de cuenta (nombres de archivo json sin extensión).")
 
 
 # --- REEMPLAZA esta función completa ---
@@ -80,6 +118,34 @@ def run_campaign_task(campaign_id: str):
     # --- 2. Obtener Lista de Contactos (Email, Nombre) ---
     contact_data = [] # Lista de diccionarios {'Email': ..., 'Name': ...}
     source_type = config.get('source_type')
+
+    # --- INICIO: NUEVO BLOQUE para cargar Servicios de Gmail ---
+    sender_config = config.get('sender_config', 'all') # 'all' por defecto si no está
+    print(f"[{campaign_id}] Configuración de remitente leída: {sender_config}")
+
+    # Usa la instancia importada del CredentialsManager
+    gmail_services: List[GmailService] = []
+    if credentials_manager_instance: # Verifica si el manager se inicializó correctamente
+        try:
+            gmail_services = credentials_manager_instance.get_gmail_services(sender_config)
+        except Exception as e_mgr:
+            print(f"[{campaign_id}] ERROR: Excepción al llamar a get_gmail_services: {e_mgr}")
+            traceback.print_exc() # Imprime el traceback completo
+    else:
+        print(f"[{campaign_id}] ERROR: CredentialsManager no está disponible.")
+
+
+    if not gmail_services:
+        print(f"[{campaign_id}] ERROR: No se pudieron cargar servicios de Gmail válidos. Abortando.")
+        config['status'] = 'Error - No Senders Loaded'
+        # Guardar estado de error...
+        try:
+            with open(campaign_file_path, 'w') as f: json.dump(config, f, indent=4)
+        except Exception as e_save: print(f"[{campaign_id}] WARNING: Could not save error status: {e_save}")
+        return # Detiene la tarea
+
+    print(f"[{campaign_id}] {len(gmail_services)} cuentas de Gmail listas para enviar.")
+    # --- FIN: NUEVO BLOQUE ---
 
     if source_type == 'airtable':
         print(f"[{campaign_id}] Fetching contacts from Airtable...")
@@ -207,74 +273,196 @@ def run_campaign_task(campaign_id: str):
     subject = config.get('subject', '(No Subject)')
     html_body_template = config.get('html_body', '<p>Error: Email body missing.</p>')
 
-    # Inicializar servicio de Gmail (requiere credenciales válidas)
-    # TODO: Necesitarás decidir cómo manejar las credenciales. Por ahora, asumimos una fija.
-    credentials_path = os.getenv("GMAIL_CREDENTIALS_PATH") # O una ruta específica
-    if not credentials_path or not os.path.exists(credentials_path):
-         print(f"[{campaign_id}] ERROR: Gmail credentials path not found or not set.")
-         config['status'] = 'Error - Gmail Credentials'
-         # (Guardar estado de error)
-         return
-    try:
-        gmail_service = GmailService(credentials_path=credentials_path)
-    except Exception as e:
-         print(f"[{campaign_id}] ERROR: Failed to initialize Gmail service: {e}")
-         config['status'] = 'Error - Gmail Init Failed'
-         # (Guardar estado de error)
-         return
 
     # --- 4. Iterar y Enviar Emails ---
-    sent_emails = []
+    # --- INICIO: REEMPLAZO del Bucle de Envío con Rotación ---
+    sent_emails = [] # Lista para llevar registro de emails ya enviados en esta campaña (en minúsculas)
+    sent_log_path = os.path.join(SENT_LOGS_DIR, f"sent_{campaign_id}.csv") # Ruta al log
+
     # Cargar emails ya enviados si el log existe (para reanudar)
     if os.path.exists(sent_log_path):
         try:
             sent_df = pd.read_csv(sent_log_path)
-            sent_emails = sent_df['Email'].tolist()
-            print(f"[{campaign_id}] Resuming campaign, found {len(sent_emails)} already sent.")
+            # Asegurarse que la columna 'Email' existe y manejar NaNs/vacíos
+            if 'Email' in sent_df.columns:
+                # Convertir a string, quitar nulos, convertir a minúsculas
+                sent_emails = sent_df['Email'].dropna().astype(str).str.lower().tolist()
+            print(f"[{campaign_id}] Reanudando campaña, encontrados {len(sent_emails)} emails ya enviados en el log.")
+        except pd.errors.EmptyDataError:
+            print(f"[{campaign_id}] El archivo de log {sent_log_path} está vacío.")
+            sent_emails = []
         except Exception as e:
-            print(f"[{campaign_id}] WARNING: Could not read previous sent log: {e}")
-            sent_emails = [] # Empezar de cero si hay error
+            print(f"[{campaign_id}] ADVERTENCIA: No se pudo leer el log de enviados {sent_log_path}: {e}. Empezando desde cero.")
+            sent_emails = [] # Empezar de cero si hay error leyendo el log
 
     sent_count_this_run = 0
+    service_index = 0 # Índice para rotar entre los servicios
+    failed_contacts = [] # Opcional: para registrar fallos persistentes
+
+    # Calcula cuántos emails realmente se intentarán enviar en esta ejecución
+    emails_to_try = [c.get('Email').lower() for c in contact_data if c.get('Email') and isinstance(c.get('Email'), str) and c.get('Email').lower() not in sent_emails]
+    total_contacts_to_send = len(emails_to_try)
+    print(f"[{campaign_id}] Emails pendientes en esta ejecución: {total_contacts_to_send}")
+    processed_count = 0
+
+    # Crear conjunto de emails ya enviados para búsqueda rápida O(1)
+    sent_emails_set = set(sent_emails)
+
     for contact in contact_data:
         email = contact.get('Email')
         name = contact.get('Name', 'Valued Supporter') # Usar nombre o genérico
 
-        if not email or email in sent_emails:
-            continue # Saltar si no hay email o ya se envió
+        # Validar y normalizar email antes de comparar
+        if not email or not isinstance(email, str):
+            print(f"[{campaign_id}] ADVERTENCIA: Contacto sin email válido, saltando: {contact}")
+            continue
+        email_lower = email.lower()
 
-        # Personalización simple (reemplazar placeholder)
-        # Podrías hacer esto más sofisticado con plantillas (Jinja2, etc.)
+        # Saltar si ya se envió (usando el conjunto para eficiencia)
+        if email_lower in sent_emails_set:
+            continue
+
+        processed_count += 1
+        print(f"[{campaign_id}] Procesando {processed_count}/{total_contacts_to_send}: {email}")
+
+        # Dentro del bucle `for contact in contact_data:` en run_campaign_task
+
+        # --- INICIO: NUEVO BLOQUE - Verificar Pausa/Cancelación ---
+        while True: # Bucle para manejar la pausa
+            try:
+                # RE-LEER el estado actual del archivo ANTES de procesar cada contacto
+                with open(campaign_file_path, 'r') as f_status:
+                    current_config = json.load(f_status)
+                current_status = current_config.get('status', 'Unknown')
+
+                if current_status == "Paused":
+                    print(f"[{campaign_id}] PAUSADO. Esperando 10 segundos para re-verificar...")
+                    time.sleep(10) # Espera 10 segundos antes de volver a verificar
+                    continue # Vuelve al inicio del while True para re-leer estado
+
+                elif current_status == "Cancelled":
+                    print(f"[{campaign_id}] CANCELADO detectado. Deteniendo tarea.")
+                    # No actualizamos el estado aquí, el endpoint /cancel ya lo hizo
+                    return # Termina la ejecución de la tarea
+
+                elif current_status != "Sending":
+                    # Si el estado es cualquier cosa que no sea Sending o Paused/Cancelled
+                    # (ej. Error, Completed, Draft?), detenemos la tarea por seguridad.
+                    print(f"[{campaign_id}] Estado inesperado '{current_status}' detectado. Deteniendo tarea.")
+                    return # Termina la ejecución
+
+                # Si llegamos aquí, el estado es "Sending", salimos del bucle while
+                break # Sale del while True y continúa con el envío del email actual
+
+            except FileNotFoundError:
+                print(f"[{campaign_id}] ERROR CRÍTICO: Archivo de configuración desaparecido durante ejecución. Deteniendo.")
+                return # Termina si el archivo ya no existe
+            except Exception as e_read_status:
+                print(f"[{campaign_id}] ADVERTENCIA: Error al leer estado durante ejecución: {e_read_status}. Reintentando en 10s...")
+                time.sleep(10) # Espera si hay error leyendo y reintenta
+        # --- FIN: NUEVO BLOQUE ---
+
+        # La línea original que procesa el email sigue aquí:
+        print(f"[{campaign_id}] Procesando {processed_count}/{total_contacts_to_send}: {email}")
+        # ... (resto del código para personalizar y enviar el email) ...
+
+# El final de la función run_campaign_task (actualizar a Completed, etc.) permanece igual
+
+        # Personalización simple
         html_body_personalized = html_body_template.replace("{{name}}", name)
 
-        print(f"[{campaign_id}] Sending email to {email}...")
-        success = gmail_service.send_email(
-            to_email=email,
-            subject=subject,
-            html_body=html_body_personalized
-        )
+        # Seleccionar el servicio actual y avanzar el índice para la próxima vez
+        current_service = gmail_services[service_index]
+        # Obtenemos el nombre base del archivo json para identificar la cuenta
+        current_credential_name = os.path.basename(current_service.credentials_path)
+        service_index = (service_index + 1) % len(gmail_services) # Rotación circular
+
+        print(f"  -> Usando cuenta: {current_credential_name}")
+        success = False
+        try:
+            success = current_service.send_email(
+                to_email=email,
+                subject=subject,
+                html_body=html_body_personalized
+            )
+        except Exception as e_send:
+            print(f"  -> EXCEPCIÓN al enviar a {email} usando {current_credential_name}: {e_send}")
+            # Considerar añadir traceback.print_exc() aquí para más detalle si es necesario
 
         if success:
-            sent_emails.append(email)
+            print(f"  -> ÉXITO enviando a {email}")
+            sent_emails_set.add(email_lower) # Añadir al conjunto de enviados
             sent_count_this_run += 1
             # Guardar en log CADA VEZ que se envía uno (más seguro)
             try:
+                # Escribimos el email original (no el lowercased) al log
                 pd.DataFrame({'Email': [email]}).to_csv(
                     sent_log_path,
                     mode='a', # Añadir al archivo
                     header=not os.path.exists(sent_log_path), # Escribir header solo si no existe
-                    index=False
+                    index=False,
+                    encoding='utf-8-sig' # Para compatibilidad con Excel
                 )
-            except Exception as e:
-                print(f"[{campaign_id}] WARNING: Failed to write to sent log {sent_log_path}: {e}")
+            except Exception as e_log:
+                print(f"[{campaign_id}] ADVERTENCIA: Fallo al escribir en log {sent_log_path}: {e_log}")
 
-            # Pausa aleatoria para evitar límites de envío
-            time.sleep(random.uniform(0.5, 2.0))
+            # Pausa aleatoria corta después de éxito
+            time.sleep(random.uniform(0.8, 2.5))
         else:
-            print(f"[{campaign_id}] FAILED to send email to {email}.")
-            # Podríamos loguear fallos en otro archivo
-            time.sleep(random.uniform(2.0, 5.0)) # Pausa más larga si falla
+            print(f"  -> FALLO al enviar a {email} usando {current_credential_name}.")
+            failed_contacts.append({"email": email, "reason": "Send failed", "account": current_credential_name})
+            # Pausa aleatoria más larga después de fallo
+            time.sleep(random.uniform(3.0, 6.0))
 
+    # --- FIN: REEMPLAZO del Bucle de Envío ---
+
+    # --- INICIO: REEMPLAZO de Actualización Final de Estado ---
+    print(f"[{campaign_id}] Campaña finalizada.")
+    final_sent_count = len(sent_emails_set) # Conteo final desde el conjunto actualizado
+    print(f"  - Emails enviados en esta ejecución: {sent_count_this_run}")
+    print(f"  - Total emails enviados (incluyendo anteriores): {final_sent_count}")
+    print(f"  - Total contactos en lista original: {len(contact_data)}")
+    print(f"  - Fallos registrados en esta ejecución: {len(failed_contacts)}")
+    # Opcional: Guardar los fallos en un archivo de log separado
+    # if failed_contacts:
+    #     failure_log_path = os.path.join(SENT_LOGS_DIR, f"failed_{campaign_id}.json")
+    #     try:
+    #         with open(failure_log_path, 'w') as f_fail:
+    #             json.dump(failed_contacts, f_fail, indent=4)
+    #     except Exception as e_fail_log:
+    #          print(f"[{campaign_id}] ADVERTENCIA: No se pudo guardar el log de fallos: {e_fail_log}")
+
+
+    # Determinar estado final con lógica mejorada
+    final_status = 'Unknown' # Estado inicial por si acaso
+    if not contact_data:
+        final_status = 'Completed - No Contacts'
+    else:
+        # Calcular total de contactos válidos (con email)
+        valid_contacts_count = len([c for c in contact_data if c.get('Email') and isinstance(c.get('Email'), str)])
+        if final_sent_count == valid_contacts_count:
+            final_status = 'Completed'
+        elif final_sent_count > 0: # Si se envió al menos uno, pero no todos
+            final_status = 'Completed with Errors'
+        elif failed_contacts: # Si no se envió ninguno pero hubo fallos registrados
+            final_status = 'Error - Sending Failed'
+        else: # Si no había contactos válidos para enviar desde el principio
+            final_status = 'Completed - No Valid Contacts to Send'
+
+
+    config['status'] = final_status
+    config['completedAt'] = datetime.now().isoformat() # Guardar fecha/hora de finalización
+    config['sent_count_final'] = final_sent_count # Guardar conteo final real
+
+    try:
+        with open(campaign_file_path, 'w') as f:
+            json.dump(config, f, indent=4)
+        print(f"[{campaign_id}] Estado final guardado como: {final_status}")
+    except Exception as e:
+        print(f"[{campaign_id}] ADVERTENCIA: No se pudo guardar el estado final '{final_status}': {e}")
+    # --- FIN: REEMPLAZO de Actualización Final de Estado ---
+
+    # El comentario '# --- Fin función ---' sigue siendo válido después de este bloque.
     # --- 5. Finalizar y Actualizar Estado ---
     print(f"[{campaign_id}] Campaign finished. Sent {sent_count_this_run} emails in this run. Total sent: {len(sent_emails)}/{len(contact_data)}")
     config['status'] = 'Completed'
@@ -729,3 +917,199 @@ async def save_csv_mapping(
          raise HTTPException(status_code=500, detail=f"Could not update campaign config with mapping: {e}")
 
     return campaign_config # Devuelve la configuración completa actualizada
+
+
+
+
+# --- Añadir al final de email_sender.py ---
+
+# Asegúrate que estas importaciones estén al PRINCIPIO del archivo si no lo están ya
+from backend.app.services.credentials_manager import CredentialsManager, get_credentials_manager
+from fastapi import Depends, HTTPException # Probablemente ya estén
+from backend.app.core.security import get_current_user # Probablemente ya esté
+# from pydantic import BaseModel # Probablemente ya esté
+# from typing import List, Dict # Probablemente ya estén
+
+class CredentialsListResponse(BaseModel):
+    groups: List[str]
+    # Lista de diccionarios {"id": "nombre_archivo_sin_extension", "group": "nombre_carpeta"}
+    accounts: List[Dict[str, str]]
+
+@router.get("/sender/credentials", response_model=CredentialsListResponse, tags=["email"]) # Añade tags si quieres agrupar en Swagger
+def list_sender_credentials(
+    manager: CredentialsManager = Depends(get_credentials_manager), # Inyecta el manager
+    current_user: str = Depends(get_current_user) # Protección de autenticación
+):
+    """Devuelve una lista de los grupos y cuentas de Gmail detectadas en el servidor."""
+    if not manager:
+        # Si el manager falló al inicializarse (capturado en credentials_manager.py)
+        raise HTTPException(status_code=503, detail="Credentials Manager is not available.")
+    try:
+        groups = manager.list_groups()
+        # Obtenemos solo id y grupo para el frontend, como definimos en el manager
+        accounts = [{"id": acc["id"], "group": acc["group"]} for acc in manager.list_accounts()]
+        return CredentialsListResponse(groups=groups, accounts=accounts)
+    except Exception as e:
+         print(f"Error en endpoint /sender/credentials: {e}")
+         traceback.print_exc() # Imprime detalle del error en consola backend
+         # Lanza un error HTTP para que el frontend sepa que algo falló
+         raise HTTPException(status_code=500, detail=f"Could not retrieve sender credentials: {e}")
+
+
+
+@router.delete("/sender/campaigns/{campaign_id}",
+               status_code=status.HTTP_204_NO_CONTENT, # Devuelve 204 si éxito
+               tags=["email"], # Mantener tag
+               summary="Delete a specific campaign") # Descripción para Swagger/OpenAPI
+def delete_campaign(
+    campaign_id: str,
+    current_user: str = Depends(get_current_user) # Protección
+):
+    """
+    Deletes a campaign and its associated files (config, target list, sent log).
+    """
+    print(f"[{campaign_id}] Solicitud de eliminación recibida.")
+    # Define las rutas de los archivos asociados
+    campaign_file_path = os.path.join(CAMPAIGN_DATA_DIR, f"{campaign_id}.json")
+    target_csv_path = os.path.join(TARGETS_DIR, f"target_{campaign_id}.csv")
+    sent_log_path = os.path.join(SENT_LOGS_DIR, f"sent_{campaign_id}.csv")
+    # Opcional: Si implementas log de fallos
+    # failure_log_path = os.path.join(SENT_LOGS_DIR, f"failed_{campaign_id}.json")
+
+    files_to_delete = [
+        campaign_file_path,
+        target_csv_path,
+        sent_log_path,
+        # failure_log_path # Añadir si existe
+    ]
+
+    deleted_count = 0
+    errors = []
+
+    # Verifica primero si el archivo de configuración principal existe
+    if not os.path.exists(campaign_file_path):
+        print(f"[{campaign_id}] Error: Archivo de configuración principal no encontrado. No se puede eliminar.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Campaign '{campaign_id}' not found.")
+
+    # Intenta eliminar cada archivo asociado
+    for file_path in files_to_delete:
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+                print(f"  - Archivo eliminado: {os.path.basename(file_path)}")
+                deleted_count += 1
+            except OSError as e:
+                error_msg = f"Error al eliminar {os.path.basename(file_path)}: {e}"
+                print(f"  - {error_msg}")
+                errors.append(error_msg)
+        else:
+             print(f"  - Archivo no encontrado (omitido): {os.path.basename(file_path)}")
+
+
+    # Si hubo errores eliminando archivos secundarios, podrías decidir qué hacer.
+    # Por ahora, consideramos éxito si al menos el archivo principal se intentó borrar (y existía).
+    if errors:
+        # Podrías lanzar un error 500 si la eliminación fue parcial y eso es crítico
+        print(f"[{campaign_id}] Eliminación completada con {len(errors)} errores.")
+        # raise HTTPException(status_code=500, detail=f"Campaign deleted but failed to remove some associated files: {'; '.join(errors)}")
+        # O simplemente loguear y devolver 204 igualmente, ya que la campaña principal (config) se fue.
+
+    print(f"[{campaign_id}] Eliminación completada. {deleted_count} archivos eliminados.")
+    # No se devuelve contenido en una respuesta 204
+    return None
+
+
+
+@router.post("/sender/campaigns/{campaign_id}/pause",
+             response_model=Dict[str, Any],
+             tags=["email"],
+             summary="Pause a running campaign")
+def pause_campaign(
+    campaign_id: str,
+    current_user: str = Depends(get_current_user)
+):
+    """
+    Sets the campaign status to 'Paused'.
+    The background task should check this status and temporarily stop sending.
+    """
+    # Aquí podríamos añadir lógica para verificar que la campaña esté realmente 'Sending'
+    print(f"[{campaign_id}] Solicitud de pausa recibida.")
+    updated_config = _update_campaign_status(campaign_id, "Paused")
+    return updated_config
+
+@router.post("/sender/campaigns/{campaign_id}/resume",
+             response_model=Dict[str, Any],
+             tags=["email"],
+             summary="Resume a paused campaign")
+def resume_campaign(
+    campaign_id: str,
+    current_user: str = Depends(get_current_user)
+):
+    """
+    Sets the campaign status back to 'Sending' if it was 'Paused'.
+    The background task should detect this change and resume sending.
+    """
+    # Aquí verificamos que venga de 'Paused' para evitar reanudar campañas completadas o en error.
+    campaign_file_path = os.path.join(CAMPAIGN_DATA_DIR, f"{campaign_id}.json")
+    current_status = 'Unknown'
+    if os.path.exists(campaign_file_path):
+        try:
+            with open(campaign_file_path, 'r') as f:
+                config = json.load(f)
+                current_status = config.get('status', 'Unknown')
+        except Exception:
+            pass # Si no se puede leer, la función _update_campaign_status lanzará error
+
+    if current_status != 'Paused':
+         raise HTTPException(status_code=400, detail=f"Campaign cannot be resumed from status '{current_status}'. Must be 'Paused'.")
+
+    print(f"[{campaign_id}] Solicitud de reanudación recibida.")
+    # Vuelve al estado 'Sending' para que la tarea continúe
+    updated_config = _update_campaign_status(campaign_id, "Sending")
+    return updated_config
+
+@router.post("/sender/campaigns/{campaign_id}/cancel",
+             status_code=status.HTTP_204_NO_CONTENT,
+             tags=["email"],
+             summary="Cancel and delete a campaign")
+async def cancel_campaign( # Usamos async def por si delete_campaign se vuelve async
+    campaign_id: str,
+    current_user: str = Depends(get_current_user)
+):
+    """
+    Sets the campaign status to 'Cancelled' (to signal the task to stop if running)
+    and then deletes the campaign and its files.
+    """
+    print(f"[{campaign_id}] Solicitud de cancelación recibida.")
+    try:
+        # Primero, intenta marcarla como cancelada para detener la tarea si está activa
+        _update_campaign_status(campaign_id, "Cancelled")
+        print(f"[{campaign_id}] Marcada como Cancelled.")
+    except HTTPException as e:
+        # Si la campaña no existe (404), la función delete_campaign ya lo maneja.
+        # Si hay otro error al marcar, lo informamos pero intentamos borrar igual.
+        print(f"[{campaign_id}] Nota: No se pudo marcar como Cancelled (puede que ya no exista o error al guardar): {e.detail}")
+        # No relanzamos la excepción aquí, procedemos a intentar borrar.
+
+    # Ahora, llamamos a la función de eliminación que ya existe
+    # NOTA: delete_campaign actualmente no es `async`, pero la llamamos con `await`
+    # por si la refactorizamos en el futuro. Si no es async, simplemente se ejecutará.
+    # Si delete_campaign lanza una excepción (ej: 404), se propagará desde aquí.
+    try:
+        # Reutilizamos la lógica de delete_campaign
+        # Es importante que delete_campaign maneje el caso de archivos que no existen
+        delete_campaign(campaign_id=campaign_id, current_user=current_user) # Pasar dependencias si es necesario
+        print(f"[{campaign_id}] Proceso de eliminación iniciado/completado tras cancelación.")
+        # El status 204 se devuelve automáticamente al no retornar nada
+    except HTTPException as e:
+         # Si delete_campaign falla (ej: 404 porque ya se borró mientras se marcaba),
+         # podríamos querer ignorar el 404 aquí o relanzar otros errores.
+         if e.status_code == 404:
+             print(f"[{campaign_id}] Campaña ya no existía al intentar borrarla tras cancelación.")
+             # Devolvemos 204 igualmente, el objetivo (que no exista) se cumple.
+             return None
+         else:
+              print(f"[{campaign_id}] Error durante la eliminación post-cancelación: {e.detail}")
+              raise e # Relanzar otros errores (ej: 500)
+
+    return None # Necesario para el 204
