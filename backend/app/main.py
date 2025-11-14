@@ -14,7 +14,8 @@ from backend.app.api.v1.endpoints import (
     campaigns,
     form_titles,
     email_sender,
-    websockets   
+    websockets,
+    scheduler
 )
 from backend.app.api.v1.endpoints.search import router as search_router
 
@@ -68,3 +69,4 @@ app.include_router(search_router, prefix="/api/v1", tags=["search"])
 app.include_router(auth_sqlite.router, prefix="/api/v1", tags=["auth"])
 app.include_router(users.router, prefix="/api/v1", tags=["users"])
 app.include_router(websockets.router, prefix="/api/v1")
+app.include_router(scheduler.router, prefix="/api/v1")

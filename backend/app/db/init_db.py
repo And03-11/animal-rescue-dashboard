@@ -1,7 +1,7 @@
 # --- File: backend/app/db/init_db.py (Corrected Again) ---
 from backend.app.db.database import Base, engine
 # ✅ CORRECCIÓN: Solo importamos el modelo 'User' que sí existe.
-from backend.app.db.models import User
+from backend.app.db.models import User, ScheduledCampaign
 
 def main():
     print("This script will delete and recreate the database.")

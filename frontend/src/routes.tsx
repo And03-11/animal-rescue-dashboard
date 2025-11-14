@@ -18,6 +18,7 @@ const CampaignAnalyticsPage = lazy(() => import('./pages/CampaignAnalyticsPage')
 const ContactSearchPage = lazy(() => import('./pages/ContactSearchPage'));
 const EmailSenderPage = lazy(() => import('./pages/EmailSenderPage'));
 const CampaignDetailPage = lazy(() => import('./pages/CampaignDetailPage'));
+const CampaignSchedulerPage = lazy(() => import('./pages/CampaignSchedulerPage'));
 
 const SpinnerFallback = () => (
   <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
@@ -84,6 +85,10 @@ export function AppRoutes() {
           <Route 
             path="campaign/:campaignId" 
             element={<PageTransition><CampaignDetailPage /></PageTransition>} 
+          />
+          <Route 
+            path="scheduler" 
+            element={<PageTransition><CampaignSchedulerPage /></PageTransition>} 
           />
 
           {/* ✅ Ruta de admin, protegida por su propio wrapper específico */}

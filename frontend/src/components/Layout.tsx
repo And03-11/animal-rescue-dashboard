@@ -14,10 +14,12 @@ import AssessmentIcon from '@mui/icons-material/Assessment';
 import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import LogoutIcon from '@mui/icons-material/Logout';
+import EventIcon from '@mui/icons-material/Event';
 import logo from '../assets/Logo.png';
 import { DarkModeToggleButton } from './DarkModeToggleButton';
 import { FloatingThemeFab } from './FloatingThemeFab';
 import { logout, isAdmin } from '../auth';
+
 
 const drawerWidth = 240;
 
@@ -38,6 +40,7 @@ export const Layout: React.FC = () => {
     { text: 'Campaign Analytics', icon: <AssessmentIcon />, path: '/analytics' },
     { text: 'Compare Campaigns', icon: <CompareArrowsIcon />, path: '/comparison' },
     { text: 'Contact Search', icon: <SearchIcon />, path: '/contact-search' },
+    { text: 'Scheduler', icon: <EventIcon />, path: '/scheduler' },
     { text: 'Send Email', icon: <MailIcon />, path: '/email-sender' },
   ];
 
