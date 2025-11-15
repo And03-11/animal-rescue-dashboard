@@ -1,21 +1,22 @@
-# --- File: backend/app/db/init_db.py (Paso 2) ---
+# --- File: backend/app/db/init_db.py (MODIFICADO) ---
 from backend.app.db.database import Base, engine
-# ✅ Importamos TODOS los modelos que Base necesita conocer
-from backend.app.db.models import User, ScheduledCampaign, ScheduledEmail
+
+# ✅ 1. Importamos TODOS los modelos que Base necesita conocer
+from backend.app.db.models import User, ScheduledCampaign, CampaignEmail, ScheduledSend
 
 def main():
-    print("This script will delete and recreate the database.")
-    # Añadimos una advertencia más clara sobre la nueva tabla
-    print("WARNING: This will create the new 'scheduled_emails' table.")
+    print("This script will DELETE and recreate all database tables.")
+    print("WARNING: This will erase all existing Users, Campaigns, and Emails.")
+    print("New Schema: User, ScheduledCampaign, CampaignEmail, ScheduledSend")
     confirm = input("Are you sure you want to continue? (y/n): ")
     
     if confirm.lower() == 'y':
         print("Recreating database...")
         # Borra todas las tablas existentes
         Base.metadata.drop_all(bind=engine)
-        # Crea todas las tablas que Base conoce (ahora incluye la nueva)
+        # Crea todas las tablas que Base conoce
         Base.metadata.create_all(bind=engine)
-        print("✅ Database tables created successfully (User, ScheduledCampaign, ScheduledEmail).")
+        print("✅ Database tables created successfully.")
     else:
         print("Operation cancelled.")
 

@@ -1,6 +1,6 @@
-# --- File: backend/app/db/models.py (Paso 1) ---
-from sqlalchemy import Column, DateTime, Integer, String, Boolean, Text, ForeignKey # 👈 Importa ForeignKey
-from sqlalchemy.orm import relationship # 👈 Importa relationship
+# --- File: backend/app/db/models.py (MODIFICADO) ---
+from sqlalchemy import Column, DateTime, Integer, String, Boolean, Text, ForeignKey
+from sqlalchemy.orm import relationship
 from .database import Base
 
 class User(Base):
@@ -10,10 +10,10 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     is_admin = Column(Boolean, default=False)
 
+
 class ScheduledCampaign(Base):
     """
-    Modelo para almacenar eventos del calendario de planificación de marketing.
-    (La Campaña "Padre")
+    NIVEL 1: La Campaña "Padre".
     """
     __tablename__ = "scheduled_campaigns"
 
@@ -21,39 +21,55 @@ class ScheduledCampaign(Base):
     title = Column(String, nullable=False, default="Nueva Campaña")
     start_date = Column(DateTime, nullable=False, index=True)
     end_date = Column(DateTime, nullable=False, index=True)
-    category = Column(String, index=True, nullable=True)
+    category = Column(String, index=True, nullable=True) 
     notes = Column(Text, nullable=True)
-    
-    # --- ✅ NUEVA RELACIÓN ---
-    # Esto le dice a SQLAlchemy que una Campaña puede tener muchos "emails"
-    # y que si se borra la campaña, se borran sus emails en cascada.
+    segmentation_mode = Column(String, nullable=True, default="bc") 
+
     emails = relationship(
-        "ScheduledEmail",
+        "CampaignEmail",
         back_populates="campaign",
         cascade="all, delete-orphan"
     )
 
-# --- ✅ CLASE COMPLETAMENTE NUEVA ---
-class ScheduledEmail(Base):
+class CampaignEmail(Base):
     """
-    Modelo para los correos individuales DENTRO de una campaña.
+    NIVEL 2: El "Email Conceptual" o Contenido.
     """
-    __tablename__ = "scheduled_emails"
+    __tablename__ = "campaign_emails"
 
     id = Column(Integer, primary_key=True, index=True)
-    title = Column(String, nullable=False, default="Nuevo Email") # Ej: "Email 1: Bienvenida"
+    title = Column(String, nullable=False, default="Nuevo Email")
     
-    send_at = Column(DateTime, nullable=False, index=True) # Hora y día exacto del envío
+    # --- ✅ CAMBIOS AQUÍ ---
+    subject = Column(String, nullable=True)
+    button_name = Column(String, nullable=True) # ✅ AÑADIDO
+    # html_body = Column(Text, nullable=True) # ✅ ELIMINADO
+    # --- FIN DE CAMBIOS ---
     
-    # El servicio específico para ESTE email
-    service = Column(String, nullable=False, default="Other", index=True) # "Mailchimp", "Brevo", "Automation"
+    link_donation = Column(String, nullable=True)
+    link_contact_us = Column(String, nullable=True)
+    custom_links = Column(Text, nullable=True) 
     
-    # ¡Aquí está tu seguimiento de estado!
-    status = Column(String, nullable=False, default="pending", index=True) # "pending" o "sent"
-
-    # Clave foránea para enlazar con la campaña padre
     campaign_id = Column(Integer, ForeignKey("scheduled_campaigns.id"), nullable=False, index=True)
-
-    # --- ✅ NUEVA RELACIÓN ---
-    # Enlace de vuelta a la campaña
     campaign = relationship("ScheduledCampaign", back_populates="emails")
+    
+    sends = relationship(
+        "ScheduledSend",
+        back_populates="email",
+        cascade="all, delete-orphan"
+    )
+
+class ScheduledSend(Base):
+    """
+    NIVEL 3: El "Envío Programado"
+    """
+    __tablename__ = "scheduled_sends"
+
+    id = Column(Integer, primary_key=True, index=True)
+    send_at = Column(DateTime, nullable=False, index=True) 
+    service = Column(String, nullable=False, default="Other", index=True) 
+    status = Column(String, nullable=False, default="pending", index=True)
+    segment_tag = Column(String, nullable=True, index=True) 
+
+    campaign_email_id = Column(Integer, ForeignKey("campaign_emails.id"), nullable=False, index=True)
+    email = relationship("CampaignEmail", back_populates="sends")
