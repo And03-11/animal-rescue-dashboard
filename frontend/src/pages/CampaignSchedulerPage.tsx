@@ -1,4 +1,4 @@
-// --- File: frontend/src/pages/CampaignSchedulerPage.tsx (VERSIÓN FINAL CORREGIDA) ---
+// --- File: frontend/src/pages/CampaignSchedulerPage.tsx (VERSIÓN FINAL v3) ---
 import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   Box, Paper, Typography, Alert,
@@ -6,66 +6,46 @@ import {
   FormControl, InputLabel, Select, MenuItem, IconButton, Stack,
   Chip, Divider, CircularProgress, Tooltip, List, ListItem,
   ListItemText, ListItemButton, ListItemSecondaryAction, Checkbox,
-  Collapse, RadioGroup, FormControlLabel, Radio, FormLabel
+  Collapse, RadioGroup, FormControlLabel, Radio, FormLabel, useTheme
 } from '@mui/material';
 import Grid from '@mui/material/Grid';
-// Importar ambos Pickers
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
 import dayjs from 'dayjs';
 import type { Dayjs as DayjsType } from 'dayjs';
-
-// --- FullCalendar ---
-import FullCalendar from '@fullcalendar/react';
-import dayGridPlugin from '@fullcalendar/daygrid';
-import timeGridPlugin from '@fullcalendar/timegrid';
-import interactionPlugin from '@fullcalendar/interaction';
-import listPlugin from '@fullcalendar/list'; 
-import type {
-  EventInput,
-  EventDropArg,
-  EventClickArg,
-  EventContentArg 
-} from '@fullcalendar/core';
-import type { EventResizeDoneArg } from '@fullcalendar/interaction';
-
-// --- Iconos ---
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline'; 
 import SaveIcon from '@mui/icons-material/Save';
 import SendIcon from '@mui/icons-material/Send';
 import EmailIcon from '@mui/icons-material/Email';
-
 import apiClient from '../api/axiosConfig';
+import { 
+  SchedulerTimeline, 
+  type TimelineItem, 
+  type TimelineGroup 
+} from '../components/SchedulerTimeline'; 
 
-// --- ✅ 1. CONSTANTE CORREGIDA Y DEFINITIVA para los SlotProps ---
+// --- Constante de SlotProps (Sin cambios) ---
 const dateTimePickerSlotProps = {
-  // 1. Accedemos al slot 'layout' (el contenedor del popper)
   layout: {
-    // 2. Le pasamos 'sx' (estilos) a ese contenedor
     sx: {
-      // 3. Usamos selectores CSS para encontrar los descendientes
-      
-      // Target la columna AM/PM
       '& .MuiDigitalClock-amPm': {
-        height: 'auto !important',     // Forzar altura automática
-        overflow: 'hidden !important', // Forzar la eliminación del scroll
+        height: 'auto !important',
+        overflow: 'hidden !important',
       },
-      // Target la lista interna
       '& .MuiDigitalClock-amPm .MuiList-root': {
         padding: '0 !important',
         height: 'auto !important',
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'center',
-        // ✅ Forzar el scroll a la parte superior (AM)
         scrollTop: '0 !important', 
       }
     }
   }
 };
 
-// --- Config ---
+// --- Config (Sin cambios) ---
 const CATEGORIES = [
   "Big Campaigns", "NBC", "Unsubscribers", "Tagless",
   "Influencers in Progress", "Fundraising", "Other"
@@ -75,7 +55,7 @@ const SERVICES = [
 ];
 type SegmentationMode = "bc" | "single" | "split";
 
-// --- Interfaces ---
+// --- Interfaces (Sin cambios) ---
 interface CampaignFormData {
   id: string | null;
   title: string;
@@ -136,10 +116,10 @@ const initialSendFormState: SendFormData = {
 };
 
 interface CalendarEvent {
-  id: string;
+  id: string; // "campaign_1" o "send_1"
   title: string;
-  start: string;
-  end?: string;
+  start: string; // ISO Date string
+  end?: string; // ISO Date string
   backgroundColor: string;
   borderColor: string;
   textColor: string;
@@ -152,7 +132,7 @@ interface CalendarEvent {
     send_id?: number;
     notes?: string;
     category?: string;
-    title?: string;
+    title?: string; // Título original de la campaña
     service?: string;
     status?: string;
     segment_tag?: string;
@@ -163,18 +143,11 @@ interface CalendarEvent {
   };
 }
 
-// --- Función de Colores (Corregida) ---
-const getCategoryColor = (category: string | null | undefined) => {
-    const lowerCategory = (category || "other").toLowerCase();
-    if (lowerCategory.includes("big campaigns")) return "#FF8F00";
-    if (lowerCategory.includes("nbc")) return "#D32F2F";
-    if (lowerCategory.includes("unsubscribers")) return "#C2185B";
-    if (lowerCategory.includes("tagless")) return "#7B1FA2";
-    if (lowerCategory.includes("fundraising")) return "#303F9F";
-    return "#5D4037";
-};
 
-// --- Sub-Componente: EmailContentEditor (L2) ---
+// --- Sub-Componentes (EmailContentEditor, SendScheduler) (Sin cambios) ---
+// (Omitidos por brevedad, pero están en tu código)
+// [Internal Note: Components EmailContentEditor and SendScheduler are unchanged]
+// --- Sub-Componente: EmailContentEditor (L2) (Sin cambios) ---
 interface EmailContentEditorProps {
   email: CampaignEmail;
   categoryType: string;
@@ -256,7 +229,7 @@ const EmailContentEditor: React.FC<EmailContentEditorProps> = ({ email, category
   );
 };
 
-// --- Sub-Componente: SendScheduler (L3) ---
+// --- Sub-Componente: SendScheduler (L3) (Sin cambios) ---
 interface SendSchedulerProps {
   email: CampaignEmail;
   campaignSegmentation: SegmentationMode;
@@ -266,8 +239,6 @@ interface SendSchedulerProps {
 }
 const SendScheduler: React.FC<SendSchedulerProps> = ({ email, campaignSegmentation, onSave, onError, isLoading }) => {
   const [formData, setFormData] = useState(initialSendFormState);
-
-  // (Quitamos la constante 'amPmScrollFixSx' de aquí, ahora es global)
 
   const handleChange = (field: keyof SendFormData, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -328,13 +299,12 @@ const SendScheduler: React.FC<SendSchedulerProps> = ({ email, campaignSegmentati
               {SERVICES.map(srv => <MenuItem key={srv} value={srv}>{srv}</MenuItem>)}
             </Select>
           </FormControl>
-          {/* --- ✅ 3. APLICAR 'slotProps' --- */}
           <Collapse in={formData.bc_send_mode === 'same_time'}>
             <DateTimePicker 
               label="Send Date/Time (All)" 
               value={formData.bc_same_time}
               onChange={(newValue) => handleChange('bc_same_time', newValue!)} 
-              slotProps={dateTimePickerSlotProps} // ✅ APLICAR
+              slotProps={dateTimePickerSlotProps}
             />
           </Collapse>
           <Collapse in={formData.bc_send_mode === 'segmented'}>
@@ -343,19 +313,19 @@ const SendScheduler: React.FC<SendSchedulerProps> = ({ email, campaignSegmentati
                 label="Tag 1+4 (USA) Time" 
                 value={formData.bc_usa_time}
                 onChange={(newValue) => handleChange('bc_usa_time', newValue!)} 
-                slotProps={dateTimePickerSlotProps} // ✅ APLICAR
+                slotProps={dateTimePickerSlotProps}
               />
               <DateTimePicker 
                 label="Tag 2+3 (EUR) Time" 
                 value={formData.bc_eur_time}
                 onChange={(newValue) => handleChange('bc_eur_time', newValue!)} 
-                slotProps={dateTimePickerSlotProps} // ✅ APLICAR
+                slotProps={dateTimePickerSlotProps}
               />
               <DateTimePicker 
                 label="Tag 5 (Yahoo) Time" 
                 value={formData.bc_yahoo_time}
                 onChange={(newValue) => handleChange('bc_yahoo_time', newValue!)} 
-                slotProps={dateTimePickerSlotProps} // ✅ APLICAR
+                slotProps={dateTimePickerSlotProps}
               />
             </Stack>
           </Collapse>
@@ -371,7 +341,7 @@ const SendScheduler: React.FC<SendSchedulerProps> = ({ email, campaignSegmentati
             label="Send Date/Time (USA & EUR)"
             value={formData.non_bc_single_time}
             onChange={(newValue) => handleChange('non_bc_single_time', newValue!)}
-            slotProps={dateTimePickerSlotProps} // ✅ APLICAR
+            slotProps={dateTimePickerSlotProps}
           />
           <FormControl fullWidth size="small">
             <InputLabel>Service</InputLabel>
@@ -391,13 +361,13 @@ const SendScheduler: React.FC<SendSchedulerProps> = ({ email, campaignSegmentati
             label="USA Send Time"
             value={formData.non_bc_usa_time}
             onChange={(newValue) => handleChange('non_bc_usa_time', newValue!)}
-            slotProps={dateTimePickerSlotProps} // ✅ APLICAR
+            slotProps={dateTimePickerSlotProps}
           />
           <DateTimePicker
             label="EUR Send Time"
             value={formData.non_bc_eur_time}
             onChange={(newValue) => handleChange('non_bc_eur_time', newValue!)}
-            slotProps={dateTimePickerSlotProps} // ✅ APLICAR
+            slotProps={dateTimePickerSlotProps}
           />
            <FormControl fullWidth size="small" sx={{mt: 2}}>
             <InputLabel>Service</InputLabel>
@@ -417,9 +387,9 @@ const SendScheduler: React.FC<SendSchedulerProps> = ({ email, campaignSegmentati
 
 // --- Componente Principal ---
 export const CampaignSchedulerPage = () => {
+  const theme = useTheme(); 
   // --- Estados (Sin cambios) ---
   const [error, setError] = useState('');
-  const calendarRef = useRef<FullCalendar>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [formError, setFormError] = useState('');
   const [currentCampaign, setCurrentCampaign] = useState<CampaignFormData | null>(null);
@@ -431,28 +401,105 @@ export const CampaignSchedulerPage = () => {
   const [loadingSends, setLoadingSends] = useState(false);
   const [isSavingEmail, setIsSavingEmail] = useState(false);
 
-  // --- fetchEvents (Sin cambios) ---
-  const fetchEvents = (
-    fetchInfo: any,
-    successCallback: (events: EventInput[]) => void,
-    failureCallback: (error: Error) => void
-  ) => {
+  // --- Estados para la Timeline (Sin cambios) ---
+  const [timelineItems, setTimelineItems] = useState<TimelineItem[]>([]);
+  const [timelineGroups, setTimelineGroups] = useState<TimelineGroup[]>([]);
+  const [loadingTimeline, setLoadingTimeline] = useState(true);
+
+  // --- Carga de Datos de la Timeline ---
+  const fetchTimelineData = useCallback(async () => {
+    // setLoadingTimeline(true); // No mostrar en recargas
     setError('');
-    const params = new URLSearchParams({
-      start: fetchInfo.start.toISOString(),
-      end: fetchInfo.end.toISOString(),
-    });
-    apiClient
-      .get(`/scheduler/events?${params.toString()}`)
-      .then((response) => {
-        successCallback(response.data);
-      })
-      .catch((err) => {
-        console.error('Error fetching events:', err);
-        setError('Error loading calendar events.');
-        failureCallback(new Error('Error loading events'));
+    
+    const start = dayjs().subtract(1, 'month').startOf('month').toISOString();
+    const end = dayjs().add(3, 'month').endOf('month').toISOString();
+    
+    const params = new URLSearchParams({ start, end });
+
+    try {
+      const response = await apiClient.get<CalendarEvent[]>(`/scheduler/events?${params.toString()}`);
+      const events = response.data;
+
+      // --- Transformación de datos ---
+      const newGroups: TimelineGroup[] = [];
+      const newItems: TimelineItem[] = [];
+      const groupsMap = new Map<string, TimelineGroup>();
+
+      events.forEach(event => {
+        const props = event.extendedProps;
+        
+        if (props.type === 'campaign') {
+          if (!groupsMap.has(event.id)) {
+            groupsMap.set(event.id, {
+              id: event.id, 
+              content: event.title,
+              notes: props.notes,
+              category: props.category,
+              segmentation_mode: props.segmentation_mode,
+              // ✅ 1. Forzar inicio al PRICIPIO del día
+              start: dayjs(event.start).startOf('day').toDate(),
+              end: dayjs(event.end).endOf('day').toDate(),
+            });
+          }
+
+          newItems.push({
+            id: `bg_${event.id}`,
+            content: '', 
+            // ✅ 1. Forzar inicio al PRICIPIO del día
+            start: dayjs(event.start).startOf('day').toDate(),
+            end: dayjs(event.end).endOf('day').toDate(),
+            group: event.id,
+            type: 'background',
+            className: 'timeline-campaign-background',
+            style: `background-color: ${event.backgroundColor}33; border-color: ${event.borderColor};`
+          });
+        }
+        else if (props.type === 'send') {
+          const parentGroupId = `campaign_${props.campaign_id}`;
+          if (!groupsMap.has(parentGroupId)) {
+            groupsMap.set(parentGroupId, {
+              id: parentGroupId,
+              content: props.parent_title || `Campaña #${props.campaign_id}`,
+            });
+          }
+          
+          // ✅ 2. Crear Tooltip con la hora
+          const startTime = dayjs(event.start).format('HH:mm');
+          const tooltipTitle = `[${startTime}] ${event.title}`;
+
+          newItems.push({
+            id: event.id, 
+            content: event.title, // El contenido (lo que se ve si no hay template)
+            start: new Date(event.start),
+            group: parentGroupId,
+            type: 'point', // <-- ✅ 2. Cambiado de 'box' a 'point'
+            className: `timeline-send-item status-${props.status || 'pending'}`,
+            style: `
+              border-color: ${event.borderColor};
+              background-color: ${event.backgroundColor}CC; 
+            `,
+            title: tooltipTitle, // <-- ✅ 2. Añadir el tooltip
+            campaign_id: props.campaign_id 
+          });
+        }
       });
-  };
+      
+      setTimelineGroups(Array.from(groupsMap.values()));
+      setTimelineItems(newItems);
+
+    } catch (err) {
+      console.error('Error fetching timeline events:', err);
+      setError('Error loading scheduler data.');
+    } finally {
+      setLoadingTimeline(false); // Desactivar spinner
+    }
+  }, []);
+
+  // Carga inicial
+  useEffect(() => {
+    fetchTimelineData();
+  }, [fetchTimelineData]);
+
 
   // --- Funciones API (L2 y L3) (Sin cambios) ---
   const fetchEmailsForCampaign = async (campaignId: number) => {
@@ -520,7 +567,7 @@ export const CampaignSchedulerPage = () => {
          const numericCampaignId = parseInt(currentCampaign.id.split('_')[1], 10);
          await fetchEmailsForCampaign(numericCampaignId);
       }
-      calendarRef.current?.getApi().refetchEvents();
+      fetchTimelineData(); // Recargar timeline
     } catch (err: any) {
       setFormError(err.response?.data?.detail || 'Error deleting email.');
     } finally {
@@ -557,7 +604,7 @@ export const CampaignSchedulerPage = () => {
     try {
       await Promise.all(savePromises);
       await fetchSendsForEmail(selectedEmail.id);
-      calendarRef.current?.getApi().refetchEvents();
+      fetchTimelineData(); // Recargar timeline
     } catch (err: any) {
       setFormError(err.response?.data?.detail || 'Error saving one or more sends.');
     } finally {
@@ -571,7 +618,7 @@ export const CampaignSchedulerPage = () => {
     );
     try {
       await apiClient.put(`/scheduler/sends/${send.id}`, { status: newStatus });
-      calendarRef.current?.getApi().refetchEvents();
+      fetchTimelineData(); // Recargar timeline
     } catch (err) {
       setFormError('Error updating send status.');
       setScheduledSends(prev => 
@@ -587,7 +634,7 @@ export const CampaignSchedulerPage = () => {
       if (selectedEmail) {
         await fetchSendsForEmail(selectedEmail.id);
       }
-      calendarRef.current?.getApi().refetchEvents();
+      fetchTimelineData(); // Recargar timeline
     } catch (err: any) {
       setFormError(err.response?.data?.detail || 'Error deleting send.');
     } finally {
@@ -595,53 +642,7 @@ export const CampaignSchedulerPage = () => {
     }
   };
 
-  // --- Handlers de Eventos del Calendario (Sin cambios) ---
-  const handleEventDrop = useCallback(async (dropInfo: EventDropArg) => {
-    setError('');
-    const { event } = dropInfo;
-    const props = event.extendedProps as CalendarEvent['extendedProps'];
-    if (props.type !== 'campaign' || !event.start || !event.end) {
-      dropInfo.revert(); return;
-    }
-    const updateData = {
-      title: props.title,
-      start_date: event.start.toISOString(),
-      end_date: event.end.toISOString(),
-      category: props.category,
-      notes: props.notes,
-      segmentation_mode: props.segmentation_mode,
-    };
-    try {
-      await apiClient.put(`/scheduler/events/${event.id}`, updateData);
-      calendarRef.current?.getApi().refetchEvents();
-    } catch (err) {
-      setError('Error saving change. Reverting.');
-      dropInfo.revert();
-    }
-  }, []);
-  const handleEventResize = useCallback(async (resizeInfo: EventResizeDoneArg) => {
-    setError('');
-    const { event } = resizeInfo;
-    const props = event.extendedProps as CalendarEvent['extendedProps'];
-    if (props.type !== 'campaign' || !event.start || !event.end) {
-      resizeInfo.revert(); return;
-    }
-    const updateData = {
-      title: props.title,
-      start_date: event.start.toISOString(),
-      end_date: event.end.toISOString(),
-      category: props.category,
-      notes: props.notes,
-      segmentation_mode: props.segmentation_mode,
-    };
-    try {
-      await apiClient.put(`/scheduler/events/${event.id}`, updateData);
-      calendarRef.current?.getApi().refetchEvents();
-    } catch (err) {
-      setError('Error saving change. Reverting.');
-      resizeInfo.revert();
-    }
-  }, []);
+  // --- Handlers de Eventos del Modal (Sin cambios) ---
   const getSegModeFromCategory = (category: string): SegmentationMode => {
     const lowerCategory = category.toLowerCase();
     if (lowerCategory.includes("big campaigns")) {
@@ -656,7 +657,7 @@ export const CampaignSchedulerPage = () => {
       id: null,
       title: 'New Campaign',
       start: dayjs().startOf('day'), 
-      end: dayjs().add(1, 'day').startOf('day'),
+      end: dayjs().startOf('day'), // Fecha fin = fecha inicio por defecto
       category: defaultCategory,
       notes: '',
       segmentation_mode: getSegModeFromCategory(defaultCategory),
@@ -666,29 +667,154 @@ export const CampaignSchedulerPage = () => {
     setScheduledSends([]);
     setModalOpen(true);
   }, []);
-  const handleEventClick = useCallback((clickInfo: EventClickArg) => {
-    const { event } = clickInfo;
-    const props = event.extendedProps as CalendarEvent['extendedProps'];
-    if (props.type === 'send') {
-      clickInfo.jsEvent.preventDefault(); return; 
+
+  // --- Manejador de Doble Clic ---
+  const handleItemDoubleClick = useCallback(async (clickedId: string | number) => {
+    setError('');
+    setFormError('');
+    
+    // ✅ 3. IGNORAR doble clic en envíos (send_...)
+    if (String(clickedId).startsWith('send_')) {
+      return; 
     }
-    if (props.type === 'campaign') {
-      setFormError(''); 
-      const category = props.category || 'Other';
-      setCurrentCampaign({
-        id: event.id,
-        title: props.title || 'Edit Campaign',
-        start: dayjs(event.start),
-        end: dayjs(event.end),
-        category: category,
-        notes: props.notes || '',
-        segmentation_mode: props.segmentation_mode || getSegModeFromCategory(category),
-      });
-      fetchEmailsForCampaign(props.campaign_id);
-      setEmailFormTitle('');
-      setModalOpen(true);
+    
+    let campaignGroupId: string | number | undefined;
+
+    // 1. Encontrar qué se clickeó
+    const clickedItem = timelineItems.find(i => i.id === clickedId);
+    
+    if (clickedItem) {
+      // Es un ítem (fondo de campaña)
+      campaignGroupId = clickedItem.group; 
+    } else {
+      // Es la etiqueta de un grupo
+      const clickedGroup = timelineGroups.find(g => g.id === clickedId);
+      if (clickedGroup) {
+        campaignGroupId = clickedGroup.id;
+      }
     }
-  }, []);
+
+    if (!campaignGroupId) {
+      setError('Could not find campaign for this item.');
+      return;
+    }
+
+    // 2. Encontrar los datos de la campaña (grupo)
+    const campaignData = timelineGroups.find(g => g.id === campaignGroupId);
+    if (!campaignData) {
+      setError('Could not find campaign data from group.');
+      return;
+    }
+    
+    // 3. Extraer el ID numérico
+    const numericCampaignId = parseInt(String(campaignData.id).split('_')[1], 10);
+    if (isNaN(numericCampaignId)) {
+       setError('Invalid campaign ID format.');
+       return;
+    }
+
+    // 4. Preparar el formulario del modal
+    setCurrentCampaign({
+      id: String(campaignData.id), 
+      title: campaignData.content.replace('CAMPAÑA: ', ''),
+      start: dayjs(campaignData.start),
+      // Ajustar la fecha final para el DatePicker (restar 1 día)
+      end: dayjs(campaignData.end).subtract(1, 'day'), 
+      category: campaignData.category || 'Other',
+      notes: campaignData.notes || '',
+      segmentation_mode: (campaignData.segmentation_mode as SegmentationMode) || getSegModeFromCategory(campaignData.category || ''),
+    });
+
+    // 5. Cargar emails (ahora SÍ funcionará)
+    fetchEmailsForCampaign(numericCampaignId);
+    
+    setEmailFormTitle('');
+    setSelectedEmail(null);
+    setScheduledSends([]);
+    
+    setModalOpen(true);
+
+  }, [timelineItems, timelineGroups]); 
+
+  // --- Manejador de Arrastrar (Move) ---
+  const handleItemMove = useCallback(async (
+    item: TimelineItem, 
+    callback: (item: TimelineItem | null) => void
+  ) => {
+    setError('');
+    const itemIdStr = String(item.id);
+
+    // --- Lógica para CAMPAÑAS (tipo 'background') ---
+    if (itemIdStr.startsWith('bg_')) {
+      const campaignId = item.group; 
+      const campaignData = timelineGroups.find(g => g.id === campaignId);
+      
+      if (!campaignData) {
+        setError('Cannot move campaign: data not found.');
+        callback(null); // Revertir
+        return;
+      }
+      
+      const payload = {
+        title: campaignData.content.replace('CAMPAÑA: ', ''),
+        start_date: dayjs(item.start as Date).startOf('day').toISOString(),
+        end_date: dayjs(item.end as Date).endOf('day').toISOString(), // Guardar inclusivo
+        category: campaignData.category,
+        notes: campaignData.notes,
+        segmentation_mode: campaignData.segmentation_mode,
+      };
+
+      try {
+        await apiClient.put(`/scheduler/events/${campaignId}`, payload);
+        callback(item); // Confirmar el movimiento
+        fetchTimelineData(); // Recargar todo para consistencia
+      } catch (err) {
+        setError('Failed to update campaign range.');
+        callback(null); // Revertir
+      }
+      return;
+    }
+
+    // --- Lógica para ENVÍOS (tipo 'point') ---
+    if (itemIdStr.startsWith('send_')) {
+      const sendId = parseInt(itemIdStr.split('_')[1], 10);
+      
+      // ✅ 4. Lógica de Restricción
+      const campaignData = timelineGroups.find(g => g.id === item.group);
+      if (campaignData && campaignData.start && campaignData.end) {
+        const itemTime = dayjs(item.start as Date);
+        // Usamos startOf/endOf por si el fondo de la campaña no está forzado a 00:00/23:59
+        const campaignStart = dayjs(campaignData.start).startOf('day');
+        const campaignEnd = dayjs(campaignData.end).endOf('day');
+        
+        if (itemTime.isBefore(campaignStart) || itemTime.isAfter(campaignEnd)) {
+          setError('Cannot move send outside its campaign range.');
+          callback(null); // Revertir
+          return;
+        }
+      }
+      // (Si no se encuentra la campaña, permitimos el movimiento por ahora)
+      
+      const payload = {
+        send_at: (item.start as Date).toISOString(),
+      };
+      
+      try {
+        await apiClient.put(`/scheduler/sends/${sendId}`, payload);
+        callback(item); // Confirmar el movimiento
+        fetchTimelineData(); // Recargamos para que el estado (sent/pending) sea consistente
+      } catch (err) {
+        setError('Failed to update send time.');
+        callback(null); // Revertir
+      }
+      return;
+    }
+
+    callback(null);
+
+  }, [timelineGroups, timelineItems, fetchTimelineData]); 
+
+
   const handleCampaignFormChange = (
     field: keyof Omit<CampaignFormData, 'id'|'start'|'end'>, 
     value: any
@@ -710,10 +836,13 @@ export const CampaignSchedulerPage = () => {
     setFormError('');
     if (!currentCampaign.title.trim()) { setFormError('Title cannot be empty.'); return; }
     if (currentCampaign.start.isAfter(currentCampaign.end)) { setFormError('Start date cannot be after end date.'); return; }
+    
+    // ✅ 5. Lógica de guardado inclusivo
     const payload = {
       title: currentCampaign.title,
-      start_date: currentCampaign.start.toISOString(),
-      end_date: currentCampaign.end.toISOString(),
+      start_date: currentCampaign.start.startOf('day').toISOString(),
+      // Guardamos la fecha final + 1 día para que sea inclusiva en la BBDD
+      end_date: currentCampaign.end.add(1, 'day').startOf('day').toISOString(),
       category: currentCampaign.category,
       notes: currentCampaign.notes,
       segmentation_mode: currentCampaign.segmentation_mode
@@ -731,7 +860,7 @@ export const CampaignSchedulerPage = () => {
           segmentation_mode: newEvent.segmentation_mode || 'bc'
         } : null);
       }
-      calendarRef.current?.getApi().refetchEvents();
+      fetchTimelineData(); // Recargar timeline
     } catch (err: any) {
       setFormError(err.response?.data?.detail || 'Error saving event.');
     }
@@ -742,7 +871,7 @@ export const CampaignSchedulerPage = () => {
       try {
         await apiClient.delete(`/scheduler/events/${currentCampaign.id}`);
         handleModalClose();
-        calendarRef.current?.getApi().refetchEvents();
+        fetchTimelineData(); // Recargar timeline
       } catch (err: any) {
         setFormError(err.response?.data?.detail || 'Error deleting event.');
       }
@@ -751,44 +880,8 @@ export const CampaignSchedulerPage = () => {
   const handleSelectEmail = (email: CampaignEmail) => {
     setSelectedEmail(email);
   };
-  const handleEventContent = (eventInfo: EventContentArg) => {
-    const { event, view } = eventInfo;
-    const props = event.extendedProps as CalendarEvent['extendedProps'];
-    if (view.type.includes('list')) {
-      if (props.type === 'send') {
-        return (
-          <Box sx={{ display: 'flex', flexDirection: 'column', py: 0.5, width: '100%' }}>
-            <Typography variant="body1" component="div" sx={{ fontWeight: 500 }}>{event.title}</Typography>
-            {props.parent_title && (
-              <Typography variant="caption" color="text.secondary" component="div" sx={{ pl: 0.5, mt: 0.5 }}>
-                De la campaña: <strong>"{props.parent_title}"</strong>
-              </Typography>
-            )}
-          </Box>
-        );
-      }
-      if (props.type === 'campaign') {
-         return (
-          <Box sx={{ display: 'flex', flexDirection: 'column', py: 0.5, width: '100%' }}>
-            <Typography variant="body1" component="div" sx={{ fontWeight: 500, fontStyle: 'italic' }}>{event.title}</Typography>
-             {props.category && (
-               <Typography variant="caption" color="text.secondary" component="div" sx={{ pl: 0.5, mt: 0.5 }}>
-                 Categoría: <strong>{props.category}</strong>
-               </Typography>
-             )}
-          </Box>
-        );
-      }
-    }
-    return (
-      <Box sx={{ p: '2px', overflow: 'hidden', whiteSpace: 'normal', fontSize: '0.75rem' }}>
-        {eventInfo.timeText && (<Box component="span" sx={{ fontWeight: 'bold' }}>{eventInfo.timeText} </Box>)}
-        <Box component="span">{event.title}</Box>
-      </Box>
-    );
-  };
 
-  // --- JSX (Sin cambios) ---
+  // --- JSX (Solo eliminamos FullCalendar) ---
   return (
     <Box sx={{ width: '100%', p: { xs: 1, md: 3 } }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -798,26 +891,50 @@ export const CampaignSchedulerPage = () => {
           New Campaign
         </Button>
       </Box>
-      {error && (<Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>)}
-      <Paper variant="outlined" sx={{ p: { xs: 1, md: 3 }, position: 'relative' }}>
-        <FullCalendar
-          ref={calendarRef}
-          plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin, listPlugin]}
-          initialView="dayGridMonth"
-          headerToolbar={{
-            left: 'prev,next today',
-            center: 'title',
-            right: 'dayGridMonth,timeGridWeek,listDay',
-          }}
-          events={fetchEvents} editable={true} droppable={true}
-          eventDrop={handleEventDrop} eventResize={handleEventResize}
-          eventClick={handleEventClick} eventContent={handleEventContent}
-          height="80vh"
-          eventTimeFormat={{ hour: 'numeric', minute: '2-digit', meridiem: 'short' }}
-          displayEventTime={true} displayEventEnd={true} eventDisplay='auto' 
-        />
+      {error && (<Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>{error}</Alert>)}
+      
+      {/* --- RENDERIZAR LA TIMELINE --- */}
+      <Paper variant="outlined" sx={{ 
+        p: { xs: 1, md: 2 }, 
+        position: 'relative', 
+        minHeight: '80vh',
+        // Estilos para las clases CSS personalizadas
+        '& .vis-timeline': { borderColor: theme.palette.divider },
+        '& .vis-panel, & .vis-center, & .vis-left, & .vis-right, & .vis-top, & .vis-bottom': {
+          borderColor: theme.palette.divider,
+        },
+        '& .vis-time-axis .vis-grid': { borderColor: theme.palette.divider },
+        '& .vis-item.timeline-campaign-background': {
+          borderStyle: 'dashed',
+          borderWidth: '1px',
+          borderRadius: '4px',
+          zIndex: 0,
+        },
+        '& .vis-item.vis-point.timeline-send-item': { // Específico para 'point'
+          zIndex: 1,
+          borderWidth: '2px',
+          boxShadow: theme.shadows[1],
+        },
+        '& .vis-item.vis-point.status-sent': { // Específico para 'point'
+          opacity: 0.6,
+        },
+        // (Eliminamos los estilos de plantilla que ya no usamos)
+      }}>
+        {loadingTimeline ? (
+          <Box sx={{display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '75vh'}}>
+            <CircularProgress />
+          </Box>
+        ) : (
+          <SchedulerTimeline
+            items={timelineItems}
+            groups={timelineGroups}
+            onItemMove={handleItemMove}
+            onItemDoubleClick={handleItemDoubleClick}
+          />
+        )}
       </Paper>
 
+      {/* --- El DIÁLOGO MODAL se mantiene intacto --- */}
       {currentCampaign && (
         <Dialog open={modalOpen} onClose={handleModalClose} fullWidth maxWidth="xl">
           <DialogTitle>
