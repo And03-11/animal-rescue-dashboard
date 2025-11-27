@@ -10,6 +10,8 @@ import { StatCard } from '../components/StatCard';
 import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import FilterAltIcon from '@mui/icons-material/FilterAlt';
+import TrendingUpIcon from '@mui/icons-material/TrendingUp';
+import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import { useWebSocket } from '../context/WebSocketProvider';
 import { CombinedStatCard } from '../components/CombinedStatCard';
 import { TopDonorsTable, type Donor } from '../components/TopDonorsTable';
@@ -21,6 +23,8 @@ interface GlanceData {
   amountThisMonth: number;
   donationsCountThisMonth: number;
   glanceTrend: { date: string; total: number }[];
+  momGrowth: number;
+  amountLastMonthSameDay: number;
 }
 interface FilteredData {
   amountInRange: number;
@@ -210,10 +214,23 @@ export const DashboardHomePage = () => {
             </Grid>
             <Grid size={{ xs: 12, lg: 4 }}>
               <motion.div variants={itemVariants} style={{ height: '100%' }}>
-                <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', background: alpha(theme.palette.primary.main, 0.05), border: `1px dashed ${theme.palette.primary.main}` }}>
-                  <Typography variant="h6" color="primary">Campaign Goal</Typography>
-                  <Typography variant="h3" fontWeight="800">85%</Typography>
-                  <Typography variant="body2" color="text.secondary">of monthly target reached</Typography>
+                <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', background: alpha(theme.palette.background.paper, 0.6), backdropFilter: 'blur(10px)', border: `1px solid ${theme.palette.divider}` }}>
+                  <Typography variant="h6" color="text.secondary" gutterBottom>MoM Growth</Typography>
+
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                    {glanceData.momGrowth >= 0 ? (
+                      <TrendingUpIcon sx={{ fontSize: 48, color: theme.palette.success.main }} />
+                    ) : (
+                      <TrendingDownIcon sx={{ fontSize: 48, color: theme.palette.error.main }} />
+                    )}
+                    <Typography variant="h3" fontWeight="800" color={glanceData.momGrowth >= 0 ? 'success.main' : 'error.main'}>
+                      {glanceData.momGrowth > 0 ? '+' : ''}{glanceData.momGrowth}%
+                    </Typography>
+                  </Box>
+
+                  <Typography variant="body2" color="text.secondary" textAlign="center">
+                    vs last month (same day)
+                  </Typography>
                 </Paper>
               </motion.div>
             </Grid>

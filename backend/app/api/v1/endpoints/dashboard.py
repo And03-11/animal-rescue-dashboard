@@ -31,42 +31,76 @@ def get_dashboard_metrics(
         today_str = today_date_obj.isoformat() # String 'YYYY-MM-DD'
 
         # --- LÓGICA NUEVA CON DAILY SUMMARIES ---
-        # 1. Obtener resúmenes de los últimos 30 días para "Glance"
-        start_30_days_ago = today_date_obj - timedelta(days=30)
-        # Llamamos a la nueva función del servicio
-        daily_summaries_last_30 = airtable_service.get_daily_summaries(
-            start_date=start_30_days_ago,
+        # 1. Calcular fechas para MoM (Month over Month)
+        # Mes actual
+        start_current_month = today_date_obj.replace(day=1)
+        
+        # Mes anterior
+        # Truco para obtener el mes anterior: primer día de este mes - 1 día = último día mes anterior
+        last_day_prev_month = start_current_month - timedelta(days=1)
+        start_prev_month = last_day_prev_month.replace(day=1)
+        
+        # Llamamos a la función del servicio con el rango ampliado
+        daily_summaries = airtable_service.get_daily_summaries(
+            start_date=start_prev_month,
             end_date=today_date_obj
         )
 
-        # 2. Calcular métricas "Glance" desde los resúmenes
+        # 2. Calcular métricas "Glance"
         amount_today = 0
         count_today = 0
         amount_this_month = 0
         count_this_month = 0
+        
+        amount_last_month_same_day = 0 # Acumulado mes anterior hasta el día equivalente
+        
         current_month = today_date_obj.month
         current_year = today_date_obj.year
+        
+        prev_month = start_prev_month.month
+        prev_year = start_prev_month.year
+        
+        # Día del mes actual (ej: 27)
+        day_of_month_limit = today_date_obj.day 
 
-        for summary in daily_summaries_last_30:
+        glance_trend = [] # Solo guardamos los últimos 30 días para la gráfica
+
+        for summary in daily_summaries:
             summary_date_str = summary["date"]
             try:
                 summary_date_obj = date.fromisoformat(summary_date_str)
             except ValueError:
-                print(f"Advertencia: Formato de fecha inválido en registro de resumen: {summary_date_str}")
                 continue
 
-            # Sumar al total del mes actual
+            # --- Lógica de Acumulados ---
+            
+            # Mes Actual
             if summary_date_obj.year == current_year and summary_date_obj.month == current_month:
                 amount_this_month += summary.get("total", 0)
                 count_this_month += summary.get("count", 0)
+                
+                # Hoy
+                if summary_date_str == today_str:
+                    amount_today = summary.get("total", 0)
+                    count_today = summary.get("count", 0)
 
-            # Sumar al total de hoy
-            if summary_date_str == today_str:
-                amount_today = summary.get("total", 0)
-                count_today = summary.get("count", 0)
+            # Mes Anterior (Mismo rango de días)
+            if summary_date_obj.year == prev_year and summary_date_obj.month == prev_month:
+                if summary_date_obj.day <= day_of_month_limit:
+                    amount_last_month_same_day += summary.get("total", 0)
 
-        # La tendencia "Glance" son directamente los datos obtenidos
-        glance_trend = daily_summaries_last_30
+            # --- Lógica para la Gráfica (Últimos 30 días) ---
+            if summary_date_obj >= (today_date_obj - timedelta(days=30)):
+                glance_trend.append(summary)
+
+        # 3. Calcular Crecimiento MoM
+        mom_growth = 0.0
+        if amount_last_month_same_day > 0:
+            mom_growth = ((amount_this_month - amount_last_month_same_day) / amount_last_month_same_day) * 100
+        elif amount_this_month > 0:
+            mom_growth = 100.0 # Crecimiento infinito si antes era 0
+        else:
+            mom_growth = 0.0
 
         glance_metrics = {
             "amountToday": round(amount_today, 2),
@@ -74,6 +108,8 @@ def get_dashboard_metrics(
             "amountThisMonth": round(amount_this_month, 2),
             "donationsCountThisMonth": count_this_month,
             "glanceTrend": glance_trend,
+            "momGrowth": round(mom_growth, 1),
+            "amountLastMonthSameDay": round(amount_last_month_same_day, 2)
         }
 
         # --- Cálculo de métricas filtradas (si se piden fechas) ---
@@ -91,7 +127,7 @@ def get_dashboard_metrics(
 
                 amount_in_range = sum(s.get("total", 0) for s in summaries_in_range)
                 count_in_range = sum(s.get("count", 0) for s in summaries_in_range)
-                filtered_trend = summaries_in_range # Ya tiene el formato
+                filtered_trend = summaries_in_range
 
                 filtered_metrics = {
                     "amountInRange": round(amount_in_range, 2),
@@ -100,21 +136,20 @@ def get_dashboard_metrics(
                 }
             except ValueError:
                 print(f"Error: Fechas inválidas recibidas para filtro - start: {start_date}, end: {end_date}")
-                pass # Simplemente no devolvemos métricas filtradas
+                pass
             except Exception as e_filter:
                 print(f"Error calculando métricas filtradas: {e_filter}")
-                pass # Simplemente no devolvemos métricas filtradas
+                pass
 
         # Devolver la estructura combinada
         return {
             "glance": glance_metrics,
             "filtered": filtered_metrics
         }
-    # Manejo de errores (asegúrate que traceback y HTTPException estén importados)
+    # Manejo de errores
     except Exception as e:
         print(f"Error crítico al generar las métricas del dashboard: {e}")
-        traceback.print_exc() # Imprime el detalle del error en la consola del servidor
-        # Lanza una excepción HTTP para que el frontend reciba un error 500
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail="Could not process dashboard metrics")
 
 
