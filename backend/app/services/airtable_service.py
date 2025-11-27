@@ -3,8 +3,9 @@ from dotenv import load_dotenv
 from fastapi import HTTPException
 from pyairtable import Api
 from typing import List, Dict, Optional, Any
-from datetime import datetime, time, timedelta, date # <-- Add , date here
+from datetime import datetime, time, timedelta, date
 from zoneinfo import ZoneInfo
+from collections import defaultdict
 import traceback
 
 dotenv_path = os.path.join(os.path.dirname(__file__), "..", "..", ".env")
@@ -872,6 +873,119 @@ class AirtableService:
             traceback.print_exc()
             return [] # Devuelve lista vacía en caso de error
     
+    def get_monthly_source_breakdown(self, start_date: date, end_date: date) -> Dict[str, Any]:
+        """
+        Calcula el desglose de donaciones por fuente para un rango de fechas.
+        Estrategia eficiente:
+        1. Obtener Donaciones en el rango (con link a Form Title).
+        2. Obtener TODOS los Form Titles (con link a Campaign).
+        3. Obtener TODAS las Campañas (con Source).
+        4. Mapear en memoria.
+        """
+        try:
+            # 1. Obtener Donaciones en el rango
+            date_field = f"{{{DONATIONS_FIELDS['date']}}}"
+            start_str = start_date.isoformat()
+            # Sumamos 1 día al end_date para incluirlo completo (Airtable a veces es tricky con tiempos)
+            end_plus_one = end_date + timedelta(days=1)
+            end_str = end_plus_one.isoformat()
+
+            formula = f"AND(IS_AFTER({date_field}, DATETIME_PARSE('{start_str}', 'YYYY-MM-DD')), IS_BEFORE({date_field}, DATETIME_PARSE('{end_str}', 'YYYY-MM-DD')))"
+            
+            donations = self.donations_table.all(
+                formula=formula,
+                fields=[DONATIONS_FIELDS["amount"], DONATIONS_FIELDS["form_title_link"]]
+            )
+
+            print(f"DEBUG: Found {len(donations)} donations for date range {start_str} to {end_str}")
+
+            if not donations:
+                return {"total_amount": 0, "breakdown": []}
+
+            # 2. Obtener TODOS los Form Titles (son pocos, cacheable en teoría, pero rápido de traer)
+            form_titles = self.form_titles_table.all(
+                fields=[FORM_TITLES_FIELDS["campaign_link"]]
+            )
+            print(f"DEBUG: Found {len(form_titles)} form titles")
+            
+            # Mapa: FormTitle ID -> Campaign ID
+            ft_to_campaign = {}
+            for ft in form_titles:
+                campaign_links = ft.get("fields", {}).get(FORM_TITLES_FIELDS["campaign_link"], [])
+                if campaign_links:
+                    ft_to_campaign[ft["id"]] = campaign_links[0]
+
+            print(f"DEBUG: Mapped {len(ft_to_campaign)} form titles to campaigns")
+
+            # 3. Obtener TODAS las Campañas
+            campaigns = self.campaigns_table.all(
+                fields=[CAMPAIGNS_FIELDS["source"]]
+            )
+            print(f"DEBUG: Found {len(campaigns)} campaigns")
+            
+            # Mapa: Campaign ID -> Source
+            campaign_to_source = {}
+            for camp in campaigns:
+                source = camp.get("fields", {}).get(CAMPAIGNS_FIELDS["source"])
+                if source:
+                    campaign_to_source[camp["id"]] = source
+
+            print(f"DEBUG: Mapped {len(campaign_to_source)} campaigns to sources")
+
+            # 4. Procesar donaciones y agrupar por fuente
+            source_totals = defaultdict(float)
+            total_amount = 0
+
+            for donation in donations:
+                fields = donation.get("fields", {})
+                amount = fields.get(DONATIONS_FIELDS["amount"], 0)
+                total_amount += amount
+
+                ft_links = fields.get(DONATIONS_FIELDS["form_title_link"], [])
+                
+                source_name = "Others" # Default
+
+                if ft_links:
+                    ft_id = ft_links[0]
+                    campaign_id = ft_to_campaign.get(ft_id)
+                    if campaign_id:
+                        found_source = campaign_to_source.get(campaign_id)
+                        if found_source:
+                            source_name = found_source
+                
+                # Mapeo de nombres de Airtable a nombres de display
+                source_mapping = {
+                    "Funnel": "New Comers",
+                    "Big Campaign": "Big Campaigns"
+                }
+                source_name = source_mapping.get(source_name, source_name)
+                
+                # Normalizar nombres de fuentes si es necesario
+                if source_name not in ["Big Campaigns", "Facebook", "New Comers"]:
+                    source_name = "Others"
+
+                source_totals[source_name] += amount
+
+            # 5. Construir el breakdown con porcentajes
+            breakdown = []
+            for source, amount in source_totals.items():
+                percentage = round((amount / total_amount * 100), 2) if total_amount > 0 else 0
+                breakdown.append({
+                    "name": source,
+                    "value": round(amount, 2),
+                    "percentage": percentage
+                })
+
+            return {
+                "total_amount": round(total_amount, 2),
+                "breakdown": breakdown
+            }
+
+        except Exception as e:
+            print(f"Error en get_monthly_source_breakdown: {e}")
+            traceback.print_exc()
+            return {"total_amount": 0, "breakdown": []}
+
 
 
 airtable_service_instance = AirtableService()

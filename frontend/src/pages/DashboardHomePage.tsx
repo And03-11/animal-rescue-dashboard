@@ -15,6 +15,7 @@ import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import { useWebSocket } from '../context/WebSocketProvider';
 import { CombinedStatCard } from '../components/CombinedStatCard';
 import { TopDonorsTable, type Donor } from '../components/TopDonorsTable';
+import { DonationSourceChart } from '../components/DonationSourceChart';
 
 // Interfaces de datos
 interface GlanceData {
@@ -30,6 +31,17 @@ interface FilteredData {
   amountInRange: number;
   donationsCount: number;
   dailyTrend: { date: string; total: number; count: number }[];
+}
+
+interface SourceData {
+  name: string;
+  value: number;
+  percentage: number;
+}
+
+interface SourceResponse {
+  total_amount: number;
+  breakdown: SourceData[];
 }
 
 const containerVariants = {
@@ -58,10 +70,11 @@ export const DashboardHomePage = () => {
   const theme = useTheme();
   const [glanceData, setGlanceData] = useState<GlanceData | null>(null);
   const [filteredData, setFilteredData] = useState<FilteredData | null>(null);
+  const [sourceData, setSourceData] = useState<SourceData[]>([]);
   const [startDate, setStartDate] = useState<Dayjs | null>(null);
   const [endDate, setEndDate] = useState<Dayjs | null>(null);
-  const [loading, setLoading] = useState({ glance: true, filter: false, topDonors: true });
-  const [error, setError] = useState({ glance: '', filter: '', topDonors: '' });
+  const [loading, setLoading] = useState({ glance: true, filter: false, topDonors: true, sources: true });
+  const [error, setError] = useState({ glance: '', filter: '', topDonors: '', sources: '' });
   const { subscribe } = useWebSocket();
   const [topDonors, setTopDonors] = useState<Donor[]>([]);
 
@@ -93,10 +106,23 @@ export const DashboardHomePage = () => {
     }
   }, []);
 
+  const fetchSources = useCallback(async () => {
+    setLoading(prev => ({ ...prev, sources: true }));
+    try {
+      const response = await apiClient.get<SourceResponse>('/dashboard/sources');
+      setSourceData(response.data.breakdown);
+    } catch (err) {
+      setError(prev => ({ ...prev, sources: 'Failed to load donation sources.' }));
+    } finally {
+      setLoading(prev => ({ ...prev, sources: false }));
+    }
+  }, []);
+
   useEffect(() => {
     fetchGlanceMetrics();
     fetchTopDonors();
-  }, [fetchGlanceMetrics]);
+    fetchSources();
+  }, [fetchGlanceMetrics, fetchTopDonors, fetchSources]);
 
   const handleSearchByRange = useCallback(async (isRefresh: boolean = false) => {
     if (!startDate || !endDate || startDate.isAfter(endDate)) {
@@ -128,6 +154,7 @@ export const DashboardHomePage = () => {
     const unsubscribe = subscribe('new_donation', () => {
       console.log('Notification received! Refreshing dashboard data silently...');
       fetchGlanceMetrics(true);
+      fetchSources(); // Refresh sources too
       if (startDate && endDate) {
         handleSearchByRange(true);
       }
@@ -136,7 +163,7 @@ export const DashboardHomePage = () => {
       console.log("Unsubscribing from 'new_donation' event.");
       unsubscribe();
     };
-  }, [subscribe, fetchGlanceMetrics, handleSearchByRange, startDate, endDate]);
+  }, [subscribe, fetchGlanceMetrics, fetchSources, handleSearchByRange, startDate, endDate]);
 
   const formatXAxis = (tickItem: string) => dayjs(tickItem).format('D/M');
 
@@ -247,7 +274,7 @@ export const DashboardHomePage = () => {
               </motion.div>
             </Grid>
 
-            <Grid size={12}>
+            <Grid size={{ xs: 12, md: 8 }}>
               <motion.div variants={itemVariants}>
                 <Paper sx={{ p: 3, height: '400px' }}>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -289,6 +316,15 @@ export const DashboardHomePage = () => {
                         tick={{ fill: theme.palette.text.secondary, fontSize: 12 }}
                       />
                       <Tooltip
+                        formatter={(value: number, name: string) => {
+                          if (name === 'Donation Count') {
+                            return Math.round(value).toString();
+                          }
+                          if (typeof value === 'number') {
+                            return value.toFixed(2);
+                          }
+                          return value;
+                        }}
                         contentStyle={{
                           backgroundColor: alpha(theme.palette.background.paper, 0.8),
                           backdropFilter: 'blur(10px)',
@@ -322,6 +358,17 @@ export const DashboardHomePage = () => {
                     </AreaChart>
                   </ResponsiveContainer>
                 </Paper>
+              </motion.div>
+            </Grid>
+
+            {/* --- NUEVA SECCIÓN: GRÁFICA DE FUENTES --- */}
+            <Grid size={{ xs: 12, md: 4 }}>
+              <motion.div variants={itemVariants}>
+                <DonationSourceChart
+                  data={sourceData}
+                  loading={loading.sources}
+                  error={error.sources}
+                />
               </motion.div>
             </Grid>
           </>

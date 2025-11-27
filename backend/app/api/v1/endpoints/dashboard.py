@@ -1,14 +1,13 @@
 from fastapi import APIRouter, Depends
 from fastapi_cache.decorator import cache
 from backend.app.services.airtable_service import AirtableService, get_airtable_service
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, date
 from zoneinfo import ZoneInfo
 from typing import List, Dict, Any, Optional
 from backend.app.core.security import get_current_user
 from collections import defaultdict
 import traceback # Para el manejo de errores
 from fastapi import HTTPException # Para devolver errores HTTP
-from datetime import datetime, time, timedelta, date
 
 router = APIRouter()
 COSTA_RICA_TZ = ZoneInfo("America/Costa_Rica")
@@ -200,3 +199,37 @@ def get_top_donors(
     except Exception as e:
         print(f"Error crítico al generar el top de donadores: {e}")
         return {"error": "Could not process top donors", "details": str(e)}
+
+@router.get("/sources")
+@cache(expire=300) # 5 minutos de caché
+def get_donation_sources(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    airtable_service: AirtableService = Depends(get_airtable_service),
+    current_user: str = Depends(get_current_user)
+):
+    """
+    Obtiene el desglose de donaciones por fuente (Big Campaigns, Facebook, etc.)
+    Por defecto usa el mes actual si no se especifican fechas.
+    """
+    try:
+        # Determinar fechas por defecto (Mes Actual)
+        if not start_date or not end_date:
+            now_in_tz = datetime.now(COSTA_RICA_TZ)
+            today_date_obj = now_in_tz.date()
+            start_date_obj = today_date_obj.replace(day=1)
+            end_date_obj = today_date_obj
+        else:
+            try:
+                start_date_obj = date.fromisoformat(start_date)
+                end_date_obj = date.fromisoformat(end_date)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+
+        # Llamar al servicio
+        result = airtable_service.get_monthly_source_breakdown(start_date_obj, end_date_obj)
+        return result
+
+    except Exception as e:
+        print(f"Error crítico al obtener fuentes de donación: {e}")
+        raise HTTPException(status_code=500, detail="Could not process donation sources")
