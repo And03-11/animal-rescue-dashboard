@@ -1002,7 +1002,7 @@ export const CampaignAnalyticsPage: React.FC = () => {
                                             )}
                                         </Box>
 
-                                        <TableContainer sx={{ maxHeight: 600, flexGrow: 1 }}>
+                                        <TableContainer ref={tableContainerRef} sx={{ maxHeight: 600, flexGrow: 1 }}>
                                             <Table stickyHeader size="small">
                                                 <TableHead>
                                                     <TableRow>
