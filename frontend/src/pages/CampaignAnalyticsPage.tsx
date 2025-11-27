@@ -602,7 +602,7 @@ export const CampaignAnalyticsPage: React.FC = () => {
                                     >
                                         <CardContent sx={{ p: 2 }}>
                                             <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.8)' }}>
-                                                Campaigns
+                                                Emails
                                             </Typography>
                                             <Typography variant="h5" sx={{ color: 'white', fontWeight: 700 }}>
                                                 {chartData?.length ?? 0}
@@ -910,7 +910,6 @@ export const CampaignAnalyticsPage: React.FC = () => {
                                     sx={{
                                         width: '100%',
                                         p: 3,
-                                        mb: 3,
                                         borderRadius: '16px',
                                         background: `linear-gradient(145deg, ${alpha(theme.palette.background.paper, 0.9)} 0%, ${alpha(theme.palette.background.paper, 0.95)} 100%)`,
                                         backdropFilter: 'blur(20px)',
@@ -921,7 +920,7 @@ export const CampaignAnalyticsPage: React.FC = () => {
                                     <Typography variant="h6" gutterBottom fontWeight="700">
                                         {selectedCampaign ? 'Revenue by Form Title' : 'Revenue by Campaign'}
                                     </Typography>
-                                    <ResponsiveContainer width="100%" height={400}>
+                                    <ResponsiveContainer width="100%" height={562}>
                                         <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 120 }}>
                                             <defs>
                                                 {chartData.map((_, index) => (
@@ -962,167 +961,168 @@ export const CampaignAnalyticsPage: React.FC = () => {
                                     </ResponsiveContainer>
                                 </Paper>
                             )}
-
-                            {/* Bottom Section: Detailed Data Tables */}
-                            <Grid container spacing={3} sx={{ mt: 1 }}>
-                                {/* Donations Table */}
-                                <Grid size={{ xs: 12, xl: 6 }}>
-                                    <AnimatePresence>
-                                        {(selectedCampaign || selectedTitles.length > 0) && !loading.stats && (
-                                            <motion.div
-                                                initial={{ opacity: 0, y: 20 }}
-                                                animate={{ opacity: 1, y: 0 }}
-                                                exit={{ opacity: 0, y: 20 }}
-                                                transition={{ duration: 0.3 }}
-                                            >
-                                                <Paper
-                                                    sx={{
-                                                        width: '100%',
-                                                        height: '100%',
-                                                        borderRadius: '16px',
-                                                        background: `linear-gradient(145deg, ${alpha(theme.palette.background.paper, 0.9)} 0%, ${alpha(theme.palette.background.paper, 0.95)} 100%)`,
-                                                        backdropFilter: 'blur(20px)',
-                                                        border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
-                                                        boxShadow: theme.shadows[4],
-                                                        overflow: 'hidden',
-                                                        display: 'flex',
-                                                        flexDirection: 'column'
-                                                    }}
-                                                >
-                                                    <Box sx={{ p: 3, pb: 2 }}>
-                                                        {loading.donations && donations.length === 0 ? (
-                                                            <CircularProgress size={24} />
-                                                        ) : (
-                                                            <Typography variant="h6" fontWeight="700">
-                                                                Donors {totalDonationsCount > 0 && `(${totalDonationsCount})`}
-                                                            </Typography>
-                                                        )}
-                                                    </Box>
-
-                                                    <TableContainer sx={{ maxHeight: 600, flexGrow: 1 }}>
-                                                        <Table stickyHeader size="small">
-                                                            <TableHead>
-                                                                <TableRow>
-                                                                    <TableCell sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>Donor</TableCell>
-                                                                    <TableCell sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>Email</TableCell>
-                                                                    <TableCell sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>Date</TableCell>
-                                                                    <TableCell align="right" sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>Amount</TableCell>
-                                                                </TableRow>
-                                                            </TableHead>
-                                                            <TableBody>
-                                                                {donations.map((d, index) => (
-                                                                    <TableRow
-                                                                        key={d.id}
-                                                                        hover
-                                                                        sx={{
-                                                                            '&:nth-of-type(odd)': {
-                                                                                backgroundColor: alpha(theme.palette.action.hover, 0.02),
-                                                                            },
-                                                                        }}
-                                                                    >
-                                                                        <TableCell sx={{ whiteSpace: 'nowrap' }}>{d.donorName}</TableCell>
-                                                                        <TableCell sx={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={d.donorEmail}>{d.donorEmail}</TableCell>
-                                                                        <TableCell sx={{ whiteSpace: 'nowrap' }}>{dayjs(d.date).format('DD/MM/YYYY HH:mm')}</TableCell>
-                                                                        <TableCell align="right" sx={{ fontWeight: 600 }}>${d.amount.toFixed(2)}</TableCell>
-                                                                    </TableRow>
-                                                                ))}
-                                                                <TableRow
-                                                                    ref={loadMoreRef}
-                                                                    sx={{
-                                                                        height: '1px',
-                                                                        padding: 0,
-                                                                        border: 'none',
-                                                                        visibility: hasMoreDonations ? 'visible' : 'hidden'
-                                                                    }}
-                                                                >
-                                                                    <TableCell colSpan={4} sx={{ padding: 0, border: 'none', textAlign: 'center' }}>
-                                                                        {isLoadingMore && <CircularProgress size={24} sx={{ my: 1 }} />}
-                                                                    </TableCell>
-                                                                </TableRow>
-                                                            </TableBody>
-                                                        </Table>
-                                                    </TableContainer>
-
-                                                    {!loading.donations && donations.length === 0 && totalDonationsCount === 0 && (
-                                                        <Box sx={{ p: 4, textAlign: 'center' }}>
-                                                            <Typography color="text.secondary">
-                                                                No donations found for the selected criteria.
-                                                            </Typography>
-                                                        </Box>
-                                                    )}
-                                                </Paper>
-                                            </motion.div>
-                                        )}
-                                    </AnimatePresence>
-                                </Grid>
-
-                                {/* Form Titles Table */}
-                                <Grid size={{ xs: 12, xl: 6 }}>
-                                    <AnimatePresence>
-                                        {chartData && chartData.length > 0 && (
-                                            <motion.div
-                                                initial={{ opacity: 0, y: 20 }}
-                                                animate={{ opacity: 1, y: 0 }}
-                                                exit={{ opacity: 0, y: 20 }}
-                                                transition={{ duration: 0.3, delay: 0.1 }}
-                                            >
-                                                <Paper
-                                                    sx={{
-                                                        width: '100%',
-                                                        mt: { xs: 4, xl: 0 }, // Margin top only on smaller screens where they stack
-                                                        borderRadius: '16px',
-                                                        background: `linear-gradient(145deg, ${alpha(theme.palette.background.paper, 0.9)} 0%, ${alpha(theme.palette.background.paper, 0.95)} 100%)`,
-                                                        backdropFilter: 'blur(20px)',
-                                                        border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
-                                                        boxShadow: theme.shadows[4],
-                                                        overflow: 'hidden'
-                                                    }}
-                                                >
-                                                    <Typography variant="h6" sx={{ p: 3, fontWeight: 700 }}>Form Titles</Typography>
-                                                    <TableContainer sx={{ maxHeight: 600 }}>
-                                                        <Table stickyHeader size="small">
-                                                            <TableHead>
-                                                                <TableRow>
-                                                                    <TableCell sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>Form Title</TableCell>
-                                                                    <TableCell sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>Start Date</TableCell>
-                                                                    <TableCell align="right" sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>Donations</TableCell>
-                                                                    <TableCell align="right" sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>Amount Raised</TableCell>
-                                                                </TableRow>
-                                                            </TableHead>
-                                                            <TableBody>
-                                                                {chartData.map((item, index) => (
-                                                                    <TableRow
-                                                                        key={item.id}
-                                                                        hover
-                                                                        sx={{
-                                                                            '&:nth-of-type(odd)': {
-                                                                                backgroundColor: alpha(theme.palette.action.hover, 0.02),
-                                                                            },
-                                                                        }}
-                                                                    >
-                                                                        <TableCell component="th" scope="row">{item.name}</TableCell>
-                                                                        <TableCell>
-                                                                            {item.start_date ? dayjs(item.start_date).format('DD/MM/YYYY') : 'N/A'}
-                                                                        </TableCell>
-                                                                        <TableCell align="right">{item.donation_count}</TableCell>
-                                                                        <TableCell align="right" sx={{ fontWeight: 'bold', color: theme.palette.success.main }}>
-                                                                            ${item.total_amount.toFixed(2)}
-                                                                        </TableCell>
-                                                                    </TableRow>
-                                                                ))}
-                                                            </TableBody>
-                                                        </Table>
-                                                    </TableContainer>
-                                                </Paper>
-                                            </motion.div>
-                                        )}
-                                    </AnimatePresence>
-                                </Grid>
-                            </Grid>
                         </motion.div>
                     )}
                 </Grid>
             </Grid>
+
+            {/* Bottom Section: Detailed Data Tables - Full Width */}
+            {stats && (
+                <Grid container spacing={3} sx={{ mt: 1 }}>
+                    {/* Donations Table */}
+                    <Grid size={{ xs: 12, lg: 6 }}>
+                        <AnimatePresence>
+                            {(selectedCampaign || selectedTitles.length > 0) && !loading.stats && (
+                                <motion.div
+                                    initial={{ opacity: 0, y: 20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: 20 }}
+                                    transition={{ duration: 0.3 }}
+                                >
+                                    <Paper
+                                        sx={{
+                                            width: '100%',
+                                            height: '100%',
+                                            borderRadius: '16px',
+                                            background: `linear-gradient(145deg, ${alpha(theme.palette.background.paper, 0.9)} 0%, ${alpha(theme.palette.background.paper, 0.95)} 100%)`,
+                                            backdropFilter: 'blur(20px)',
+                                            border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+                                            boxShadow: theme.shadows[4],
+                                            overflow: 'hidden',
+                                            display: 'flex',
+                                            flexDirection: 'column'
+                                        }}
+                                    >
+                                        <Box sx={{ p: 3, pb: 2 }}>
+                                            {loading.donations && donations.length === 0 ? (
+                                                <CircularProgress size={24} />
+                                            ) : (
+                                                <Typography variant="h6" fontWeight="700">
+                                                    Donors {totalDonationsCount > 0 && `(${totalDonationsCount})`}
+                                                </Typography>
+                                            )}
+                                        </Box>
+
+                                        <TableContainer sx={{ maxHeight: 600, flexGrow: 1 }}>
+                                            <Table stickyHeader size="small">
+                                                <TableHead>
+                                                    <TableRow>
+                                                        <TableCell sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>Donor</TableCell>
+                                                        <TableCell align="right" sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>Amount</TableCell>
+                                                        <TableCell sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>Date</TableCell>
+                                                        <TableCell sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper, minWidth: 200 }}>Email</TableCell>
+                                                    </TableRow>
+                                                </TableHead>
+                                                <TableBody>
+                                                    {donations.map((d, index) => (
+                                                        <TableRow
+                                                            key={d.id}
+                                                            hover
+                                                            sx={{
+                                                                '&:nth-of-type(odd)': {
+                                                                    backgroundColor: alpha(theme.palette.action.hover, 0.02),
+                                                                },
+                                                            }}
+                                                        >
+                                                            <TableCell sx={{ whiteSpace: 'nowrap' }}>{d.donorName}</TableCell>
+                                                            <TableCell align="right" sx={{ fontWeight: 600, color: theme.palette.success.main, whiteSpace: 'nowrap' }}>${d.amount.toFixed(2)}</TableCell>
+                                                            <TableCell sx={{ whiteSpace: 'nowrap' }}>{dayjs(d.date).format('DD/MM/YYYY HH:mm')}</TableCell>
+                                                            <TableCell sx={{ maxWidth: 250, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={d.donorEmail}>{d.donorEmail}</TableCell>
+                                                        </TableRow>
+                                                    ))}
+                                                    <TableRow
+                                                        ref={loadMoreRef}
+                                                        sx={{
+                                                            height: '1px',
+                                                            padding: 0,
+                                                            border: 'none',
+                                                            visibility: hasMoreDonations ? 'visible' : 'hidden'
+                                                        }}
+                                                    >
+                                                        <TableCell colSpan={4} sx={{ padding: 0, border: 'none', textAlign: 'center' }}>
+                                                            {isLoadingMore && <CircularProgress size={24} sx={{ my: 1 }} />}
+                                                        </TableCell>
+                                                    </TableRow>
+                                                </TableBody>
+                                            </Table>
+                                        </TableContainer>
+
+                                        {!loading.donations && donations.length === 0 && totalDonationsCount === 0 && (
+                                            <Box sx={{ p: 4, textAlign: 'center' }}>
+                                                <Typography color="text.secondary">
+                                                    No donations found for the selected criteria.
+                                                </Typography>
+                                            </Box>
+                                        )}
+                                    </Paper>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+                    </Grid>
+
+                    {/* Form Titles Table */}
+                    <Grid size={{ xs: 12, lg: 6 }}>
+                        <AnimatePresence>
+                            {chartData && chartData.length > 0 && (
+                                <motion.div
+                                    initial={{ opacity: 0, y: 20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: 20 }}
+                                    transition={{ duration: 0.3, delay: 0.1 }}
+                                >
+                                    <Paper
+                                        sx={{
+                                            width: '100%',
+                                            borderRadius: '16px',
+                                            background: `linear-gradient(145deg, ${alpha(theme.palette.background.paper, 0.9)} 0%, ${alpha(theme.palette.background.paper, 0.95)} 100%)`,
+                                            backdropFilter: 'blur(20px)',
+                                            border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+                                            boxShadow: theme.shadows[4],
+                                            overflow: 'hidden'
+                                        }}
+                                    >
+                                        <Typography variant="h6" sx={{ p: 3, fontWeight: 700 }}>Form Titles</Typography>
+                                        <TableContainer sx={{ maxHeight: 600 }}>
+                                            <Table stickyHeader size="small">
+                                                <TableHead>
+                                                    <TableRow>
+                                                        <TableCell sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>Form Title</TableCell>
+                                                        <TableCell sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>Start Date</TableCell>
+                                                        <TableCell align="right" sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>Donations</TableCell>
+                                                        <TableCell align="right" sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>Amount Raised</TableCell>
+                                                    </TableRow>
+                                                </TableHead>
+                                                <TableBody>
+                                                    {chartData.map((item, index) => (
+                                                        <TableRow
+                                                            key={item.id}
+                                                            hover
+                                                            sx={{
+                                                                '&:nth-of-type(odd)': {
+                                                                    backgroundColor: alpha(theme.palette.action.hover, 0.02),
+                                                                },
+                                                            }}
+                                                        >
+                                                            <TableCell component="th" scope="row">{item.name}</TableCell>
+                                                            <TableCell>
+                                                                {item.start_date ? dayjs(item.start_date).format('DD/MM/YYYY') : 'N/A'}
+                                                            </TableCell>
+                                                            <TableCell align="right">{item.donation_count}</TableCell>
+                                                            <TableCell align="right" sx={{ fontWeight: 'bold', color: theme.palette.success.main }}>
+                                                                ${item.total_amount.toFixed(2)}
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    ))}
+                                                </TableBody>
+                                            </Table>
+                                        </TableContainer>
+                                    </Paper>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+                    </Grid>
+                </Grid>
+            )}
         </Box>
     );
 };
