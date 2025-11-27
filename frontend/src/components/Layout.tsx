@@ -18,6 +18,7 @@ import EmailRoundedIcon from '@mui/icons-material/EmailRounded';
 import AdminPanelSettingsRoundedIcon from '@mui/icons-material/AdminPanelSettingsRounded';
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded';
 import MenuIcon from '@mui/icons-material/Menu';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 
 import logo from '../assets/Logo.png';
@@ -70,7 +71,10 @@ export const Layout: React.FC = () => {
         alignItems: 'center',
         justifyContent: collapsed ? 'center' : 'space-between',
         px: 2,
-        minHeight: '80px !important'
+        minHeight: '80px !important',
+        flexDirection: collapsed ? 'column' : 'row',
+        gap: collapsed ? 1 : 0,
+        py: collapsed ? 2 : 0
       }}>
         {!collapsed && (
           <motion.div
@@ -83,9 +87,9 @@ export const Layout: React.FC = () => {
         )}
         {collapsed && <img src={logo} alt="Logo" style={{ height: '32px' }} />}
 
-        {!isMobile && !collapsed && (
-          <IconButton onClick={() => setCollapsed(true)} size="small">
-            <ChevronLeftIcon />
+        {!isMobile && (
+          <IconButton onClick={() => setCollapsed(!collapsed)} size="small">
+            {collapsed ? <ChevronRightIcon /> : <ChevronLeftIcon />}
           </IconButton>
         )}
       </Toolbar>
@@ -163,7 +167,7 @@ export const Layout: React.FC = () => {
           {!collapsed && <ListItemText primary="Logout" primaryTypographyProps={{ fontWeight: 600 }} />}
         </ListItemButton>
       </Box>
-    </Box>
+    </Box >
   );
 
   return (
