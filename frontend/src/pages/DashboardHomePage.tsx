@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Typography, Box, CircularProgress, Alert, Paper, Button, useTheme, alpha } from '@mui/material';
+import { Typography, Box, CircularProgress, Alert, Paper, Button, useTheme, alpha, Card } from '@mui/material';
 import Grid from '@mui/material/Grid';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
@@ -214,24 +214,36 @@ export const DashboardHomePage = () => {
             </Grid>
             <Grid size={{ xs: 12, lg: 4 }}>
               <motion.div variants={itemVariants} style={{ height: '100%' }}>
-                <Paper sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', background: alpha(theme.palette.background.paper, 0.6), backdropFilter: 'blur(10px)', border: `1px solid ${theme.palette.divider}` }}>
-                  <Typography variant="h6" color="text.secondary" gutterBottom>MoM Growth</Typography>
+                <Card
+                  component={motion.div}
+                  whileHover={{ y: -4, boxShadow: theme.shadows[8] }}
+                  transition={{ type: "spring", stiffness: 300 }}
+                  sx={{
+                    height: '100%',
+                    background: `linear-gradient(145deg, ${theme.palette.background.paper} 0%, ${alpha(theme.palette.background.paper, 0.9)} 100%)`,
+                  }}
+                >
+                  <Box sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
+                    <Typography variant="overline" color="text.secondary" fontWeight={700} letterSpacing={1.2} gutterBottom>
+                      MoM Growth
+                    </Typography>
 
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                    {glanceData.momGrowth >= 0 ? (
-                      <TrendingUpIcon sx={{ fontSize: 48, color: theme.palette.success.main }} />
-                    ) : (
-                      <TrendingDownIcon sx={{ fontSize: 48, color: theme.palette.error.main }} />
-                    )}
-                    <Typography variant="h3" fontWeight="800" color={glanceData.momGrowth >= 0 ? 'success.main' : 'error.main'}>
-                      {glanceData.momGrowth > 0 ? '+' : ''}{glanceData.momGrowth}%
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                      {glanceData.momGrowth >= 0 ? (
+                        <TrendingUpIcon sx={{ fontSize: 48, color: theme.palette.success.main }} />
+                      ) : (
+                        <TrendingDownIcon sx={{ fontSize: 48, color: theme.palette.error.main }} />
+                      )}
+                      <Typography variant="h3" fontWeight="800" color={glanceData.momGrowth >= 0 ? 'success.main' : 'error.main'}>
+                        {glanceData.momGrowth > 0 ? '+' : ''}{glanceData.momGrowth}%
+                      </Typography>
+                    </Box>
+
+                    <Typography variant="body2" color="text.secondary" textAlign="center">
+                      vs last month (same day)
                     </Typography>
                   </Box>
-
-                  <Typography variant="body2" color="text.secondary" textAlign="center">
-                    vs last month (same day)
-                  </Typography>
-                </Paper>
+                </Card>
               </motion.div>
             </Grid>
 
