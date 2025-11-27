@@ -484,22 +484,13 @@ export const CampaignAnalyticsPage: React.FC = () => {
             {/* Modern Header */}
             <Box
                 sx={{
-                    background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
-                    borderRadius: '24px',
-                    p: 4,
                     mb: 4,
-                    position: 'relative',
-                    overflow: 'hidden',
-                    '&::before': {
-                        content: '""',
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        background: 'radial-gradient(circle at top right, rgba(255,255,255,0.1) 0%, transparent 60%)',
-                        pointerEvents: 'none'
-                    }
+                    p: 4,
+                    borderRadius: '20px',
+                    background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.1)} 0%, ${alpha(theme.palette.secondary.main, 0.1)} 100%)`,
+                    backdropFilter: 'blur(20px)',
+                    border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+                    boxShadow: theme.shadows[4]
                 }}
             >
                 <Box sx={{ position: 'relative', zIndex: 1 }}>
@@ -510,20 +501,28 @@ export const CampaignAnalyticsPage: React.FC = () => {
                         animate={{ opacity: 1, y: 0 }}
                         sx={{
                             fontWeight: 800,
-                            color: 'white',
+                            background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
+                            WebkitBackgroundClip: 'text',
+                            WebkitTextFillColor: 'transparent',
+                            backgroundClip: 'text',
                             mb: 1,
-                            textShadow: '0 2px 10px rgba(0,0,0,0.2)'
+                            textShadow: '0 2px 10px rgba(0,0,0,0.1)'
                         }}
                     >
                         Campaign Analytics
                     </Typography>
                     <Typography
-                        variant="body1"
+                        variant="h6"
                         component={motion.p}
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         transition={{ delay: 0.2 }}
-                        sx={{ color: 'rgba(255,255,255,0.9)', mb: 3 }}
+                        sx={{
+                            color: theme.palette.text.secondary,
+                            fontWeight: 500,
+                            maxWidth: '600px',
+                            mb: 3
+                        }}
                     >
                         Deep insights into your fundraising campaigns
                     </Typography>
