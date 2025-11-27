@@ -2,11 +2,14 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-  Box, Typography, Paper, Grid, CircularProgress, Alert,
-  Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Dialog, DialogTitle, DialogContent, DialogActions, Button, IconButton
+    Box, Typography, Paper, Grid, CircularProgress, Alert,
+    Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
+    Dialog, DialogTitle, DialogContent, DialogActions, Button, IconButton
 } from '@mui/material';
+import { alpha, useTheme } from '@mui/material/styles';
+import { motion, AnimatePresence } from 'framer-motion';
 import CloseIcon from '@mui/icons-material/Close';
+import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
 import apiClient from '../api/axiosConfig';
 import { CombinedStatCard } from '../components/CombinedStatCard';
 import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
@@ -16,24 +19,24 @@ import { CampaignSelectorSlot, VIEW_ALL_CAMPAIGNS, type ApiListItem, type Campai
 
 // --- Interfaces ---
 interface ComparisonStatsData {
-  totalAmount: number;
-  totalCount: number;
-  breakdown: {
-    id: string;
-    name: string;
-    total_amount: number;
-    donation_count: number;
-    start_date?: string;
-  }[];
-  viewType: 'form-title' | 'campaign';
-  displayName: string;
+    totalAmount: number;
+    totalCount: number;
+    breakdown: {
+        id: string;
+        name: string;
+        total_amount: number;
+        donation_count: number;
+        start_date?: string;
+    }[];
+    viewType: 'form-title' | 'campaign';
+    displayName: string;
 }
 
 interface DonationDetail { id: string; donorName: string; donorEmail: string; amount: number; date: string; }
 
 interface SlotSelection {
-  source: string | null;
-  campaign: CampaignSelection;
+    source: string | null;
+    campaign: CampaignSelection;
 }
 
 
@@ -45,56 +48,158 @@ const formatCompactNumber = (num: number) => {
     return `$${num.toFixed(2)}`;
 };
 
-const CampaignResultCard: React.FC<{ stats: ComparisonStatsData; onFormTitleClick: (formTitleId: string, formTitleName: string) => void; }> = ({ stats, onFormTitleClick }) => (
-    <Paper variant="outlined" sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
-        <Typography variant="h6" gutterBottom noWrap title={stats.displayName} sx={{textAlign: 'center', mb: 1}}>{stats.displayName}</Typography>
-        <Box sx={{ mb: 2 }}>
-            <CombinedStatCard title="" metrics={[
-                { value: formatCompactNumber(stats.totalAmount), label: 'Total Amount', icon: <MonetizationOnIcon sx={{ fontSize: 32 }} /> },
-                { value: stats.totalCount.toString(), label: 'Donations', icon: <ReceiptLongIcon sx={{ fontSize: 32 }} /> }
-            ]}/>
-        </Box>
-        <Typography variant="subtitle2" sx={{ mt: 1, mb: 1 }}>
-            {stats.viewType === 'form-title' ? 'Form Title Breakdown' : 'Campaign Breakdown'}
-        </Typography>
-        <TableContainer component={Paper} variant="outlined" sx={{ flexGrow: 1, maxHeight: 450 }}>
-            <Table stickyHeader size="small">
-                <TableHead>
-                    <TableRow>
-                        <TableCell>{stats.viewType === 'form-title' ? 'Form Title' : 'Campaign'}</TableCell>
-                        <TableCell>Start Date</TableCell>
-                        <TableCell align="right">#</TableCell>
-                        <TableCell align="right">Amount</TableCell>
-                    </TableRow>
-                </TableHead>
-                <TableBody>
-                    {(stats.breakdown || []).map((row) => (
-                        <TableRow 
-                            key={row.id} 
-                            hover 
-                            sx={{ cursor: stats.viewType === 'form-title' ? 'pointer' : 'default' }} 
-                            onClick={() => stats.viewType === 'form-title' && onFormTitleClick(row.id, row.name)}
-                        >
-                            <TableCell component="th" scope="row">{row.name}</TableCell>
-                            <TableCell>{row.start_date ? dayjs(row.start_date).format('DD/MM/YY') : 'N/A'}</TableCell>
-                            <TableCell align="right">{row.donation_count}</TableCell>
-                            <TableCell align="right" sx={{ fontWeight: 'bold' }}>{formatCurrency(row.total_amount)}</TableCell>
-                        </TableRow>
-                    ))}
-                </TableBody>
-            </Table>
-        </TableContainer>
-    </Paper>
-);
+const CampaignResultCard: React.FC<{ stats: ComparisonStatsData; onFormTitleClick: (formTitleId: string, formTitleName: string) => void; }> = ({ stats, onFormTitleClick }) => {
+    const theme = useTheme();
+
+    return (
+        <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
+        >
+            <Paper
+                sx={{
+                    p: 3,
+                    height: '100%',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    borderRadius: '16px',
+                    background: `linear-gradient(145deg, ${alpha(theme.palette.background.paper, 0.9)} 0%, ${alpha(theme.palette.background.paper, 0.95)} 100%)`,
+                    backdropFilter: 'blur(20px)',
+                    border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+                    boxShadow: theme.shadows[8],
+                    transition: 'transform 0.2s, box-shadow 0.2s',
+                    '&:hover': {
+                        transform: 'translateY(-4px)',
+                        boxShadow: theme.shadows[12]
+                    }
+                }}
+            >
+                <Typography
+                    variant="h6"
+                    gutterBottom
+                    noWrap
+                    title={stats.displayName}
+                    sx={{
+                        textAlign: 'center',
+                        mb: 2,
+                        fontWeight: 700,
+                        background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
+                        WebkitBackgroundClip: 'text',
+                        WebkitTextFillColor: 'transparent',
+                        backgroundClip: 'text'
+                    }}
+                >
+                    {stats.displayName}
+                </Typography>
+
+                <Box sx={{ mb: 3 }}>
+                    <CombinedStatCard
+                        title=""
+                        metrics={[
+                            {
+                                value: formatCompactNumber(stats.totalAmount),
+                                label: 'Total Amount',
+                                icon: <MonetizationOnIcon sx={{ fontSize: 32, color: theme.palette.success.main }} />
+                            },
+                            {
+                                value: stats.totalCount.toString(),
+                                label: 'Donations',
+                                icon: <ReceiptLongIcon sx={{ fontSize: 32, color: theme.palette.info.main }} />
+                            }
+                        ]}
+                    />
+                </Box>
+
+                <Typography
+                    variant="subtitle2"
+                    sx={{
+                        mt: 1,
+                        mb: 2,
+                        fontWeight: 600,
+                        color: theme.palette.text.secondary
+                    }}
+                >
+                    {stats.viewType === 'form-title' ? '📧 Form Title Breakdown' : '🎯 Campaign Breakdown'}
+                </Typography>
+
+                <TableContainer
+                    component={Paper}
+                    sx={{
+                        flexGrow: 1,
+                        maxHeight: 450,
+                        borderRadius: '12px',
+                        background: alpha(theme.palette.background.paper, 0.6),
+                        backdropFilter: 'blur(10px)',
+                        border: `1px solid ${alpha(theme.palette.divider, 0.1)}`
+                    }}
+                >
+                    <Table stickyHeader size="small">
+                        <TableHead>
+                            <TableRow>
+                                <TableCell sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>
+                                    {stats.viewType === 'form-title' ? 'Form Title' : 'Campaign'}
+                                </TableCell>
+                                <TableCell sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>
+                                    Start Date
+                                </TableCell>
+                                <TableCell align="right" sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>
+                                    #
+                                </TableCell>
+                                <TableCell align="right" sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>
+                                    Amount
+                                </TableCell>
+                            </TableRow>
+                        </TableHead>
+                        <TableBody>
+                            {(stats.breakdown || []).map((row) => (
+                                <TableRow
+                                    key={row.id}
+                                    hover
+                                    sx={{
+                                        cursor: stats.viewType === 'form-title' ? 'pointer' : 'default',
+                                        '&:nth-of-type(odd)': {
+                                            backgroundColor: alpha(theme.palette.action.hover, 0.02),
+                                        },
+                                        '&:hover': {
+                                            backgroundColor: stats.viewType === 'form-title'
+                                                ? alpha(theme.palette.primary.main, 0.08)
+                                                : alpha(theme.palette.action.hover, 0.04),
+                                        }
+                                    }}
+                                    onClick={() => stats.viewType === 'form-title' && onFormTitleClick(row.id, row.name)}
+                                >
+                                    <TableCell component="th" scope="row" sx={{ fontWeight: 500 }}>
+                                        {row.name}
+                                    </TableCell>
+                                    <TableCell sx={{ color: theme.palette.text.secondary }}>
+                                        {row.start_date ? dayjs(row.start_date).format('DD/MM/YY') : 'N/A'}
+                                    </TableCell>
+                                    <TableCell align="right" sx={{ fontWeight: 600 }}>
+                                        {row.donation_count}
+                                    </TableCell>
+                                    <TableCell align="right" sx={{ fontWeight: 700, color: theme.palette.success.main }}>
+                                        {formatCurrency(row.total_amount)}
+                                    </TableCell>
+                                </TableRow>
+                            ))}
+                        </TableBody>
+                    </Table>
+                </TableContainer>
+            </Paper>
+        </motion.div>
+    );
+};
 
 // --- Main Page Component ---
 export const CampaignComparisonPage: React.FC = () => {
+    const theme = useTheme();
     const [sources, setSources] = useState<ApiListItem[]>([]);
     const [selectedSlots, setSelectedSlots] = useState<SlotSelection[]>(Array(4).fill({ source: null, campaign: null }));
     const [comparisonData, setComparisonData] = useState<Record<number, ComparisonStatsData | null>>({});
     const [loading, setLoading] = useState({ sources: true, stats: false });
     const [error, setError] = useState('');
-    
+
     const [modalOpen, setModalOpen] = useState(false);
     const [modalTitle, setModalTitle] = useState('');
     const [donationDetails, setDonationDetails] = useState<DonationDetail[]>([]);
@@ -137,7 +242,7 @@ export const CampaignComparisonPage: React.FC = () => {
                     let url = '';
                     let displayName = 'Data';
                     const isAllCampaignsView = campaign === VIEW_ALL_CAMPAIGNS;
-                    
+
                     if (isAllCampaignsView) {
                         url = `/campaigns/source/${source}/stats`;
                         displayName = `${source} (All Campaigns)`;
@@ -149,9 +254,9 @@ export const CampaignComparisonPage: React.FC = () => {
                     }
 
                     const res = await apiClient.get(url);
-                    
+
                     const rawBreakdown = res.data.stats_by_campaign ?? res.data.stats_by_form_title;
-                    
+
                     const transformedBreakdown = rawBreakdown.map((item: any) => ({
                         id: item.campaign_id ?? item.form_title_id,
                         name: item.campaign_name ?? item.form_title_name,
@@ -172,7 +277,7 @@ export const CampaignComparisonPage: React.FC = () => {
                     return { slotId, data: null };
                 }
             });
-            
+
             try {
                 const results = await Promise.all(statsPromises);
                 const newData: Record<number, ComparisonStatsData | null> = {};
@@ -189,7 +294,7 @@ export const CampaignComparisonPage: React.FC = () => {
 
         fetchStats();
     }, [selectedSlots]);
-    
+
     const handleOpenDonationModal = async (formTitleId: string, formTitleName: string) => {
         setModalTitle(`Donors for "${formTitleName}"`);
         setModalOpen(true);
@@ -200,14 +305,46 @@ export const CampaignComparisonPage: React.FC = () => {
             .finally(() => setLoadingDonations(false));
     };
     const handleCloseDonationModal = () => setModalOpen(false);
-    
+
     const activeSlots = Object.values(comparisonData).filter(Boolean);
 
     return (
-        <Box sx={{ width: '100%', maxWidth: 1800, mx: 'auto' }}>
-            <Typography variant="h4" component="h1" gutterBottom>Campaign Comparison</Typography>
+        <Box sx={{ width: '100%', maxWidth: 1800, mx: 'auto', p: 3 }}>
+            {/* Header Section */}
+            <Box
+                sx={{
+                    mb: 4,
+                    p: 4,
+                    borderRadius: '20px',
+                    background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.1)} 0%, ${alpha(theme.palette.secondary.main, 0.1)} 100%)`,
+                    backdropFilter: 'blur(20px)',
+                    border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+                    boxShadow: theme.shadows[4]
+                }}
+            >
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
+                    <CompareArrowsIcon sx={{ fontSize: 40, color: theme.palette.primary.main }} />
+                    <Typography
+                        variant="h4"
+                        component="h1"
+                        sx={{
+                            fontWeight: 700,
+                            background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
+                            WebkitBackgroundClip: 'text',
+                            WebkitTextFillColor: 'transparent',
+                            backgroundClip: 'text'
+                        }}
+                    >
+                        Campaign Comparison
+                    </Typography>
+                </Box>
+                <Typography variant="body2" color="text.secondary">
+                    Compare performance across different campaigns and sources
+                </Typography>
+            </Box>
 
-            <Grid container spacing={2} sx={{ mb: 3 }}>
+            {/* Selection Slots */}
+            <Grid container spacing={2} sx={{ mb: 4 }}>
                 {[1, 2, 3, 4].map(slotId => (
                     <Grid size={{ xs: 12, sm: 6, md: 3 }} key={slotId}>
                         <CampaignSelectorSlot
@@ -221,46 +358,138 @@ export const CampaignComparisonPage: React.FC = () => {
                 ))}
             </Grid>
 
+            {/* Loading & Error States */}
             {loading.stats && <CircularProgress sx={{ display: 'block', mx: 'auto', my: 4 }} />}
             {error && <Alert severity="error" sx={{ my: 2 }}>{error}</Alert>}
+
+            {/* Empty State */}
             {!loading.stats && activeSlots.length === 0 && (
-                <Paper variant="outlined" sx={{ p: 4, textAlign: 'center' }}>
-                    <Typography color="text.secondary">Select a source and a view in one or more slots to compare statistics.</Typography>
-                </Paper>
+                <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ duration: 0.3 }}
+                >
+                    <Paper
+                        sx={{
+                            p: 6,
+                            textAlign: 'center',
+                            borderRadius: '16px',
+                            background: `linear-gradient(145deg, ${alpha(theme.palette.background.paper, 0.9)} 0%, ${alpha(theme.palette.background.paper, 0.95)} 100%)`,
+                            backdropFilter: 'blur(20px)',
+                            border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+                        }}
+                    >
+                        <CompareArrowsIcon sx={{ fontSize: 64, color: alpha(theme.palette.text.secondary, 0.3), mb: 2 }} />
+                        <Typography variant="h6" color="text.secondary" gutterBottom>
+                            Ready to Compare
+                        </Typography>
+                        <Typography color="text.secondary" variant="body2">
+                            Select a source and a view in one or more slots above to compare statistics
+                        </Typography>
+                    </Paper>
+                </motion.div>
             )}
 
-            <Grid container spacing={3} alignItems="stretch">
-                {Object.entries(comparisonData).map(([slotId, data]) => (
-                    data && (
-                        <Grid size={{ xs: 12, md: 6 }} key={slotId}>
-                            <CampaignResultCard stats={data} onFormTitleClick={handleOpenDonationModal} />
-                        </Grid>
-                    )
-                ))}
-            </Grid>
-            
-            <Dialog open={modalOpen} onClose={handleCloseDonationModal} maxWidth="md" fullWidth>
-                <DialogTitle>
+            {/* Results Grid */}
+            <AnimatePresence mode="wait">
+                <Grid container spacing={3} alignItems="stretch">
+                    {Object.entries(comparisonData).map(([slotId, data]) => (
+                        data && (
+                            <Grid size={{ xs: 12, md: 6 }} key={slotId}>
+                                <CampaignResultCard stats={data} onFormTitleClick={handleOpenDonationModal} />
+                            </Grid>
+                        )
+                    ))}
+                </Grid>
+            </AnimatePresence>
+
+            {/* Donation Details Modal */}
+            <Dialog
+                open={modalOpen}
+                onClose={handleCloseDonationModal}
+                maxWidth="md"
+                fullWidth
+                PaperProps={{
+                    sx: {
+                        borderRadius: '16px',
+                        background: `linear-gradient(145deg, ${alpha(theme.palette.background.paper, 0.95)} 0%, ${alpha(theme.palette.background.paper, 0.98)} 100%)`,
+                        backdropFilter: 'blur(20px)',
+                    }
+                }}
+            >
+                <DialogTitle sx={{ fontWeight: 700 }}>
                     {modalTitle}
-                    <IconButton aria-label="close" onClick={handleCloseDonationModal} sx={{ position: 'absolute', right: 8, top: 8, color: (theme) => theme.palette.grey[500] }}>
+                    <IconButton
+                        aria-label="close"
+                        onClick={handleCloseDonationModal}
+                        sx={{
+                            position: 'absolute',
+                            right: 8,
+                            top: 8,
+                            color: theme.palette.grey[500]
+                        }}
+                    >
                         <CloseIcon />
                     </IconButton>
                 </DialogTitle>
                 <DialogContent dividers>
-                     {loadingDonations ? <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box> : (
-                        <TableContainer component={Paper} variant="outlined">
+                    {loadingDonations ? (
+                        <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
+                            <CircularProgress />
+                        </Box>
+                    ) : (
+                        <TableContainer
+                            component={Paper}
+                            sx={{
+                                borderRadius: '12px',
+                                background: alpha(theme.palette.background.paper, 0.6),
+                                backdropFilter: 'blur(10px)',
+                                border: `1px solid ${alpha(theme.palette.divider, 0.1)}`
+                            }}
+                        >
                             <Table size="small">
-                                <TableHead><TableRow><TableCell>Donor Name</TableCell><TableCell>Email</TableCell><TableCell>Date</TableCell><TableCell align="right">Amount</TableCell></TableRow></TableHead>
+                                <TableHead>
+                                    <TableRow>
+                                        <TableCell sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>Donor Name</TableCell>
+                                        <TableCell sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>Email</TableCell>
+                                        <TableCell sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>Date</TableCell>
+                                        <TableCell align="right" sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>Amount</TableCell>
+                                    </TableRow>
+                                </TableHead>
                                 <TableBody>
                                     {donationDetails.length > 0 ? donationDetails.map(d => (
-                                        <TableRow key={d.id}><TableCell>{d.donorName}</TableCell><TableCell>{d.donorEmail}</TableCell><TableCell>{dayjs(d.date).format('DD/MM/YYYY HH:mm')}</TableCell><TableCell align="right">{formatCurrency(d.amount)}</TableCell></TableRow>
-                                    )) : <TableRow><TableCell colSpan={4} align="center">No donations found for this item.</TableCell></TableRow>}
+                                        <TableRow
+                                            key={d.id}
+                                            sx={{
+                                                '&:nth-of-type(odd)': {
+                                                    backgroundColor: alpha(theme.palette.action.hover, 0.02),
+                                                }
+                                            }}
+                                        >
+                                            <TableCell>{d.donorName}</TableCell>
+                                            <TableCell>{d.donorEmail}</TableCell>
+                                            <TableCell>{dayjs(d.date).format('DD/MM/YYYY HH:mm')}</TableCell>
+                                            <TableCell align="right" sx={{ fontWeight: 600, color: theme.palette.success.main }}>
+                                                {formatCurrency(d.amount)}
+                                            </TableCell>
+                                        </TableRow>
+                                    )) : (
+                                        <TableRow>
+                                            <TableCell colSpan={4} align="center" sx={{ py: 4, color: theme.palette.text.secondary }}>
+                                                No donations found for this item.
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
                                 </TableBody>
                             </Table>
                         </TableContainer>
                     )}
                 </DialogContent>
-                <DialogActions><Button onClick={handleCloseDonationModal}>Close</Button></DialogActions>
+                <DialogActions sx={{ p: 2 }}>
+                    <Button onClick={handleCloseDonationModal} variant="contained">
+                        Close
+                    </Button>
+                </DialogActions>
             </Dialog>
         </Box>
     );
