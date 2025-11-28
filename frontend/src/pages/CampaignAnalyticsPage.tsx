@@ -3,10 +3,9 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
     Box, Typography, Paper, Divider, Button, CircularProgress, Alert,
     FormControl, InputLabel, Select, MenuItem, Collapse,
-    Table, TableBody, TableCell, TableContainer, TableHead, TableRow, useTheme, Chip, Stack, alpha, Card, CardContent, Grid
+    Table, TableBody, TableCell, TableContainer, TableHead, TableRow, useTheme, Chip, alpha, Card, CardContent, Grid
 } from '@mui/material';
 import TuneIcon from '@mui/icons-material/Tune';
-import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import BarChartIcon from '@mui/icons-material/BarChart';
@@ -15,9 +14,8 @@ import dayjs, { Dayjs } from 'dayjs';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
 import apiClient from '../api/axiosConfig';
-import { StatCard } from '../components/StatCard';
 import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
-import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
+import VolunteerActivismIcon from '@mui/icons-material/VolunteerActivism';
 import { useWebSocket } from '../context/WebSocketProvider';
 import { FormTitleSelector } from '../components/FormTitleSelector';
 
@@ -467,6 +465,18 @@ export const CampaignAnalyticsPage: React.FC = () => {
     const totalCount = stats?.total_count ?? 0;
     const chartData = stats?.breakdown;
 
+    const [showFloatingStats, setShowFloatingStats] = useState(false);
+
+    useEffect(() => {
+        const handleScroll = () => {
+            const threshold = 300; // Show floating stats after scrolling 300px
+            setShowFloatingStats(window.scrollY > threshold);
+        };
+
+        window.addEventListener('scroll', handleScroll);
+        return () => window.removeEventListener('scroll', handleScroll);
+    }, []);
+
     // Generate gradient colors for chart bars
     const getBarColor = (index: number, total: number) => {
         const hue = (index / total) * 360;
@@ -481,19 +491,94 @@ export const CampaignAnalyticsPage: React.FC = () => {
             animate="visible"
             sx={{ width: '100%', maxWidth: '1600px', mx: 'auto', p: { xs: 2, md: 4 } }}
         >
-            {/* Modern Header */}
+            {/* Floating Stats Pill (Sticky) - Centered in Content */}
+            <AnimatePresence>
+                {showFloatingStats && stats && (
+                    <Box
+                        component={motion.div}
+                        initial={{ y: -100, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        exit={{ y: -100, opacity: 0 }}
+                        transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                        sx={{
+                            position: 'sticky',
+                            top: 80, // Below navbar
+                            zIndex: 1100,
+                            mx: 'auto', // Center horizontally in the content container
+                            mb: -10, // Negative margin to not take up space (approx height)
+                            background: alpha(theme.palette.background.paper, 0.8),
+                            backdropFilter: 'blur(16px)',
+                            borderRadius: '50px',
+                            boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+                            border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+                            px: 4,
+                            py: 1.5,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            width: 'fit-content',
+                            pointerEvents: 'auto'
+                        }}
+                    >
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                            <Box sx={{
+                                p: 1,
+                                borderRadius: '50%',
+                                background: alpha(theme.palette.primary.main, 0.1),
+                                color: theme.palette.primary.main,
+                                display: 'flex'
+                            }}>
+                                <MonetizationOnIcon />
+                            </Box>
+                            <Box>
+                                <Typography variant="caption" sx={{ color: theme.palette.text.secondary, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block' }}>
+                                    Raised
+                                </Typography>
+                                <Typography variant="h6" sx={{ color: theme.palette.text.primary, fontWeight: 800, lineHeight: 1 }}>
+                                    ${totalAmount.toFixed(2)}
+                                </Typography>
+                            </Box>
+                        </Box>
+
+                        <Divider orientation="vertical" flexItem sx={{ height: '32px', alignSelf: 'center' }} />
+
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                            <Box sx={{
+                                p: 1,
+                                borderRadius: '50%',
+                                background: alpha(theme.palette.secondary.main, 0.1),
+                                color: theme.palette.secondary.main,
+                                display: 'flex'
+                            }}>
+                                <VolunteerActivismIcon />
+                            </Box>
+                            <Box>
+                                <Typography variant="caption" sx={{ color: theme.palette.text.secondary, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block' }}>
+                                    Donations
+                                </Typography>
+                                <Typography variant="h6" sx={{ color: theme.palette.text.primary, fontWeight: 800, lineHeight: 1 }}>
+                                    {totalCount}
+                                </Typography>
+                            </Box>
+                        </Box>
+                    </Box>
+                )}
+            </AnimatePresence>
+
+            {/* Combined Header & Stats Container */}
             <Box
                 sx={{
                     mb: 4,
                     p: 4,
                     borderRadius: '20px',
-                    background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.1)} 0%, ${alpha(theme.palette.secondary.main, 0.1)} 100%)`,
+                    background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.05)} 0%, ${alpha(theme.palette.secondary.main, 0.05)} 100%)`,
                     backdropFilter: 'blur(20px)',
                     border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
-                    boxShadow: theme.shadows[4]
+                    boxShadow: theme.shadows[1],
                 }}
             >
-                <Box sx={{ position: 'relative', zIndex: 1 }}>
+                {/* Header Title & Description */}
+                <Box sx={{ mb: 4 }}>
                     <Typography
                         variant="h3"
                         component={motion.h1}
@@ -521,98 +606,129 @@ export const CampaignAnalyticsPage: React.FC = () => {
                             color: theme.palette.text.secondary,
                             fontWeight: 500,
                             maxWidth: '600px',
-                            mb: 3
                         }}
                     >
                         Deep insights into your fundraising campaigns
                     </Typography>
-
-                    {/* Quick Stats in Header */}
-                    {stats && (
-                        <Grid container spacing={2}>
-                            <Grid size={{ xs: 6, md: 3 }}>
-                                <motion.div variants={itemVariants}>
-                                    <Card
-                                        sx={{
-                                            background: alpha(theme.palette.background.paper, 0.15),
-                                            backdropFilter: 'blur(10px)',
-                                            border: `1px solid ${alpha(theme.palette.divider, 0.2)}`,
-                                        }}
-                                    >
-                                        <CardContent sx={{ p: 2 }}>
-                                            <Typography variant="caption" sx={{ color: alpha(theme.palette.text.primary, 0.8) }}>
-                                                Total Raised
-                                            </Typography>
-                                            <Typography variant="h5" sx={{ color: theme.palette.text.primary, fontWeight: 700 }}>
-                                                ${totalAmount.toFixed(2)}
-                                            </Typography>
-                                        </CardContent>
-                                    </Card>
-                                </motion.div>
-                            </Grid>
-                            <Grid size={{ xs: 6, md: 3 }}>
-                                <motion.div variants={itemVariants}>
-                                    <Card
-                                        sx={{
-                                            background: alpha(theme.palette.background.paper, 0.15),
-                                            backdropFilter: 'blur(10px)',
-                                            border: `1px solid ${alpha(theme.palette.divider, 0.2)}`,
-                                        }}
-                                    >
-                                        <CardContent sx={{ p: 2 }}>
-                                            <Typography variant="caption" sx={{ color: alpha(theme.palette.text.primary, 0.8) }}>
-                                                Donations
-                                            </Typography>
-                                            <Typography variant="h5" sx={{ color: theme.palette.text.primary, fontWeight: 700 }}>
-                                                {totalCount}
-                                            </Typography>
-                                        </CardContent>
-                                    </Card>
-                                </motion.div>
-                            </Grid>
-                            <Grid size={{ xs: 6, md: 3 }}>
-                                <motion.div variants={itemVariants}>
-                                    <Card
-                                        sx={{
-                                            background: alpha(theme.palette.background.paper, 0.15),
-                                            backdropFilter: 'blur(10px)',
-                                            border: `1px solid ${alpha(theme.palette.divider, 0.2)}`,
-                                        }}
-                                    >
-                                        <CardContent sx={{ p: 2 }}>
-                                            <Typography variant="caption" sx={{ color: alpha(theme.palette.text.primary, 0.8) }}>
-                                                Avg. Donation
-                                            </Typography>
-                                            <Typography variant="h5" sx={{ color: theme.palette.text.primary, fontWeight: 700 }}>
-                                                ${totalCount > 0 ? (totalAmount / totalCount).toFixed(2) : '0.00'}
-                                            </Typography>
-                                        </CardContent>
-                                    </Card>
-                                </motion.div>
-                            </Grid>
-                            <Grid size={{ xs: 6, md: 3 }}>
-                                <motion.div variants={itemVariants}>
-                                    <Card
-                                        sx={{
-                                            background: alpha(theme.palette.background.paper, 0.15),
-                                            backdropFilter: 'blur(10px)',
-                                            border: `1px solid ${alpha(theme.palette.divider, 0.2)}`,
-                                        }}
-                                    >
-                                        <CardContent sx={{ p: 2 }}>
-                                            <Typography variant="caption" sx={{ color: alpha(theme.palette.text.primary, 0.8) }}>
-                                                Emails
-                                            </Typography>
-                                            <Typography variant="h5" sx={{ color: theme.palette.text.primary, fontWeight: 700 }}>
-                                                {chartData?.length ?? 0}
-                                            </Typography>
-                                        </CardContent>
-                                    </Card>
-                                </motion.div>
-                            </Grid>
-                        </Grid>
-                    )}
                 </Box>
+
+                {/* Main Stats Grid */}
+                {stats && (
+                    <Grid container spacing={2}>
+                        <Grid size={{ xs: 6, md: 3 }}>
+                            <motion.div variants={itemVariants}>
+                                <Card
+                                    sx={{
+                                        background: alpha(theme.palette.background.paper, 0.6),
+                                        backdropFilter: 'blur(10px)',
+                                        border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+                                        boxShadow: 'none',
+                                        borderRadius: '16px',
+                                        transition: 'all 0.3s ease',
+                                        '&:hover': {
+                                            transform: 'translateY(-2px)',
+                                            boxShadow: theme.shadows[2],
+                                            borderColor: alpha(theme.palette.primary.main, 0.2)
+                                        }
+                                    }}
+                                >
+                                    <CardContent sx={{ p: 3, '&:last-child': { pb: 3 } }}>
+                                        <Typography variant="caption" sx={{ color: theme.palette.text.secondary, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                            Total Raised
+                                        </Typography>
+                                        <Typography variant="h4" sx={{ color: theme.palette.text.primary, fontWeight: 800, mt: 1 }}>
+                                            ${totalAmount.toFixed(2)}
+                                        </Typography>
+                                    </CardContent>
+                                </Card>
+                            </motion.div>
+                        </Grid>
+                        <Grid size={{ xs: 6, md: 3 }}>
+                            <motion.div variants={itemVariants}>
+                                <Card
+                                    sx={{
+                                        background: alpha(theme.palette.background.paper, 0.6),
+                                        backdropFilter: 'blur(10px)',
+                                        border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+                                        boxShadow: 'none',
+                                        borderRadius: '16px',
+                                        transition: 'all 0.3s ease',
+                                        '&:hover': {
+                                            transform: 'translateY(-2px)',
+                                            boxShadow: theme.shadows[2],
+                                            borderColor: alpha(theme.palette.primary.main, 0.2)
+                                        }
+                                    }}
+                                >
+                                    <CardContent sx={{ p: 3, '&:last-child': { pb: 3 } }}>
+                                        <Typography variant="caption" sx={{ color: theme.palette.text.secondary, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                            Donations
+                                        </Typography>
+                                        <Typography variant="h4" sx={{ color: theme.palette.text.primary, fontWeight: 800, mt: 1 }}>
+                                            {totalCount}
+                                        </Typography>
+                                    </CardContent>
+                                </Card>
+                            </motion.div>
+                        </Grid>
+                        <Grid size={{ xs: 6, md: 3 }}>
+                            <motion.div variants={itemVariants}>
+                                <Card
+                                    sx={{
+                                        background: alpha(theme.palette.background.paper, 0.6),
+                                        backdropFilter: 'blur(10px)',
+                                        border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+                                        boxShadow: 'none',
+                                        borderRadius: '16px',
+                                        transition: 'all 0.3s ease',
+                                        '&:hover': {
+                                            transform: 'translateY(-2px)',
+                                            boxShadow: theme.shadows[2],
+                                            borderColor: alpha(theme.palette.primary.main, 0.2)
+                                        }
+                                    }}
+                                >
+                                    <CardContent sx={{ p: 3, '&:last-child': { pb: 3 } }}>
+                                        <Typography variant="caption" sx={{ color: theme.palette.text.secondary, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                            Avg. Donation
+                                        </Typography>
+                                        <Typography variant="h4" sx={{ color: theme.palette.text.primary, fontWeight: 800, mt: 1 }}>
+                                            ${totalCount > 0 ? (totalAmount / totalCount).toFixed(2) : '0.00'}
+                                        </Typography>
+                                    </CardContent>
+                                </Card>
+                            </motion.div>
+                        </Grid>
+                        <Grid size={{ xs: 6, md: 3 }}>
+                            <motion.div variants={itemVariants}>
+                                <Card
+                                    sx={{
+                                        background: alpha(theme.palette.background.paper, 0.6),
+                                        backdropFilter: 'blur(10px)',
+                                        border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+                                        boxShadow: 'none',
+                                        borderRadius: '16px',
+                                        transition: 'all 0.3s ease',
+                                        '&:hover': {
+                                            transform: 'translateY(-2px)',
+                                            boxShadow: theme.shadows[2],
+                                            borderColor: alpha(theme.palette.primary.main, 0.2)
+                                        }
+                                    }}
+                                >
+                                    <CardContent sx={{ p: 3, '&:last-child': { pb: 3 } }}>
+                                        <Typography variant="caption" sx={{ color: theme.palette.text.secondary, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                            Emails
+                                        </Typography>
+                                        <Typography variant="h4" sx={{ color: theme.palette.text.primary, fontWeight: 800, mt: 1 }}>
+                                            {chartData?.length ?? 0}
+                                        </Typography>
+                                    </CardContent>
+                                </Card>
+                            </motion.div>
+                        </Grid>
+                    </Grid>
+                )}
             </Box>
 
             <Grid container spacing={3}>
