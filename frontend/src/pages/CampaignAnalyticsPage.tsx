@@ -534,16 +534,16 @@ export const CampaignAnalyticsPage: React.FC = () => {
                                 <motion.div variants={itemVariants}>
                                     <Card
                                         sx={{
-                                            background: 'rgba(255,255,255,0.15)',
+                                            background: alpha(theme.palette.background.paper, 0.15),
                                             backdropFilter: 'blur(10px)',
-                                            border: '1px solid rgba(255,255,255,0.2)',
+                                            border: `1px solid ${alpha(theme.palette.divider, 0.2)}`,
                                         }}
                                     >
                                         <CardContent sx={{ p: 2 }}>
-                                            <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.8)' }}>
+                                            <Typography variant="caption" sx={{ color: alpha(theme.palette.text.primary, 0.8) }}>
                                                 Total Raised
                                             </Typography>
-                                            <Typography variant="h5" sx={{ color: 'white', fontWeight: 700 }}>
+                                            <Typography variant="h5" sx={{ color: theme.palette.text.primary, fontWeight: 700 }}>
                                                 ${totalAmount.toFixed(2)}
                                             </Typography>
                                         </CardContent>
@@ -554,16 +554,16 @@ export const CampaignAnalyticsPage: React.FC = () => {
                                 <motion.div variants={itemVariants}>
                                     <Card
                                         sx={{
-                                            background: 'rgba(255,255,255,0.15)',
+                                            background: alpha(theme.palette.background.paper, 0.15),
                                             backdropFilter: 'blur(10px)',
-                                            border: '1px solid rgba(255,255,255,0.2)',
+                                            border: `1px solid ${alpha(theme.palette.divider, 0.2)}`,
                                         }}
                                     >
                                         <CardContent sx={{ p: 2 }}>
-                                            <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.8)' }}>
+                                            <Typography variant="caption" sx={{ color: alpha(theme.palette.text.primary, 0.8) }}>
                                                 Donations
                                             </Typography>
-                                            <Typography variant="h5" sx={{ color: 'white', fontWeight: 700 }}>
+                                            <Typography variant="h5" sx={{ color: theme.palette.text.primary, fontWeight: 700 }}>
                                                 {totalCount}
                                             </Typography>
                                         </CardContent>
@@ -574,16 +574,16 @@ export const CampaignAnalyticsPage: React.FC = () => {
                                 <motion.div variants={itemVariants}>
                                     <Card
                                         sx={{
-                                            background: 'rgba(255,255,255,0.15)',
+                                            background: alpha(theme.palette.background.paper, 0.15),
                                             backdropFilter: 'blur(10px)',
-                                            border: '1px solid rgba(255,255,255,0.2)',
+                                            border: `1px solid ${alpha(theme.palette.divider, 0.2)}`,
                                         }}
                                     >
                                         <CardContent sx={{ p: 2 }}>
-                                            <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.8)' }}>
+                                            <Typography variant="caption" sx={{ color: alpha(theme.palette.text.primary, 0.8) }}>
                                                 Avg. Donation
                                             </Typography>
-                                            <Typography variant="h5" sx={{ color: 'white', fontWeight: 700 }}>
+                                            <Typography variant="h5" sx={{ color: theme.palette.text.primary, fontWeight: 700 }}>
                                                 ${totalCount > 0 ? (totalAmount / totalCount).toFixed(2) : '0.00'}
                                             </Typography>
                                         </CardContent>
@@ -594,16 +594,16 @@ export const CampaignAnalyticsPage: React.FC = () => {
                                 <motion.div variants={itemVariants}>
                                     <Card
                                         sx={{
-                                            background: 'rgba(255,255,255,0.15)',
+                                            background: alpha(theme.palette.background.paper, 0.15),
                                             backdropFilter: 'blur(10px)',
-                                            border: '1px solid rgba(255,255,255,0.2)',
+                                            border: `1px solid ${alpha(theme.palette.divider, 0.2)}`,
                                         }}
                                     >
                                         <CardContent sx={{ p: 2 }}>
-                                            <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.8)' }}>
+                                            <Typography variant="caption" sx={{ color: alpha(theme.palette.text.primary, 0.8) }}>
                                                 Emails
                                             </Typography>
-                                            <Typography variant="h5" sx={{ color: 'white', fontWeight: 700 }}>
+                                            <Typography variant="h5" sx={{ color: theme.palette.text.primary, fontWeight: 700 }}>
                                                 {chartData?.length ?? 0}
                                             </Typography>
                                         </CardContent>
@@ -867,7 +867,7 @@ export const CampaignAnalyticsPage: React.FC = () => {
                                     justifyContent: 'center',
                                     background: `linear-gradient(145deg, ${alpha(theme.palette.background.paper, 0.4)} 0%, ${alpha(theme.palette.background.paper, 0.1)} 100%)`,
                                     backdropFilter: 'blur(10px)',
-                                    border: `1px dashed ${alpha(theme.palette.common.white, 0.1)}`,
+                                    border: `1px dashed ${alpha(theme.palette.text.primary, 0.1)}`,
                                     borderRadius: '24px',
                                     textAlign: 'center'
                                 }}
@@ -880,12 +880,12 @@ export const CampaignAnalyticsPage: React.FC = () => {
                                         background: `radial-gradient(circle, ${alpha(theme.palette.primary.main, 0.2)} 0%, transparent 70%)`
                                     }}
                                 >
-                                    <BarChartIcon sx={{ fontSize: 80, color: alpha(theme.palette.common.white, 0.2) }} />
+                                    <BarChartIcon sx={{ fontSize: 80, color: alpha(theme.palette.text.primary, 0.2) }} />
                                 </Box>
-                                <Typography variant="h4" fontWeight="700" gutterBottom sx={{ color: alpha(theme.palette.common.white, 0.8) }}>
+                                <Typography variant="h4" fontWeight="700" gutterBottom sx={{ color: alpha(theme.palette.text.primary, 0.8) }}>
                                     Ready to Analyze
                                 </Typography>
-                                <Typography variant="body1" sx={{ color: alpha(theme.palette.common.white, 0.5), maxWidth: 400, mb: 4 }}>
+                                <Typography variant="body1" sx={{ color: alpha(theme.palette.text.primary, 0.5), maxWidth: 400, mb: 4 }}>
                                     Select a source from the control panel to generate detailed insights, visualize trends, and track campaign performance.
                                 </Typography>
 
@@ -897,7 +897,7 @@ export const CampaignAnalyticsPage: React.FC = () => {
                                         <Box sx={{ width: 60, height: 80, bgcolor: theme.palette.primary.main, borderRadius: '8px 8px 0 0' }} />
                                         <Box sx={{ width: 60, height: 120, bgcolor: theme.palette.secondary.main, borderRadius: '8px 8px 0 0' }} />
                                     </Box>
-                                    <Box sx={{ height: 4, bgcolor: alpha(theme.palette.common.white, 0.2), borderRadius: 2 }} />
+                                    <Box sx={{ height: 4, bgcolor: alpha(theme.palette.text.primary, 0.1), borderRadius: 2 }} />
                                 </Box>
                             </Paper>
                         </motion.div>
