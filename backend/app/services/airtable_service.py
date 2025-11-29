@@ -614,16 +614,19 @@ class AirtableService:
 
             # Rama CON filtro de fecha (llama a get_campaign_stats, que ya usa createdTime)
             else:
-                 # Necesitamos los IDs para iterar
-                 campaign_records_ids = self.campaigns_table.all(formula=campaign_formula, fields=[]) # Solo IDs
-                 campaign_map = {rec['id']: rec for rec in campaign_records_ids} # Mapeo ID -> Record (con createdTime)
-
+                 # Necesitamos los IDs para iterar, y AHORA TAMBIÉN EL NOMBRE para evitar N+1 calls
+                 campaign_records_ids = self.campaigns_table.all(
+                     formula=campaign_formula, 
+                     fields=[CAMPAIGNS_FIELDS["name"]] # <-- Traemos el nombre aquí
+                 )
+                 campaign_map = {rec['id']: rec for rec in campaign_records_ids} # Mapeo ID -> Record
 
                  for campaign_id, camp_record in campaign_map.items():
                     # Llamamos a la versión ya modificada de get_campaign_stats
                     stats = self.get_campaign_stats(campaign_id, start_date, end_date)
-                    campaign_name_rec = self.campaigns_table.get(campaign_id, fields=[CAMPAIGNS_FIELDS["name"]]) # Obtener nombre
-                    campaign_name = campaign_name_rec.get('fields', {}).get(CAMPAIGNS_FIELDS['name'], 'Unknown Campaign') if campaign_name_rec else 'Unknown Campaign'
+                    
+                    # YA NO hacemos una llamada extra por cada campaña. Usamos el dato que ya trajimos.
+                    campaign_name = camp_record.get('fields', {}).get(CAMPAIGNS_FIELDS['name'], 'Unknown Campaign')
 
 
                     total_amount = stats.get("campaign_total_amount", 0.0)

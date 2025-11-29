@@ -17,6 +17,7 @@ from backend.app.api.v1.endpoints import (
     websockets,
     scheduler
 )
+from backend.app.api.v1.endpoints import campaigns_fast
 from backend.app.api.v1.endpoints.search import router as search_router
 
 # ✅ 2. DEFINE el 'lifespan' de la aplicación
@@ -63,6 +64,7 @@ app.add_middleware(
 app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["dashboard"])
 app.include_router(contacts.router, prefix="/api/v1/contacts", tags=["contacts"])
 app.include_router(campaigns.router, prefix="/api/v1/campaigns", tags=["campaigns"])
+app.include_router(campaigns_fast.router, prefix="/api/v1/campaigns", tags=["campaigns-fast"])  # ⚡ FAST Supabase endpoints
 app.include_router(form_titles.router, prefix="/api/v1/form-titles", tags=["form-titles"])
 app.include_router(email_sender.router, prefix="/api/v1", tags=["email"])
 app.include_router(search_router, prefix="/api/v1", tags=["search"])

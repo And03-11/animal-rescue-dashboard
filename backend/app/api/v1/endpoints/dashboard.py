@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 from fastapi_cache.decorator import cache
-from backend.app.services.airtable_service import AirtableService, get_airtable_service
+from backend.app.services.data_service import DataService, get_data_service
 from datetime import datetime, time, timedelta, date
 from zoneinfo import ZoneInfo
 from typing import List, Dict, Any, Optional
@@ -18,7 +18,7 @@ COSTA_RICA_TZ = ZoneInfo("America/Costa_Rica")
 def get_dashboard_metrics(
     start_date: Optional[str] = None, # Recibe YYYY-MM-DD del frontend
     end_date: Optional[str] = None,   # Recibe YYYY-MM-DD del frontend
-    airtable_service: AirtableService = Depends(get_airtable_service),
+    data_service: DataService = Depends(get_data_service),
     current_user: str = Depends(get_current_user)
 ):
     """
@@ -40,7 +40,7 @@ def get_dashboard_metrics(
         start_prev_month = last_day_prev_month.replace(day=1)
         
         # Llamamos a la función del servicio con el rango ampliado
-        daily_summaries = airtable_service.get_daily_summaries(
+        daily_summaries = data_service.get_daily_summaries(
             start_date=start_prev_month,
             end_date=today_date_obj
         )
@@ -119,7 +119,7 @@ def get_dashboard_metrics(
                 e_date_obj = date.fromisoformat(end_date)
 
                 # Obtener resúmenes para el rango específico
-                summaries_in_range = airtable_service.get_daily_summaries(
+                summaries_in_range = data_service.get_daily_summaries(
                     start_date=s_date_obj,
                     end_date=e_date_obj
                 )
@@ -157,44 +157,15 @@ def get_dashboard_metrics(
 @cache(expire=900)
 def get_top_donors(
     limit: int = 10,
-    airtable_service: AirtableService = Depends(get_airtable_service),
+    data_service: DataService = Depends(get_data_service),
     current_user: str = Depends(get_current_user)
 ):
     """
     Calcula y devuelve los mejores donadores históricos basados en el monto total donado.
     """
     try:
-        # ✅ PASO CLAVE: Usar la nueva función que sí trae la info del donante
-        all_donations = airtable_service.get_donations_with_donor_info()
-        
-        # Usamos defaultdict para facilitar la agrupación
-        donor_stats = defaultdict(lambda: {"totalAmount": 0, "donationsCount": 0, "name": ""})
-
-        for donation in all_donations:
-            email = donation.get("email")
-            # Ignoramos donaciones sin un email asociado
-            if not email:
-                continue
-
-            amount = donation.get("amount", 0)
-            
-            # Agrupa por email, sumando montos y contando donaciones
-            donor_stats[email]["totalAmount"] += amount
-            donor_stats[email]["donationsCount"] += 1
-            # Se asegura de guardar el nombre del donante
-            if not donor_stats[email]["name"] or donor_stats[email]["name"] == "Anonymous":
-                 donor_stats[email]["name"] = donation.get("name", "Anonymous")
-
-        # Convierte el diccionario a una lista de objetos
-        top_donors_list = [
-            {"email": email, **stats} for email, stats in donor_stats.items()
-        ]
-
-        # Ordena la lista de mayor a menor por el monto total
-        sorted_donors = sorted(top_donors_list, key=lambda x: x["totalAmount"], reverse=True)
-        
-        # Devuelve el top N (el frontend espera este formato)
-        return sorted_donors[:limit]
+        # ✅ PASO CLAVE: Usar el DataService
+        return data_service.get_top_donors(limit=limit)
 
     except Exception as e:
         print(f"Error crítico al generar el top de donadores: {e}")
@@ -205,7 +176,7 @@ def get_top_donors(
 def get_donation_sources(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    airtable_service: AirtableService = Depends(get_airtable_service),
+    data_service: DataService = Depends(get_data_service),
     current_user: str = Depends(get_current_user)
 ):
     """
@@ -227,7 +198,7 @@ def get_donation_sources(
                 raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
 
         # Llamar al servicio
-        result = airtable_service.get_monthly_source_breakdown(start_date_obj, end_date_obj)
+        result = data_service.get_monthly_source_breakdown(start_date_obj, end_date_obj)
         return result
 
     except Exception as e:

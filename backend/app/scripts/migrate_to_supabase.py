@@ -57,7 +57,6 @@ def fetch_all(table_id, fields=None):
 def upsert_batch(table_name, columns, data, conflict_col='airtable_id'):
     """
     Inserta datos masivamente en Postgres (Upsert).
-    NOTA: Ya no confiamos en el retorno de esto para el mapeo.
     """
     if not data:
         return
@@ -101,16 +100,18 @@ def build_id_map_from_db(table_name):
 # 1. CAMPAIGNS
 # ==========================================
 print("\n--- Paso 1: Campaigns ---")
+# Removed "Created Time" from fields as it is a metadata field
 at_campaigns = fetch_all(TABLE_CAMPAIGNS, fields=["Name", "Source"])
 pg_campaigns_data = []
 for rec in at_campaigns:
     pg_campaigns_data.append({
         'airtable_id': rec['id'],
         'name': rec.get('fields', {}).get('Name'),
-        'source': rec.get('fields', {}).get('Source')
+        'source': rec.get('fields', {}).get('Source'),
+        'created_at': rec.get('createdTime')
     })
 
-upsert_batch('campaigns', ['airtable_id', 'name', 'source'], pg_campaigns_data)
+upsert_batch('campaigns', ['airtable_id', 'name', 'source', 'created_at'], pg_campaigns_data)
 # Recuperar mapa real desde la base de datos
 campaign_map = build_id_map_from_db('campaigns')
 
