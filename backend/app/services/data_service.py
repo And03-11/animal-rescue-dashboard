@@ -150,6 +150,31 @@ class DataService:
 
     def get_donations_for_form_title(self, form_title_ids: List[str], start_date: Optional[str] = None, end_date: Optional[str] = None, page_size: int = 50, offset: int = 0) -> Dict[str, Any]:
         """
+        Fetches donations for specific form titles from Supabase, falling back to Airtable.
+        """
+        try:
+            print("Attempting to fetch donations for form titles from Supabase...")
+            # SupabaseService has get_donations_for_form_title
+            return self.supabase.get_donations_for_form_title(form_title_ids, start_date, end_date, page_size, offset)
+        except Exception as e:
+            print(f"⚠️ Supabase Error (get_donations_for_form_title): {e}")
+            print("Falling back to Airtable...")
+            return self.airtable.get_donations_for_form_title(form_title_ids, start_date, end_date, page_size, offset)
+
+    def get_form_titles(self, campaign_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Fetches form titles from Supabase, falling back to Airtable.
+        """
+        try:
+            print("Attempting to fetch form titles from Supabase...")
+            return self.supabase.get_form_titles(campaign_id)
+        except Exception as e:
+            print(f"⚠️ Supabase Error (get_form_titles): {e}")
+            print("Falling back to Airtable...")
+            return self.airtable.get_form_titles(campaign_id)
+
+    def get_donations_for_form_title(self, form_title_ids: List[str], start_date: Optional[str] = None, end_date: Optional[str] = None, page_size: int = 50, offset: int = 0) -> Dict[str, Any]:
+        """
         Fetches donations for form title from Supabase, falling back to Airtable.
         """
         try:

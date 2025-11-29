@@ -455,6 +455,43 @@ class SupabaseService:
             for row in results
         ]
 
+    def get_form_titles(self, campaign_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Get form titles, optionally filtered by campaign.
+        """
+        params = []
+        where_clause = ""
+        
+        if campaign_id:
+            where_clause = "WHERE c.airtable_id = %s"
+            params.append(campaign_id)
+            
+        query = f"""
+            SELECT 
+                ft.airtable_id as id,
+                ft.name,
+                ft.created_at as "createdTime",
+                c.airtable_id as campaign_id,
+                c.name as campaign_name
+            FROM form_titles ft
+            LEFT JOIN campaigns c ON ft.campaign_id = c.id
+            {where_clause}
+            ORDER BY ft.created_at DESC
+        """
+        
+        results = self._execute_query(query, tuple(params))
+        
+        return [
+            {
+                "id": row['id'],
+                "name": row['name'],
+                "createdTime": row['createdTime'].isoformat() if row['createdTime'] else None,
+                "campaign_id": row['campaign_id'],
+                "campaign_name": row['campaign_name']
+            }
+            for row in results
+        ]
+
     def get_unique_campaign_sources(self) -> List[str]:
         """
         Get unique campaign sources.

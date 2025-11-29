@@ -15,6 +15,23 @@ class DonationDetail(BaseModel):
     amount: float
     date: Union[datetime, str]
 
+# backend/app/api/v1/endpoints/campaigns.py
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+from datetime import datetime
+from typing import List, Dict, Any, Optional, Union
+from backend.app.core.security import get_current_user
+from backend.app.services.data_service import DataService, get_data_service
+from fastapi_cache.decorator import cache
+
+
+class DonationDetail(BaseModel):
+    id: str
+    donorName: str
+    donorEmail: str
+    amount: float
+    date: Union[datetime, str]
+
 class PaginatedDonationsResponse(BaseModel):
     donations: List[DonationDetail]
     total_count: int
@@ -79,25 +96,11 @@ def get_donations_for_form_title(
 ):
     """why: endpoint auxiliar para un solo form title."""
     try:
-        # Note: DataService doesn't have get_donations_for_form_title yet.
-        # We should add it or use airtable directly if it's a rare endpoint.
-        # But for consistency, let's use airtable fallback via DataService if we add it,
-        # or just access airtable service directly if we want to save time, 
-        # BUT the user wants Supabase.
-        # Let's add it to DataService in a future step if needed, but for now 
-        # let's just use the airtable service from data_service if we can, 
-        # or better, add the method to DataService now.
-        # Since I can't edit DataService again in this turn easily without multiple calls,
-        # and I want to be quick, I'll access the airtable service through data_service.airtable
-        # TEMPORARILY, but really I should add it to DataService.
-        # Actually, SupabaseService HAS get_donations_for_form_title.
-        # So I should add it to DataService.
-        # I'll add it to DataService in the next turn if I missed it.
-        # For now, I'll assume I'll add it.
-        return data_service.get_donations_for_form_title([form_title_id])
-    except AttributeError:
-        # Fallback if I forgot to add it to DataService in this turn
-        return data_service.airtable.get_donations_for_form_title([form_title_id])
+        # Ahora DataService tiene este método
+        result = data_service.get_donations_for_form_title([form_title_id])
+        # El servicio devuelve un dict con "donations" y "total_count", pero este endpoint espera una lista
+        # Ajustamos para devolver la lista de donaciones
+        return result.get("donations", [])
     except HTTPException as http_exc:
         raise http_exc
     except Exception as e:
@@ -114,7 +117,7 @@ def get_campaign_donations_endpoint(
     offset: Optional[int] = Query(0, ge=0),
     data_service: DataService = Depends(get_data_service),
     current_user: str = Depends(get_current_user),
-) -> Dict[str, Any]: # El tipo de retorno sigue siendo Dict
+) -> PaginatedDonationsResponse: # El tipo de retorno debe coincidir con response_model
     """
     Devuelve donaciones paginadas para una campaña, opcionalmente filtradas por fecha.
     """
