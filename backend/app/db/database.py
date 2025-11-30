@@ -2,9 +2,14 @@
 import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# Build paths inside the project like this: BASE_DIR / 'subdir'.
+BASE_DIR = Path(__file__).resolve().parent.parent.parent # backend/app/db -> backend/app -> backend
+ENV_PATH = BASE_DIR / ".env"
+
+load_dotenv(dotenv_path=ENV_PATH)
 
 # ✅ CAMBIO: Usar Supabase (PostgreSQL) en lugar de SQLite
 SQLALCHEMY_DATABASE_URL = os.getenv("SUPABASE_DATABASE_URL")

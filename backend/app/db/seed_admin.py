@@ -1,7 +1,14 @@
 # --- File: backend/app/db/seed_admin.py (Corrected) ---
 from backend.app.db.database import SessionLocal
 from backend.app.db.models import User
-from backend.app.core.security import get_password_hash
+from backend.app.db.database import SessionLocal
+from backend.app.db.models import User
+from passlib.context import CryptContext
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
 
 db = SessionLocal()
 

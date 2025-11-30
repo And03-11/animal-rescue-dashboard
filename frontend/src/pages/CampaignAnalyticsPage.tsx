@@ -317,7 +317,9 @@ export const CampaignAnalyticsPage: React.FC = () => {
         }
 
         // Fetch First Page of Donations
-        const shouldFetchDonations = !!selectedCampaign || (selectedTitles.length > 0 && formTitles.length > 0);
+        // ✅ Modified: Now fetches donors whenever a campaign is selected, even if no form title is selected
+        const shouldFetchDonations = !!selectedCampaign;
+
 
         if (shouldFetchDonations) {
             try {

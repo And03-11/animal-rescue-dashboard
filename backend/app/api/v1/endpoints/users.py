@@ -53,7 +53,7 @@ def get_current_admin_user(
 # --- Endpoints ---
 
 @router.post("/users/register", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
-def register_user(
+async def register_user(
     user: UserCreate,
     db: Session = Depends(get_db),
     # ✅ Se usa la nueva dependencia para simplificar el código y asegurar que solo admins pueden registrar.
@@ -75,12 +75,15 @@ def register_user(
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+    
+    # ✅ Clear cache after creating user
+    from fastapi_cache import FastAPICache
+    await FastAPICache.clear()
+    
     # ✅ Se devuelve el objeto del usuario creado (sin contraseña).
     return new_user
 
 @router.get("/users/list", response_model=List[UserPublic])
-# ✅ 2. AÑADE CACHÉ: La lista de usuarios cambia muy raramente. 10 minutos es un buen caché.
-@cache(expire=600)
 def list_users(
     db: Session = Depends(get_db),
     admin_user: User = Depends(get_current_admin_user)
@@ -89,7 +92,7 @@ def list_users(
     return db.query(User).all()
 
 @router.put("/users/{user_id}", response_model=UserPublic)
-def update_user(
+async def update_user(
     user_id: int,
     update_data: UserUpdate,
     db: Session = Depends(get_db),
@@ -118,10 +121,15 @@ def update_user(
     
     db.commit()
     db.refresh(user_to_update)
+    
+    # ✅ Clear cache after updating user
+    from fastapi_cache import FastAPICache
+    await FastAPICache.clear()
+    
     return user_to_update
 
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_user(
+async def delete_user(
     user_id: int,
     db: Session = Depends(get_db),
     admin_user: User = Depends(get_current_admin_user)
@@ -139,4 +147,9 @@ def delete_user(
 
     db.delete(user_to_delete)
     db.commit()
+    
+    # ✅ Clear cache after deleting user
+    from fastapi_cache import FastAPICache
+    await FastAPICache.clear()
+    
     return None # Para el status 204, no se devuelve contenido.

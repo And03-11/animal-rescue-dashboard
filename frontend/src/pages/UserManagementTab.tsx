@@ -32,7 +32,9 @@ export default function UserManagementTab() {
     const fetchUsers = async () => {
         try {
             setLoading(true);
-            const res = await apiClient.get("/users/list");
+            // Add timestamp to prevent caching
+            const timestamp = new Date().getTime();
+            const res = await apiClient.get(`/users/list?_t=${timestamp}`);
             setUsers(res.data);
             setError("");
         } catch {
