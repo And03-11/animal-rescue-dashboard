@@ -5,6 +5,7 @@ Performance: 20-50ms vs 2-5s with Airtable
 """
 import os
 import psycopg2
+from psycopg2 import pool
 from psycopg2.extras import RealDictCursor
 from typing import Optional, List, Dict, Any
 from datetime import datetime, date
@@ -18,30 +19,51 @@ class SupabaseService:
         if not self.db_url:
             raise ValueError("SUPABASE_DATABASE_URL not found in environment variables")
         
-        self._conn = None
+        # Create connection pool instead of single connection
+        try:
+            self._pool = psycopg2.pool.SimpleConnectionPool(
+                1,  # minconn
+                10,  # maxconn
+                self.db_url
+            )
+            print("✅ Supabase connection pool created successfully")
+        except Exception as e:
+            print(f"❌ Failed to create connection pool: {e}")
+            raise
     
     def _get_connection(self):
-        """Get or create database connection"""
-        if self._conn is None or self._conn.closed:
-            self._conn = psycopg2.connect(
-                self.db_url,
-                cursor_factory=RealDictCursor
-            )
-        return self._conn
+        """Get connection from pool"""
+        try:
+            conn = self._pool.getconn()
+            return conn
+        except Exception as e:
+            print(f"❌ Error getting connection from pool: {e}")
+            raise
+    
+    def _return_connection(self, conn):
+        """Return connection to pool"""
+        if conn:
+            self._pool.putconn(conn)
     
     def _execute_query(self, query: str, params: tuple = None) -> List[Dict]:
         """Execute query and return results as list of dicts"""
-        conn = self._get_connection()
+        conn = None
         try:
-            with conn.cursor() as cursor:
+            conn = self._get_connection()
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
                 cursor.execute(query, params or ())
-                return cursor.fetchall()
+                results = cursor.fetchall()
+            conn.commit()
+            return results
         except Exception as e:
-            conn.rollback()
+            if conn:
+                conn.rollback()
             print(f"❌ ERROR executing query: {e}")
             print(f"Query: {query}")
             print(f"Params: {params}")
             raise
+        finally:
+            self._return_connection(conn)
     
     def _execute_one(self, query: str, params: tuple = None) -> Optional[Dict]:
         """Execute query and return single result"""

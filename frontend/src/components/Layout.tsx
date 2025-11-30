@@ -1,11 +1,11 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import {
   Box, Drawer, List, ListItem, ListItemButton,
   ListItemIcon, ListItemText, Toolbar,
   useMediaQuery, Zoom, AppBar, IconButton, Typography,
-  Avatar, Tooltip, useTheme, Divider
+  Avatar, Tooltip, useTheme, Divider, Menu, MenuItem
 } from '@mui/material';
-import { Link as RouterLink, Outlet, useLocation } from 'react-router-dom';
+import { Link as RouterLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 
 // Icons
@@ -15,7 +15,7 @@ import CompareArrowsRoundedIcon from '@mui/icons-material/CompareArrowsRounded';
 import PersonSearchRoundedIcon from '@mui/icons-material/PersonSearchRounded';
 import EventNoteRoundedIcon from '@mui/icons-material/EventNoteRounded';
 import EmailRoundedIcon from '@mui/icons-material/EmailRounded';
-import AdminPanelSettingsRoundedIcon from '@mui/icons-material/AdminPanelSettingsRounded';
+import SettingsRoundedIcon from '@mui/icons-material/SettingsRounded'; // ✅ Nuevo icono
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded';
 import MenuIcon from '@mui/icons-material/Menu';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
@@ -24,7 +24,7 @@ import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import logo from '../assets/Logo.png';
 import { DarkModeToggleButton } from './DarkModeToggleButton';
 import { FloatingThemeFab } from './FloatingThemeFab';
-import { logout, isAdmin } from '../auth';
+import { logout } from '../auth';
 
 const DRAWER_WIDTH = 260;
 const COLLAPSED_DRAWER_WIDTH = 72;
@@ -35,14 +35,31 @@ export const Layout: React.FC = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
 
-  const isUserAdmin = useMemo(() => isAdmin(), []);
+  // Profile Menu State
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const openMenu = Boolean(anchorEl);
 
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
   };
 
+  const handleMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
+    setAnchorEl(event.currentTarget);
+  };
+
+  const handleMenuClose = () => {
+    setAnchorEl(null);
+  };
+
+  const handleSettings = () => {
+    handleMenuClose();
+    navigate('/settings');
+  };
+
   const handleLogout = () => {
+    handleMenuClose();
     logout();
   };
 
@@ -55,9 +72,7 @@ export const Layout: React.FC = () => {
     { text: 'Email', icon: <EmailRoundedIcon />, path: '/email-sender' },
   ];
 
-  if (isUserAdmin) {
-    menuItems.push({ text: 'Users', icon: <AdminPanelSettingsRoundedIcon />, path: '/admin/users' });
-  }
+  // ✅ ELIMINADO: "Users" ya no está en el menú lateral
 
   const drawerContent = (
     <Box sx={{
@@ -150,6 +165,7 @@ export const Layout: React.FC = () => {
         })}
       </List>
 
+      {/* ✅ Logout button at bottom of sidebar remains as quick access */}
       <Box sx={{ p: 2 }}>
         <Divider sx={{ mb: 2 }} />
         <ListItemButton
@@ -204,8 +220,73 @@ export const Layout: React.FC = () => {
 
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
             <DarkModeToggleButton />
-            <Avatar sx={{ bgcolor: 'secondary.main', width: 32, height: 32 }}>A</Avatar>
+
+            {/* ✅ Profile Menu Trigger */}
+            <Tooltip title="Account settings">
+              <IconButton
+                onClick={handleMenuOpen}
+                size="small"
+                sx={{ ml: 2 }}
+                aria-controls={openMenu ? 'account-menu' : undefined}
+                aria-haspopup="true"
+                aria-expanded={openMenu ? 'true' : undefined}
+              >
+                <Avatar sx={{ bgcolor: 'secondary.main', width: 32, height: 32 }}>A</Avatar>
+              </IconButton>
+            </Tooltip>
           </Box>
+
+          {/* ✅ Profile Menu Dropdown */}
+          <Menu
+            anchorEl={anchorEl}
+            id="account-menu"
+            open={openMenu}
+            onClose={handleMenuClose}
+            onClick={handleMenuClose}
+            PaperProps={{
+              elevation: 0,
+              sx: {
+                overflow: 'visible',
+                filter: 'drop-shadow(0px 2px 8px rgba(0,0,0,0.32))',
+                mt: 1.5,
+                '& .MuiAvatar-root': {
+                  width: 32,
+                  height: 32,
+                  ml: -0.5,
+                  mr: 1,
+                },
+                '&:before': {
+                  content: '""',
+                  display: 'block',
+                  position: 'absolute',
+                  top: 0,
+                  right: 14,
+                  width: 10,
+                  height: 10,
+                  bgcolor: 'background.paper',
+                  transform: 'translateY(-50%) rotate(45deg)',
+                  zIndex: 0,
+                },
+              },
+            }}
+            transformOrigin={{ horizontal: 'right', vertical: 'top' }}
+            anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
+          >
+            <MenuItem onClick={handleSettings}>
+              <ListItemIcon>
+                <SettingsRoundedIcon fontSize="small" />
+              </ListItemIcon>
+              Settings
+            </MenuItem>
+            <Divider />
+            <MenuItem onClick={handleLogout}>
+              <ListItemIcon>
+                <LogoutRoundedIcon fontSize="small" />
+              </ListItemIcon>
+              Logout
+            </MenuItem>
+          </Menu>
+
         </Toolbar>
       </AppBar>
 

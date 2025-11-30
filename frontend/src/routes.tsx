@@ -6,9 +6,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 import { Layout } from './components/Layout';
 import PrivateRoute from './components/PrivateRoute';
-import PrivateAdminRoute from './components/PrivateAdminRoute'; // ✅ nuevo
+// import PrivateAdminRoute from './components/PrivateAdminRoute'; // Ya no se usa directamente aquí, o se puede reusar para settings
 import LoginForm from './pages/LoginForm';
-import UserManagementPage from './pages/UserManagementPage';
+// import UserManagementPage from './pages/UserManagementPage'; // Eliminado
 import CampaignComparisonPage from './pages/CampaignComparisonPage';
 
 
@@ -19,6 +19,7 @@ const ContactSearchPage = lazy(() => import('./pages/ContactSearchPage'));
 const EmailSenderPage = lazy(() => import('./pages/EmailSenderPage'));
 const CampaignDetailPage = lazy(() => import('./pages/CampaignDetailPage'));
 const CampaignSchedulerPage = lazy(() => import('./pages/CampaignSchedulerPage'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage')); // ✅ NUEVO
 
 const SpinnerFallback = () => (
   <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
@@ -56,55 +57,48 @@ export function AppRoutes() {
         <Route path="/login" element={<LoginForm />} />
 
         {/* --- Rutas Protegidas con Layout --- */}
-        {/* ✅ El Layout ya protege a TODAS las rutas hijas que se definen dentro */}
         <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
-          
-          {/* ✅ La ruta "index" es la página por defecto del layout */}
-          <Route 
-            path="dashboard" 
-            element={<PageTransition><DashboardHomePage /></PageTransition>} 
-          />
-          
-          {/* ✅ Ya no se necesita el <PrivateRoute> en las rutas hijas */}
-          <Route 
-            path="analytics" 
-            element={<PageTransition><CampaignAnalyticsPage /></PageTransition>} 
-          />
-          <Route 
-            path="comparison" 
-            element={<PageTransition><CampaignComparisonPage /></PageTransition>} 
-          />
-          <Route 
-            path="contact-search" 
-            element={<PageTransition><ContactSearchPage /></PageTransition>} 
-          />
-          <Route 
-            path="email-sender" 
-            element={<PageTransition><EmailSenderPage /></PageTransition>} 
-          />
-          <Route 
-            path="campaign/:campaignId" 
-            element={<PageTransition><CampaignDetailPage /></PageTransition>} 
-          />
-          <Route 
-            path="scheduler" 
-            element={<PageTransition><CampaignSchedulerPage /></PageTransition>} 
+
+          <Route
+            path="dashboard"
+            element={<PageTransition><DashboardHomePage /></PageTransition>}
           />
 
-          {/* ✅ Ruta de admin, protegida por su propio wrapper específico */}
-          <Route 
-            path="admin/users" 
-            element={
-              <PrivateAdminRoute>
-                <PageTransition><UserManagementPage /></PageTransition>
-              </PrivateAdminRoute>
-            } 
+          <Route
+            path="analytics"
+            element={<PageTransition><CampaignAnalyticsPage /></PageTransition>}
+          />
+          <Route
+            path="comparison"
+            element={<PageTransition><CampaignComparisonPage /></PageTransition>}
+          />
+          <Route
+            path="contact-search"
+            element={<PageTransition><ContactSearchPage /></PageTransition>}
+          />
+          <Route
+            path="email-sender"
+            element={<PageTransition><EmailSenderPage /></PageTransition>}
+          />
+          <Route
+            path="campaign/:campaignId"
+            element={<PageTransition><CampaignDetailPage /></PageTransition>}
+          />
+          <Route
+            path="scheduler"
+            element={<PageTransition><CampaignSchedulerPage /></PageTransition>}
           />
 
-          {/* ✅ El 404 también queda protegido por el Layout */}
-          <Route 
-            path="*" 
-            element={<PageTransition><NotFoundPage /></PageTransition>} 
+          {/* ✅ NUEVA RUTA DE SETTINGS (Accesible a todos, el tab interno controla permisos si es necesario) */}
+          <Route
+            path="settings"
+            element={<PageTransition><SettingsPage /></PageTransition>}
+          />
+
+          {/* El 404 también queda protegido por el Layout */}
+          <Route
+            path="*"
+            element={<PageTransition><NotFoundPage /></PageTransition>}
           />
         </Route>
       </Routes>
