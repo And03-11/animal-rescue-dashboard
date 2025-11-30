@@ -139,6 +139,70 @@ class SupabaseService:
             "total_count": total_count
         }
     
+    def get_source_donations(
+        self,
+        source_name: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        page_size: int = 50,
+        offset: int = 0
+    ) -> Dict[str, Any]:
+        """
+        Get paginated donations for all campaigns in a source with optional date filters.
+        Uses Costa Rica timezone (America/Costa_Rica) for date comparisons.
+        """
+        # Build WHERE clause with Costa Rica timezone
+        where_clauses = ["c.source = %s"]
+        params = [source_name]
+        
+        if start_date:
+            where_clauses.append("(d.donation_date AT TIME ZONE 'America/Costa_Rica')::date >= %s")
+            params.append(start_date)
+        
+        if end_date:
+            where_clauses.append("(d.donation_date AT TIME ZONE 'America/Costa_Rica')::date <= %s")
+            params.append(end_date)
+        
+        where_sql = " AND ".join(where_clauses)
+        
+        # Query for donations with donor info
+        query = f"""
+            SELECT 
+                d.airtable_id as id,
+                d.amount,
+                d.donation_date as date,
+                COALESCE(don.name, 'Unknown') as "donorName",
+                COALESCE(don.emails[1], 'N/A') as "donorEmail"
+            FROM donations d
+            JOIN form_titles ft ON d.form_title_id = ft.id
+            JOIN campaigns c ON ft.campaign_id = c.id
+            LEFT JOIN donors don ON d.donor_id = don.id
+            WHERE {where_sql}
+            ORDER BY d.donation_date DESC
+            LIMIT %s OFFSET %s
+        """
+        
+        params.extend([page_size, offset])
+        donations = self._execute_query(query, params)
+        
+        # Get total count
+        count_query = f"""
+            SELECT COUNT(*) as count
+            FROM donations d
+            JOIN form_titles ft ON d.form_title_id = ft.id
+            JOIN campaigns c ON ft.campaign_id = c.id
+            WHERE {where_sql}
+        """
+        
+        count_result = self._execute_one(count_query, tuple(params[:len(params)-2]))
+        total_count = count_result['count'] if count_result else 0
+        
+        return {
+            "donations": [dict(d) for d in donations],
+            "total_count": total_count
+        }
+
+    
     # ==========================================
     # CAMPAIGN STATS (Optimized)
     # ==========================================

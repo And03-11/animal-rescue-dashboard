@@ -115,6 +115,19 @@ class DataService:
             print("Falling back to Airtable...")
             return self.airtable.get_campaign_donations(campaign_id, start_date, end_date, page_size, offset)
 
+    def get_source_donations(self, source_name: str, start_date: Optional[str] = None, end_date: Optional[str] = None, page_size: int = 50, offset: int = 0) -> Dict[str, Any]:
+        """
+        Fetches donations for all campaigns in a source from Supabase, falling back to Airtable.
+        """
+        try:
+            print(f"Attempting to fetch source donations from Supabase for source: {source_name}...")
+            return self.supabase.get_source_donations(source_name, start_date, end_date, page_size, offset)
+        except Exception as e:
+            print(f"⚠️ Supabase Error (get_source_donations): {e}")
+            print("Falling back to Airtable...")
+            return self.airtable.get_source_donations(source_name, start_date, end_date, page_size, offset)
+
+
     def get_campaigns_by_source(self, source: str) -> List[Dict[str, Any]]:
         """
         Fetches campaigns by source from Supabase (not implemented yet in SupabaseService?), falling back to Airtable.

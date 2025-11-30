@@ -749,6 +749,50 @@ class AirtableService:
         except Exception as e:
             print(f"Error in get_campaign_donations (paginado): {e}")
             return {"donations": [], "total_count": 0, "error": str(e)}
+    
+    def get_source_donations(
+        self,
+        source_name: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        page_size: Optional[int] = 50,
+        offset: Optional[int] = 0
+    ) -> Dict[str, Any]:
+        """Get donations for all campaigns in a source (fallback to Airtable)."""
+        try:
+            # Get all campaigns for this source
+            campaign_records = self.campaigns_table.all(fields=[CAMPAIGNS_FIELDS["source"]])
+            campaign_ids = [
+                rec["id"] for rec in campaign_records
+                if rec.get("fields", {}).get(CAMPAIGNS_FIELDS["source"]) == source_name
+            ]
+            
+            if not campaign_ids:
+                return {"donations": [], "total_count": 0}
+            
+            # Get all form_title_ids for these campaigns
+            title_records = self.form_titles_table.all(fields=[FORM_TITLES_FIELDS["campaign_link"]])
+            form_title_ids: List[str] = []
+            for rec in title_records:
+                campaign_links = rec.get("fields", {}).get(FORM_TITLES_FIELDS["campaign_link"], [])
+                if any(cid in campaign_links for cid in campaign_ids):
+                    form_title_ids.append(rec["id"])
+            
+            if not form_title_ids:
+                return {"donations": [], "total_count": 0}
+            
+            # Reuse existing pagination logic
+            return self.get_donations_for_form_title(
+                form_title_ids=form_title_ids,
+                start_date=start_date,
+                end_date=end_date,
+                page_size=page_size,
+                offset=offset
+            )
+        except Exception as e:
+            print(f"Error in get_source_donations (Airtable fallback): {e}")
+            return {"donations": [], "total_count": 0, "error": str(e)}
+
         
 
     # --- NUEVA FUNCIÓN ---

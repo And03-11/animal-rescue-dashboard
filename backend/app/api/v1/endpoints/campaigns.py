@@ -15,23 +15,6 @@ class DonationDetail(BaseModel):
     amount: float
     date: Union[datetime, str]
 
-# backend/app/api/v1/endpoints/campaigns.py
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
-from datetime import datetime
-from typing import List, Dict, Any, Optional, Union
-from backend.app.core.security import get_current_user
-from backend.app.services.data_service import DataService, get_data_service
-from fastapi_cache.decorator import cache
-
-
-class DonationDetail(BaseModel):
-    id: str
-    donorName: str
-    donorEmail: str
-    amount: float
-    date: Union[datetime, str]
-
 class PaginatedDonationsResponse(BaseModel):
     donations: List[DonationDetail]
     total_count: int
@@ -106,24 +89,21 @@ def get_donations_for_form_title(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener las donaciones: {e}")
 
-@router.get("/{campaign_id}/donations", response_model=PaginatedDonationsResponse) # Usar el nuevo response_model
-@cache(expire=60) # Mantener caché si aplica, pero ten en cuenta que cacheará por página/offset
+@router.get("/{campaign_id}/donations", response_model=PaginatedDonationsResponse)
+@cache(expire=60)
 def get_campaign_donations_endpoint(
     campaign_id: str,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    # PAGINACIÓN: Añadir parámetros de query page_size y offset
     page_size: Optional[int] = Query(50, ge=1, le=100),
     offset: Optional[int] = Query(0, ge=0),
     data_service: DataService = Depends(get_data_service),
     current_user: str = Depends(get_current_user),
-) -> PaginatedDonationsResponse: # El tipo de retorno debe coincidir con response_model
+) -> PaginatedDonationsResponse:
     """
     Devuelve donaciones paginadas para una campaña, opcionalmente filtradas por fecha.
     """
     try:
-        # PAGINACIÓN: Pasar page_size y offset al servicio
-        # La función get_campaign_donations ya fue modificada para aceptar estos params
         donations_result = data_service.get_campaign_donations(
             campaign_id=campaign_id,
             start_date=start_date,
@@ -131,9 +111,36 @@ def get_campaign_donations_endpoint(
             page_size=page_size,
             offset=offset
         )
-        # PAGINACIÓN: Devolver directamente el resultado del servicio
         return donations_result
     except HTTPException as http_exc:
         raise http_exc
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener donaciones de campaña (paginado): {e}")
+
+@router.get("/source/{source_name}/donations", response_model=PaginatedDonationsResponse)
+@cache(expire=60)
+def get_source_donations_endpoint(
+    source_name: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    page_size: Optional[int] = Query(50, ge=1, le=100),
+    offset: Optional[int] = Query(0, ge=0),
+    data_service: DataService = Depends(get_data_service),
+    current_user: str = Depends(get_current_user),
+) -> PaginatedDonationsResponse:
+    """
+    Devuelve donaciones paginadas para todas las campañas de un source, opcionalmente filtradas por fecha.
+    """
+    try:
+        donations_result = data_service.get_source_donations(
+            source_name=source_name,
+            start_date=start_date,
+            end_date=end_date,
+            page_size=page_size,
+            offset=offset
+        )
+        return donations_result
+    except HTTPException as http_exc:
+        raise http_exc
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener donaciones de source (paginado): {e}")

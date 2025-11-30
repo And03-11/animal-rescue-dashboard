@@ -317,8 +317,8 @@ export const CampaignAnalyticsPage: React.FC = () => {
         }
 
         // Fetch First Page of Donations
-        // ✅ Modified: Now fetches donors whenever a campaign is selected, even if no form title is selected
-        const shouldFetchDonations = !!selectedCampaign;
+        // ✅ Modified: Fetch donors when either source OR campaign is selected
+        const shouldFetchDonations = !!selectedSource;
 
 
         if (shouldFetchDonations) {
@@ -354,6 +354,13 @@ export const CampaignAnalyticsPage: React.FC = () => {
                 } else if (hasCampaign) {
                     const campaignReportUrl = `/campaigns/${selectedCampaign}/donations`;
                     donationsRes = await apiClient.get<PaginatedDonationsResponse>(campaignReportUrl, {
+                        params: commonParams,
+                        signal: donationsController.signal
+                    });
+                } else if (selectedSource) {
+                    // ✅ NEW: Fetch donations for the entire source when no campaign is selected
+                    const sourceReportUrl = `/campaigns/source/${selectedSource}/donations`;
+                    donationsRes = await apiClient.get<PaginatedDonationsResponse>(sourceReportUrl, {
                         params: commonParams,
                         signal: donationsController.signal
                     });
@@ -1089,7 +1096,7 @@ export const CampaignAnalyticsPage: React.FC = () => {
                     {/* Donations Table */}
                     <Grid size={{ xs: 12, lg: 6 }}>
                         <AnimatePresence>
-                            {(selectedCampaign || selectedTitles.length > 0) && !loading.stats && (
+                            {(selectedSource || selectedCampaign || selectedTitles.length > 0) && !loading.stats && (
                                 <motion.div
                                     initial={{ opacity: 0, y: 20 }}
                                     animate={{ opacity: 1, y: 0 }}
