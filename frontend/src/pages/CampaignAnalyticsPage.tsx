@@ -1044,7 +1044,7 @@ export const CampaignAnalyticsPage: React.FC = () => {
                                     <Typography variant="h6" gutterBottom fontWeight="700">
                                         {selectedCampaign ? 'Revenue by Form Title' : 'Revenue by Campaign'}
                                     </Typography>
-                                    <ResponsiveContainer width="100%" height={562}>
+                                    <ResponsiveContainer width="100%" height={selectedCampaign ? 562 : 420}>
                                         <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 120 }}>
                                             <defs>
                                                 {chartData.map((_, index) => (
