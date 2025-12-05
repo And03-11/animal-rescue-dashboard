@@ -591,10 +591,93 @@ class SupabaseService:
         results = self._execute_query(query)
         return [row['source'] for row in results]
 
+    # ==========================================
+    # CONTACTS / DONORS (Optimized)
+    # ==========================================
+
+    def get_donor_by_email(self, email: str) -> Dict[str, Any]:
+        """
+        Search for a donor by email and return their info and donations.
+        Returns a normalized structure.
+        """
+        # 1. Find donor by email (checking the emails array)
+        # Note: We assume the 'emails' column is a text array (text[])
+        donor_query = """
+            SELECT 
+                id,
+                airtable_id,
+                name,
+                emails
+            FROM donors
+            WHERE %s = ANY(emails)
+            LIMIT 1
+        """
+        
+        donor = self._execute_one(donor_query, (email,))
+        
+        if not donor:
+            return {"donor": None, "donations": []}
+            
+        # 2. Fetch donations for this donor
+        donations_query = """
+            SELECT 
+                d.airtable_id as id,
+                d.amount,
+                d.donation_date as date,
+                ft.name as form_title
+            FROM donations d
+            LEFT JOIN form_titles ft ON d.form_title_id = ft.id
+            WHERE d.donor_id = %s
+            ORDER BY d.donation_date DESC
+        """
+        
+        donations = self._execute_query(donations_query, (donor['id'],))
+        
+        # Normalize donor data
+        normalized_donor = {
+            "id": donor['airtable_id'] or str(donor['id']), # Prefer airtable_id for compatibility if exists
+            "name": donor.get('name', ''),
+            "email": email, # The email we searched for
+            "emails": donor.get('emails', []),
+            "phone": None  # Phone not available in Supabase donors table
+        }
+        
+        # Normalize donations data
+        normalized_donations = [
+            {
+                "id": d['id'],
+                "amount": float(d['amount']),
+                "date": d['date'].isoformat() if d['date'] else None,
+                "form_title": d['form_title']
+            }
+            for d in donations
+        ]
+        
+        return {
+            "donor": normalized_donor,
+            "donations": normalized_donations
+        }
+
+    def get_emails_from_ids(self, email_ids: List[str]) -> List[str]:
+        """
+        In Supabase, we don't use email IDs like Airtable. 
+        This method is mainly for compatibility if we were to look up by ID, 
+        but for now we can return empty or implement if we had an emails table.
+        Assuming we don't have a separate emails table in Supabase (emails are in donors array),
+        this might not be needed or applicable in the same way.
+        
+        However, if the caller passes actual email strings, we just return them.
+        If they pass IDs, we can't really resolve them without a mapping table.
+        
+        For the search endpoint migration, we will try to avoid using this method 
+        by using the normalized 'emails' list from 'get_donor_by_email'.
+        """
+        return []
+
     def close(self):
         """Close database connection"""
-        if self._conn and not self._conn.closed:
-            self._conn.close()
+        if self._pool:
+            self._pool.closeall()
 
 
 # Singleton instance

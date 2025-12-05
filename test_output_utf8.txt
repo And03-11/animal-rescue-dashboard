@@ -1,0 +1,35 @@
+✅ Connecting to Supabase PostgreSQL...
+R:\Coding\dashboard_animal_rescue\backend\venv\Lib\site-packages\pydantic\_internal\_config.py:373: UserWarning: Valid config keys have changed in V2:
+* 'orm_mode' has been renamed to 'from_attributes'
+  warnings.warn(message, UserWarning)
+Servicio de Airtable inicializado correctamente.
+Explorando directorio: R:\Coding\dashboard_animal_rescue\backend\gmail_credentials
+  Encontrado grupo: BigPond
+    - Descubierta credencial: ID='credentials_account_BP', Ruta='R:\Coding\dashboard_animal_rescue\backend\gmail_credentials\BigPond\credentials_account_BP.json'
+    - Descubierta credencial: ID='credentials_account_BP_1', Ruta='R:\Coding\dashboard_animal_rescue\backend\gmail_credentials\BigPond\credentials_account_BP_1.json'
+  Encontrado grupo: Normal
+    - Descubierta credencial: ID='credentials_account1', Ruta='R:\Coding\dashboard_animal_rescue\backend\gmail_credentials\Normal\credentials_account1.json'
+    - Descubierta credencial: ID='credentials_account10', Ruta='R:\Coding\dashboard_animal_rescue\backend\gmail_credentials\Normal\credentials_account10.json'
+    - Descubierta credencial: ID='credentials_account11', Ruta='R:\Coding\dashboard_animal_rescue\backend\gmail_credentials\Normal\credentials_account11.json'
+    - Descubierta credencial: ID='credentials_account12', Ruta='R:\Coding\dashboard_animal_rescue\backend\gmail_credentials\Normal\credentials_account12.json'
+    - Descubierta credencial: ID='credentials_account13', Ruta='R:\Coding\dashboard_animal_rescue\backend\gmail_credentials\Normal\credentials_account13.json'
+    - Descubierta credencial: ID='credentials_account14', Ruta='R:\Coding\dashboard_animal_rescue\backend\gmail_credentials\Normal\credentials_account14.json'
+    - Descubierta credencial: ID='credentials_account15', Ruta='R:\Coding\dashboard_animal_rescue\backend\gmail_credentials\Normal\credentials_account15.json'
+    - Descubierta credencial: ID='credentials_account16', Ruta='R:\Coding\dashboard_animal_rescue\backend\gmail_credentials\Normal\credentials_account16.json'
+    - Descubierta credencial: ID='credentials_account2', Ruta='R:\Coding\dashboard_animal_rescue\backend\gmail_credentials\Normal\credentials_account2.json'
+    - Descubierta credencial: ID='credentials_account3', Ruta='R:\Coding\dashboard_animal_rescue\backend\gmail_credentials\Normal\credentials_account3.json'
+    - Descubierta credencial: ID='credentials_account4', Ruta='R:\Coding\dashboard_animal_rescue\backend\gmail_credentials\Normal\credentials_account4.json'
+    - Descubierta credencial: ID='credentials_account5', Ruta='R:\Coding\dashboard_animal_rescue\backend\gmail_credentials\Normal\credentials_account5.json'
+    - Descubierta credencial: ID='credentials_account6', Ruta='R:\Coding\dashboard_animal_rescue\backend\gmail_credentials\Normal\credentials_account6.json'
+    - Descubierta credencial: ID='credentials_account7', Ruta='R:\Coding\dashboard_animal_rescue\backend\gmail_credentials\Normal\credentials_account7.json'
+    - Descubierta credencial: ID='credentials_account8', Ruta='R:\Coding\dashboard_animal_rescue\backend\gmail_credentials\Normal\credentials_account8.json'
+    - Descubierta credencial: ID='credentials_account9', Ruta='R:\Coding\dashboard_animal_rescue\backend\gmail_credentials\Normal\credentials_account9.json'
+CredentialsManager inicializado. Buscando en: R:\Coding\dashboard_animal_rescue\backend\gmail_credentials
+R:\Coding\dashboard_animal_rescue\backend\venv\Lib\site-packages\pydantic\_internal\_config.py:373: UserWarning: Valid config keys have changed in V2:
+* 'orm_mode' has been renamed to 'from_attributes'
+  warnings.warn(message, UserWarning)
+Imported test_search successfully
+Running test_search_not_found_returns_404...
+test_search_not_found_returns_404 passed
+Running test_search_found_on_mailchimp_and_brevo...
+test_search_found_on_mailchimp_and_brevo passed

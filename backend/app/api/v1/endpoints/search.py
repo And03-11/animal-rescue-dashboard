@@ -1,14 +1,13 @@
-# --- File: backend/app/api/v1/endpoints/search.py (Corrected) ---
 from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Dict, Any
 from datetime import datetime
+import asyncio
 
-# ✅ CAMBIO: Se usan rutas de importación absolutas desde la raíz 'backend'.
 from backend.app.core.security import get_current_user
 from backend.app.schemas import (
     SearchResponse, MailchimpDetail, BrevoDetail, AirtableSummary
 )
-from backend.app.services.airtable_service import AirtableService, get_airtable_service
+from backend.app.services.data_service import DataService, get_data_service
 from backend.app.services.mailchimp_service import MailchimpService, get_mailchimp_service
 from backend.app.services.brevo_service import BrevoService, get_brevo_service
 
@@ -16,58 +15,83 @@ router = APIRouter()
 
 
 @router.get("/search/{email}", response_model=SearchResponse, tags=["search"])
-def search_unified_contact(
+async def search_unified_contact(
     email: str,
-    airtable: AirtableService = Depends(get_airtable_service),
+    data_service: DataService = Depends(get_data_service),
     mailchimp: MailchimpService = Depends(get_mailchimp_service),
     brevo: BrevoService = Depends(get_brevo_service),
     current_user: str = Depends(get_current_user)
 ) -> SearchResponse:
     """
-    Searches for a contact by email across Airtable, Mailchimp, and Brevo
+    Searches for a contact by email across Supabase/Airtable, Mailchimp, and Brevo
     to build a unified profile.
     """
     all_emails: List[str] = [email]
     donor_info: Dict[str, Any] = {}
-    airtable_records: List[Dict[str, Any]] = []
+    donations_list: List[Dict[str, Any]] = []
 
-    # --- 1. Search in Airtable ---
+    # --- 1. Search in Supabase (with Airtable fallback) ---
     try:
-        result = airtable.get_airtable_data_by_email(email)
-        donor_info = result.get("donor_info") or {}
-        airtable_records = result.get("donations") or []
-
-        linked_ids = donor_info.get('fields', {}).get('Emails', []) or []
-        if linked_ids:
-            all_emails = airtable.get_emails_from_ids(linked_ids)
+        result = data_service.get_donor_by_email(email)
+        
+        normalized_donor = result.get("donor")
+        donations_list = result.get("donations", [])
+        
+        if normalized_donor:
+            donor_info = {
+                "id": normalized_donor["id"],
+                "fields": {
+                    "Name": normalized_donor["name"].split(" ")[0],
+                    "Last Name": " ".join(normalized_donor["name"].split(" ")[1:]),
+                    "Email": normalized_donor["email"],
+                    "Phone": normalized_donor["phone"],
+                    "Emails": normalized_donor["emails"]
+                }
+            }
+            
+            if normalized_donor.get("emails"):
+                all_emails = normalized_donor["emails"]
+                
     except Exception as e:
-        donor_info = {"error": f"Airtable Error: {e}"}
+        print(f"Error in search_unified_contact (DataService): {e}")
+        donor_info = {"error": f"Data Error: {e}"}
 
-    # --- 2. Search in Mailchimp ---
-    mailchimp_details: List[Dict[str, Any]] = []
-    try:
-        for em in all_emails:
-            tags = mailchimp.get_contact_tags(em)
-            mailchimp_details.append({
-                "email": em,
-                "found": bool(tags),
-                "tags": tags or []
-            })
-    except Exception as e:
-        mailchimp_details = [{"error": f"Mailchimp Error: {e}"}]
+    # --- 2 & 3. Search in Mailchimp and Brevo (in parallel) ---
+    async def fetch_mailchimp():
+        mailchimp_details = []
+        try:
+            loop = asyncio.get_event_loop()
+            for em in all_emails:
+                tags = await loop.run_in_executor(None, mailchimp.get_contact_tags, em)
+                mailchimp_details.append({
+                    "email": em,
+                    "found": bool(tags),
+                    "tags": tags or []
+                })
+        except Exception as e:
+            mailchimp_details = [{"error": f"Mailchimp Error: {e}"}]
+        return mailchimp_details
 
-    # --- 3. Search in Brevo ---
-    brevo_details: List[Dict[str, Any]] = []
-    try:
-        for em in all_emails:
-            details = brevo.get_contact_details(em)
-            brevo_details.append({
-                "email": em,
-                "found": details is not None,
-                "details": details or {}
-            })
-    except Exception as e:
-        brevo_details = [{"error": f"Brevo Error: {e}"}]
+    async def fetch_brevo():
+        brevo_details = []
+        try:
+            loop = asyncio.get_event_loop()
+            for em in all_emails:
+                details = await loop.run_in_executor(None, brevo.get_contact_details, em)
+                brevo_details.append({
+                    "email": em,
+                    "found": details is not None,
+                    "details": details or {}
+                })
+        except Exception as e:
+            brevo_details = [{"error": f"Brevo Error: {e}"}]
+        return brevo_details
+
+    # Execute both searches in parallel
+    mailchimp_details, brevo_details = await asyncio.gather(
+        fetch_mailchimp(),
+        fetch_brevo()
+    )
 
     # --- Validate if at least one platform found the contact ---
     found_any = (bool(donor_info and not donor_info.get("error"))
@@ -76,22 +100,29 @@ def search_unified_contact(
     if not found_any:
         raise HTTPException(
             status_code=404,
-            detail=f"Contact '{email}' not found on any platform."
+            detail=f"Contacto '{email}' no encontrado en ninguna plataforma."
         )
 
-    # --- Airtable Donations Summary ---
+    # --- Donations Summary ---
     donation_dates: List[datetime] = []
-    for d in airtable_records:
-        ds = d.get('fields', {}).get('Date')
+    total_amount = 0.0
+    
+    for d in donations_list:
+        amt = d.get("amount", 0)
+        total_amount += amt
+        
+        ds = d.get("date")
         if ds:
             try:
                 donation_dates.append(datetime.fromisoformat(ds.replace('Z', '+00:00')))
             except ValueError:
                 pass
+                
     first_date = min(donation_dates).isoformat() if donation_dates else None
+    
     summary = AirtableSummary(
-        total=sum(d.get('fields', {}).get('Amount', 0) for d in airtable_records),
-        count=len(airtable_records),
+        total=total_amount,
+        count=len(donations_list),
         first_date=first_date
     )
 

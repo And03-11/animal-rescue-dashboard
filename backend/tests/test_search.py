@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 import app.schemas as schemas
 from app.api.v1.endpoints.search import (
-    get_airtable_service,
+    get_data_service,
     get_mailchimp_service,
     get_brevo_service
 )
@@ -19,11 +19,9 @@ from app.core.security import get_current_user  # 🔐 para override auth
 app.dependency_overrides[get_current_user] = lambda: "test@example.com"
 
 # --- Stubs para dependencias ---
-class DummyAirtableService:
-    def get_airtable_data_by_email(self, email: str):
-        return {"donor_info": None, "donations": []}
-    def get_emails_from_ids(self, ids):
-        return []
+class DummyDataService:
+    def get_donor_by_email(self, email: str):
+        return {"donor": None, "donations": []}
 
 class DummyMailchimpService:
     def get_contact_tags(self, email: str):
@@ -35,11 +33,11 @@ class DummyBrevoService:
 
 @pytest.fixture(autouse=True)
 def override_dependencies():
-    app.dependency_overrides[get_airtable_service] = lambda: DummyAirtableService()
+    app.dependency_overrides[get_data_service] = lambda: DummyDataService()
     app.dependency_overrides[get_mailchimp_service] = lambda: DummyMailchimpService()
     app.dependency_overrides[get_brevo_service] = lambda: DummyBrevoService()
     yield
-    del app.dependency_overrides[get_airtable_service]
+    del app.dependency_overrides[get_data_service]
     del app.dependency_overrides[get_mailchimp_service]
     del app.dependency_overrides[get_brevo_service]
 

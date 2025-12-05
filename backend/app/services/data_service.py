@@ -198,6 +198,76 @@ class DataService:
             print("Falling back to Airtable...")
             return self.airtable.get_donations_for_form_title(form_title_ids, start_date, end_date, page_size, offset)
 
+    def get_donor_by_email(self, email: str) -> Dict[str, Any]:
+        """
+        Fetches donor info and donations by email.
+        Returns a normalized structure:
+        {
+            "donor": {"id": "...", "name": "...", "email": "...", "emails": [...], "phone": "..."},
+            "donations": [{"id": "...", "amount": 100, "date": "...", "form_title": "..."}]
+        }
+        """
+        try:
+            print(f"Attempting to fetch donor by email {email} from Supabase...")
+            return self.supabase.get_donor_by_email(email)
+        except Exception as e:
+            print(f"⚠️ Supabase Error (get_donor_by_email): {e}")
+            print("Falling back to Airtable...")
+            
+            # Fallback to Airtable and normalize
+            raw_result = self.airtable.get_airtable_data_by_email(email)
+            donor_record = raw_result.get("donor_info")
+            donation_records = raw_result.get("donations", [])
+            
+            if not donor_record:
+                return {"donor": None, "donations": []}
+                
+            fields = donor_record.get("fields", {})
+            
+            # Get all emails linked to this donor
+            # Airtable stores links to Emails table, so we need to fetch them or use what we have
+            # The raw result might not have the full list of emails strings, just IDs.
+            # We can try to fetch them if needed, or just use the one we searched for.
+            # For now, let's use the helper if available or just the current email.
+            email_ids = fields.get("Emails", []) # This is the link field name in AirtableService
+            # Wait, AirtableService.DONORS_FIELDS['emails_link'] is "Emails"
+            
+            all_emails = []
+            if email_ids:
+                try:
+                    all_emails = self.airtable.get_emails_from_ids(email_ids)
+                except:
+                    all_emails = [email]
+            
+            normalized_donor = {
+                "id": donor_record.get("id"),
+                "name": f"{fields.get('Name', '')} {fields.get('Last Name', '')}".strip(),
+                "email": email,
+                "emails": all_emails,
+                "phone": fields.get("Phone")
+            }
+            
+            normalized_donations = []
+            for d in donation_records:
+                d_fields = d.get("fields", {})
+                normalized_donations.append({
+                    "id": d.get("id"),
+                    "amount": d_fields.get("Amount", 0),
+                    "date": d_fields.get("Date"),
+                    # Form title might be a link, so we might not have the name directly here
+                    # unless we fetched it. AirtableService.get_airtable_data_by_email 
+                    # fetches 'Form Title' (link) but maybe not the name.
+                    # Let's check AirtableService again. 
+                    # It fetches fields=[DONATIONS_FIELDS["amount"], DONATIONS_FIELDS["date"], DONATIONS_FIELDS["form_title_link"]]
+                    # So we don't have the name. We'll leave it empty or ID for now.
+                    "form_title": str(d_fields.get("Form Title", ["Unknown"])[0]) if isinstance(d_fields.get("Form Title"), list) else "Unknown"
+                })
+                
+            return {
+                "donor": normalized_donor,
+                "donations": normalized_donations
+            }
+
 # Singleton
 _data_service_instance = None
 
