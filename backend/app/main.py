@@ -20,6 +20,9 @@ from backend.app.api.v1.endpoints import (
 from backend.app.api.v1.endpoints import campaigns_fast
 from backend.app.api.v1.endpoints.search import router as search_router
 
+# ✅ Import email scheduler worker
+from backend.app.core.scheduler_worker import start_scheduler, stop_scheduler
+
 # ✅ 2. DEFINE el 'lifespan' de la aplicación
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -31,8 +34,14 @@ async def lifespan(app: FastAPI):
     # Inicializa el caché usando una memoria interna simple.
     FastAPICache.init(InMemoryBackend(), prefix="fastapi-cache")
     print("Sistema de caché inicializado.")
+    
+    # ✅ Start email scheduler worker
+    start_scheduler()
+    
     yield
-    # Aquí se podrían añadir tareas de limpieza al apagar la app
+    
+    # ✅ Stop email scheduler worker
+    stop_scheduler()
     print("Sistema de caché detenido.")
 
 # ✅ 3. PASA el 'lifespan' a la instancia de FastAPI

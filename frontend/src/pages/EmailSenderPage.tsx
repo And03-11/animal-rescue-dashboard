@@ -44,6 +44,11 @@ import {
   Typography,
 } from '@mui/material'; // Agrupadas importaciones de MUI
 import { Link as RouterLink } from 'react-router-dom';
+import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
+import dayjs, { Dayjs } from 'dayjs';
+import ScheduleIcon from '@mui/icons-material/Schedule';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
@@ -105,6 +110,7 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
   const [selectedAccounts, setSelectedAccounts] = useState<SelectedAccount[]>([]);
   const [loadingSenders, setLoadingSenders] = useState<boolean>(true);
   const [campaignName, setCampaignName] = useState<string>('');
+  const [scheduledAt, setScheduledAt] = useState<Dayjs | null>(null);
   // --- FIN: NUEVOS ESTADOS ---
 
 
@@ -189,24 +195,97 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
 
 
   // --- Manejadores ---
+  // Función para parsear CSV localmente
+  const parseCSVLocally = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      if (!text) return;
+      
+      // Detectar delimitador
+      const firstLine = text.split('\n')[0];
+      let delimiter = ',';
+      if (firstLine.includes(';')) delimiter = ';';
+      else if (firstLine.includes('\t')) delimiter = '\t';
+      
+      // Parsear filas
+      const lines = text.split('\n').filter(line => line.trim());
+      if (lines.length === 0) {
+        setFormError('CSV file is empty.');
+        return;
+      }
+      
+      const splitLine = (line: string) => {
+        const result: string[] = [];
+        let current = '';
+        let inQuotes = false;
+        for (const char of line) {
+          if (char === '"') { inQuotes = !inQuotes; }
+          else if (char === delimiter && !inQuotes) { result.push(current.trim()); current = ''; }
+          else { current += char; }
+        }
+        result.push(current.trim());
+        return result;
+      };
+      
+      const firstRow = splitLine(lines[0]);
+      const secondRow = lines.length > 1 ? splitLine(lines[1]) : [];
+      
+      // Detectar si tiene header (si todas las celdas de la primera fila son texto)
+      const hasHeader = firstRow.every(cell => {
+        const cleaned = cell.replace(/[.,]/g, '');
+        return isNaN(Number(cleaned)) || cleaned === '';
+      });
+      
+      // Construir preview
+      const columns = hasHeader ? firstRow : firstRow.map((_, i) => `Columna ${i + 1}`);
+      const previewData = hasHeader ? secondRow : firstRow;
+      
+      console.log("Local CSV parse:", { columns, hasHeader, previewData, delimiter });
+      
+      // Auto-detectar columnas de email y nombre
+      const columnsLower = columns.map(c => c.toLowerCase());
+      const emailIdx = columnsLower.findIndex(c => c === 'email' || c === 'correo' || c.includes('mail'));
+      const nameIdx = columnsLower.findIndex(c => c === 'name' || c === 'nombre' || c.includes('first'));
+      
+      setCsvPreview({
+        columns,
+        has_header: hasHeader,
+        preview_row: previewData
+      });
+      setColumnMapping({
+        email: emailIdx >= 0 ? columns[emailIdx] : '',
+        name: nameIdx >= 0 ? columns[nameIdx] : ''
+      });
+      setShowMapping(true);
+    };
+    reader.readAsText(file, 'utf-8');
+  };
+
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    // ... (sin cambios respecto a lo anterior) ...
     if (event.target.files && event.target.files[0]) {
       const file = event.target.files[0];
       if (file.type !== 'text/csv' && !file.name.toLowerCase().endsWith('.csv')) {
-        setFormError('Please select a valid CSV file.'); // Usar formError en lugar de alert
+        setFormError('Please select a valid CSV file.');
         setCsvFile(null);
         setCsvFileName('');
+        setCsvPreview(null);
+        setShowMapping(false);
         event.target.value = '';
         return;
       }
       setCsvFile(file);
       setCsvFileName(file.name);
-      setFormError(''); // Limpia error si el archivo es válido
+      setFormError('');
       console.log("Archivo CSV seleccionado:", file.name, file.type, file.size);
+      
+      // ✅ Parsear CSV localmente para mostrar mapeo inmediatamente
+      parseCSVLocally(file);
     } else {
       setCsvFile(null);
       setCsvFileName('');
+      setCsvPreview(null);
+      setShowMapping(false);
     }
   };
 
@@ -262,7 +341,8 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
       source_type: sourceType,
       subject,
       html_body: htmlBody,
-      sender_config: senderConfig, // <-- INCLUIDO AQUÍ
+      sender_config: senderConfig,
+      scheduled_at: scheduledAt ? scheduledAt.toISOString() : null,
       csvFile: sourceType === 'csv' && !campaignId ? csvFile : undefined,
     };
     if (sourceType === 'airtable') {
@@ -270,29 +350,34 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
       payload.is_bounced = isBounced;
     }
 
-    // --- Lógica de Etapas (CSV) ---
-    if (showMapping && sourceType === 'csv') {
-      // --- ETAPA 2: Confirmar Mapeo ---
-      if (!columnMapping.email) { setFormError('Please select the column containing Email addresses.'); return; }
-      if (!columnMapping.name) { setFormError('Please select the column containing the recipient Name.'); return; }
-      if (columnMapping.email === columnMapping.name) { setFormError('Email and Name must be mapped to different columns.'); return; }
-
-      console.log('Etapa 2: Llamando a onSave con mapeo:', { ...columnMapping, has_header: csvPreview?.has_header ?? false });
-      // Llama a onSave (en EmailSenderPage) pasando el payload base Y el objeto de mapeo
-      onSave(payload, {
+    // --- Lógica para CSV ---
+    if (sourceType === 'csv') {
+      // Validar que haya archivo si es nueva campaña
+      if (!csvFile && !campaignId) {
+        setFormError('Please select a CSV file.'); return;
+      }
+      
+      // Validar mapeo si tenemos preview local
+      if (showMapping && csvPreview) {
+        if (!columnMapping.email) { setFormError('Please select the column containing Email addresses.'); return; }
+        if (!columnMapping.name) { setFormError('Please select the column containing the recipient Name.'); return; }
+        if (columnMapping.email === columnMapping.name) { setFormError('Email and Name must be mapped to different columns.'); return; }
+        
+        // ✅ Enviar todo junto: campaña + archivo + mapeo
+        console.log('CSV con mapeo local - enviando todo junto:', { ...columnMapping, has_header: csvPreview?.has_header ?? false });
+        onSave(payload, {
           email: columnMapping.email,
           name: columnMapping.name,
           has_header: csvPreview?.has_header ?? false
-      });
-
-    } else {
-      // --- ETAPA 1: Guardar Configuración / Subir Archivo ---
-      if (sourceType === 'csv' && !csvFile && !campaignId) {
-          setFormError('Please select a CSV file.'); return;
+        });
+      } else {
+        // Sin preview local (caso raro), solo enviar payload
+        console.log('CSV sin mapeo local - solo payload');
+        onSave(payload);
       }
-
-      console.log('Etapa 1: Llamando a onSave solo con payload (config/archivo/sender_config)');
-      // Llama a onSave (en EmailSenderPage) solo con el payload base
+    } else {
+      // --- Airtable - enviar directamente ---
+      console.log('Airtable: Llamando a onSave con payload');
       onSave(payload);
     }
   };
@@ -495,6 +580,32 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
 
 
         {/* Campos Comunes: Subject y Editor/Preview */}
+        
+        {/* --- Programar Envío --- */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 2 }}>
+          <LocalizationProvider dateAdapter={AdapterDayjs}>
+            <DateTimePicker
+              label="Schedule Send (optional)"
+              value={scheduledAt}
+              onChange={(newValue) => setScheduledAt(newValue)}
+              slotProps={{
+                textField: {
+                  fullWidth: true,
+                  helperText: scheduledAt ? 'Campaign will launch automatically at this time' : 'Leave empty to save as Draft'
+                }
+              }}
+              minDateTime={dayjs()}
+            />
+          </LocalizationProvider>
+          {scheduledAt && (
+            <Tooltip title="Clear scheduled time">
+              <IconButton onClick={() => setScheduledAt(null)} color="warning" size="small">
+                <DeleteIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+        </Box>
+
         <TextField fullWidth label="Email Subject" variant="outlined" value={subject} onChange={(e) => {setSubject(e.target.value); setFormError('');}} margin="normal" required error={formError.includes('Subject')}/>
 
         <Box sx={{display: 'flex', justifyContent: 'flex-end', my: 1}}>
@@ -514,7 +625,7 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
       <DialogActions>
         <Button onClick={onCancel}>Cancel</Button>
         <Button onClick={handleSave} variant="contained">
-          {showMapping ? 'Confirm Mapping & Save' : 'Save Campaign'}
+          {showMapping ? 'Confirm Mapping & Save' : (scheduledAt ? '📅 Schedule Campaign' : 'Save Campaign')}
         </Button>
       </DialogActions>
     </>
@@ -637,15 +748,26 @@ export const EmailSenderPage = () => {
         try {
           await apiClient.post(`/sender/campaigns/${campaignId}/upload-csv`, formData);
           console.log(`Etapa 1: CSV subido para ${campaignId}`);
+          
+          // ✅ SI HAY MAPPING, GUARDARLO INMEDIATAMENTE
+          if (mapping) {
+             console.log("Mapeo recibido en Etapa 1, guardando inmediatamente...");
+             setSnackbarMessage(`Saving column mapping...`);
+             await apiClient.post(`/sender/campaigns/${campaignId}/save-mapping`, mapping);
+             console.log("Mapeo guardado exitosamente.");
+             setSnackbarMessage(`Campaign saved successfully!`);
+             setIsModalOpen(false);
+             setEditingCampaignId(null);
+             fetchCampaigns();
+             return;
+          }
+
           setSnackbarMessage(`CSV uploaded! Please map columns below.`);
-          // IMPORTANTE: NO CERRAMOS EL MODAL.
-          // El useEffect en CampaignForm se activará y llamará a fetchCsvPreview.
+          // Si no hay mapping (flujo antiguo), dejamos abierto
         } catch (uploadErr: any) {
-           console.error("Error uploading CSV:", uploadErr);
-           setError(uploadErr.response?.data?.detail || 'Failed to upload CSV file.');
+           console.error("Error uploading/mapping CSV:", uploadErr);
+           setError(uploadErr.response?.data?.detail || 'Failed to upload/map CSV file.');
            setSnackbarMessage(null);
-           // Podríamos resetear editingCampaignId si la subida falla y era una campaña nueva?
-           // if (!editingCampaignId) setEditingCampaignId(null); // Opcional
            return; // Detiene
         }
 
@@ -824,8 +946,17 @@ const handlePauseCampaign = async (campaignId: string) => {
                         {/* Muestra nombre del archivo o estado */}
                     </TableCell>
                     <TableCell>
-                      <Chip label={campaign.status} size="small"
-                          color={campaign.status === 'Completed' ? 'success' : campaign.status === 'Sending' ? 'warning' : campaign.status.startsWith('Error') ? 'error' : 'default'}/>
+                      <Chip 
+                          icon={campaign.status === 'Scheduled' ? <ScheduleIcon fontSize="small" /> : undefined}
+                          label={campaign.status} 
+                          size="small"
+                          color={campaign.status === 'Completed' ? 'success' : campaign.status === 'Sending' ? 'warning' : campaign.status === 'Scheduled' ? 'info' : campaign.status.startsWith('Error') ? 'error' : 'default'}
+                        />
+                        {campaign.status === 'Scheduled' && campaign.scheduled_at && (
+                          <Typography variant="caption" display="block" color="info.main" sx={{ mt: 0.5 }}>
+                            📅 {new Date(campaign.scheduled_at).toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' })}
+                          </Typography>
+                        )}
                     </TableCell>
                     <TableCell>
                       {/* Lógica de progreso */}
@@ -844,6 +975,8 @@ const handlePauseCampaign = async (campaignId: string) => {
                          <Typography variant="caption" color="text.secondary">Waiting...</Typography>
                       ): campaign.status === 'Ready' ? (
                          <Typography variant="caption" color="success.main">Ready to Launch</Typography>
+                      ): campaign.status === 'Scheduled' ? (
+                         <Typography variant="caption" color="info.main">⏰ Scheduled</Typography>
                       ) : (
                           <Typography variant="caption" color="text.secondary">N/A</Typography>
                       )}

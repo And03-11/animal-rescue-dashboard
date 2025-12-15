@@ -14,6 +14,7 @@ from typing import List, Dict, Any, Optional, Union
 from backend.app.services.airtable_service import AirtableService
 from backend.app.services.gmail_service import GmailService
 from backend.app.services.credentials_manager import credentials_manager_instance
+from backend.app.services.email_sender_service import get_email_sender_service
 
 
 from fastapi import Depends, status
@@ -81,8 +82,10 @@ class CampaignRequest(BaseModel):
     # Campos específicos para Airtable (opcionales)
     region: Optional[str] = None
     is_bounced: Optional[bool] = None
-    # --- AÑADE ESTA LÍNEA ---
-    sender_config: Union[str, List[str]] = Field(default="all", description="Grupo ('all', 'normal', 'risky', etc.) o lista de IDs de cuenta (nombres de archivo json sin extensión).")
+    # Configuración de remitente
+    sender_config: Union[str, List[str]] = Field(default="all", description="Grupo o lista de IDs de cuenta.")
+    # ✅ Campo para programar envío
+    scheduled_at: Optional[datetime] = Field(default=None, description="Fecha/hora para envío programado. Si es None, la campaña queda en Draft.")
 
 
 # --- REEMPLAZA esta función completa ---
@@ -370,7 +373,7 @@ def run_campaign_task(campaign_id: str):
 # El final de la función run_campaign_task (actualizar a Completed, etc.) permanece igual
 
         # Personalización simple
-        html_body_personalized = html_body_template.replace("{{name}}", name)
+        html_body_personalized = html_body_template.replace("{{name}}", name).replace("*|FNAME|*", name)
 
         # Seleccionar el servicio actual y avanzar el índice para la próxima vez
         current_service = gmail_services[service_index]
@@ -526,16 +529,26 @@ def create_campaign(
     pd.DataFrame(df_data).to_csv(target_list_path, index=False)
 
     # Guarda la configuración completa de la campaña
+    # Determinar estado basado en scheduled_at
+    initial_status = 'Scheduled' if req.scheduled_at else 'Draft'
     campaign_config = req.model_dump() # Guarda todo lo recibido
     campaign_config.update({
         'id': campaign_id,
-        'status': 'Draft', # Estado inicial
+        'status': initial_status,
         'createdAt': datetime.now().isoformat(),
-        'target_count': total_contacts # Puede ser 0 inicialmente para CSV
+        'target_count': total_contacts
     })
     file_path = os.path.join(CAMPAIGN_DATA_DIR, f"{campaign_id}.json")
     with open(file_path, 'w') as f:
-        json.dump(campaign_config, f, indent=4)
+        json.dump(campaign_config, f, indent=4, default=str)
+
+    # Guardar en Supabase para scheduling
+    try:
+        service = get_email_sender_service()
+        service.create_campaign(campaign_config)
+        print(f"[{campaign_id}] Saved to Supabase (status: {initial_status})")
+    except Exception as e:
+        print(f"[{campaign_id}] Supabase save warning: {e}")
 
     return campaign_config
 
@@ -651,7 +664,7 @@ async def upload_campaign_csv(
                 detail="This campaign was not created with source_type 'csv'."
             )
         # Opcional: Validar si la campaña ya está 'Sending' o 'Completed'
-        if campaign_config.get('status') not in ['Draft']:
+        if campaign_config.get('status') not in ['Draft', 'Scheduled', 'Ready']:
              raise HTTPException(
                 status_code=400,
                 detail=f"Cannot upload CSV for campaign with status '{campaign_config.get('status')}'."
@@ -730,14 +743,28 @@ async def get_csv_preview(
     # --- Leer CSV y detectar cabeceras/muestra ---
     try:
     # --- Intenta leer con utf-8-sig primero ---
+        first_row = None
+        second_row = None
+        delimiter = ','  # Default delimiter
+        
         try:
             print("Attempting to read CSV with utf-8-sig encoding...")
             with open(target_csv_path, 'r', newline='', encoding='utf-8-sig') as csvfile:
                 # Detectar delimitador
                 sniffer = csv.Sniffer()
-                sample = csvfile.read(2048) # Leer muestra
-                dialect = sniffer.sniff(sample)
-                delimiter = dialect.delimiter
+                sample = csvfile.read(4096) # Leer muestra más grande
+                try:
+                    dialect = sniffer.sniff(sample, delimiters=',;\t|')
+                    delimiter = dialect.delimiter
+                except csv.Error as sniff_err:
+                    print(f"Sniffer failed: {sniff_err}. Trying common delimiters...")
+                    # Try to detect delimiter by counting occurrences
+                    for test_delim in [',', ';', '\t', '|']:
+                        if test_delim in sample:
+                            delimiter = test_delim
+                            print(f"Using detected delimiter: '{delimiter}'")
+                            break
+                
                 csvfile.seek(0) # Volver al inicio
 
                 # Leer filas para preview
@@ -834,8 +861,8 @@ async def save_csv_mapping(
             campaign_config = json.load(f)
         if campaign_config.get('source_type') != 'csv':
             raise HTTPException(status_code=400, detail="Campaign is not of type 'csv'.")
-        if campaign_config.get('status') != 'Draft':
-             raise HTTPException(status_code=400, detail="Mapping can only be saved for campaigns in 'Draft' status.")
+        if campaign_config.get('status') not in ['Draft', 'Scheduled', 'Ready']:
+             raise HTTPException(status_code=400, detail=f"Mapping can only be saved for campaigns in 'Draft', 'Scheduled' or 'Ready' status (current: {campaign_config.get('status')}).")
         # Podríamos validar si el mapeo ya existe y qué hacer (¿sobrescribir?)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading campaign config: {e}")
@@ -907,15 +934,29 @@ async def save_csv_mapping(
         'has_header': mapping_data.has_header
     }
     campaign_config['target_count'] = target_count
-    # Podríamos cambiar el status aquí si quisiéramos, ej. 'Ready'
-    # campaign_config['status'] = 'Ready'
-    campaign_config['status'] = 'Ready'
-
+    
+    # Actualizar estado solo si estaba en Draft
+    # Si estaba Scheduled, se mantiene Scheduled (pero ahora con mapping válido)
+    if campaign_config.get('status') == 'Draft':
+        campaign_config['status'] = 'Ready'
+    
+    # Guardar JSON
     try:
         with open(campaign_file_path, 'w') as f:
-            json.dump(campaign_config, f, indent=4)
+            json.dump(campaign_config, f, indent=4, default=str)
     except Exception as e:
          raise HTTPException(status_code=500, detail=f"Could not update campaign config with mapping: {e}")
+
+    # ✅ Actualizar en Supabase (mapping, target_count, status)
+    try:
+        service = get_email_sender_service()
+        service.update_campaign(campaign_id, {
+            'mapping': campaign_config['mapping'],
+            'target_count': target_count,
+            'status': campaign_config['status']
+        })
+    except Exception as e:
+        print(f"[{campaign_id}] Warning: Supabase update failed in save_mapping: {e}")
 
     return campaign_config # Devuelve la configuración completa actualizada
 
