@@ -9,10 +9,21 @@ interface CalendarEvent {
     end?: string;
     backgroundColor: string;
     borderColor: string;
+    textColor: string;
     extendedProps: {
         type: 'campaign' | 'send';
+        campaign_id: number;
+        campaign_email_id?: number;
+        send_id?: number;
+        notes?: string;
         category?: string;
+        title?: string;
+        service?: string;
         status?: string;
+        segment_tag?: string;
+        parent_title?: string;
+        parent_category?: string;
+        segmentation_mode?: string;
     };
 }
 

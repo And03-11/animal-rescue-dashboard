@@ -30,7 +30,7 @@ interface CampaignFormData {
     end_date: Dayjs;
     category: string;
     notes: string;
-    segmentation_mode: 'bc' | 'single' | 'split';
+    segmentation_mode: 'bc_single' | 'bc_split' | 'standard';
 }
 
 interface CampaignModalProps {
@@ -65,7 +65,7 @@ export const CampaignModal: React.FC<CampaignModalProps> = ({
         end_date: dayjs(),
         category: 'Other',
         notes: '',
-        segmentation_mode: 'single'
+        segmentation_mode: 'standard'
     });
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
@@ -75,7 +75,11 @@ export const CampaignModal: React.FC<CampaignModalProps> = ({
             setFormData({
                 ...campaign,
                 start_date: dayjs(campaign.start_date),
-                end_date: dayjs(campaign.end_date)
+                end_date: dayjs(campaign.end_date),
+                // Ensure segmentation_mode is valid, default to standard if not
+                segmentation_mode: (['bc_single', 'bc_split', 'standard'].includes(campaign.segmentation_mode)
+                    ? campaign.segmentation_mode
+                    : 'standard') as any
             });
         } else {
             setFormData({
@@ -84,7 +88,7 @@ export const CampaignModal: React.FC<CampaignModalProps> = ({
                 end_date: dayjs(),
                 category: 'Other',
                 notes: '',
-                segmentation_mode: 'single'
+                segmentation_mode: 'standard'
             });
         }
         setError('');
@@ -254,9 +258,9 @@ export const CampaignModal: React.FC<CampaignModalProps> = ({
                             onChange={(e) => handleChange('segmentation_mode', e.target.value)}
                             sx={{ borderRadius: '12px' }}
                         >
-                            <MenuItem value="bc">Big Campaign (3 segments)</MenuItem>
-                            <MenuItem value="single">Single Time (2 segments)</MenuItem>
-                            <MenuItem value="split">Split Time (2 segments)</MenuItem>
+                            <MenuItem value="bc_single">Big Campaign - Unified Time (All Tags)</MenuItem>
+                            <MenuItem value="bc_split">Big Campaign - Split Time (USA/EUR/Yahoo)</MenuItem>
+                            <MenuItem value="standard">Standard - Select Region (USA/EUR)</MenuItem>
                         </Select>
                     </FormControl>
 

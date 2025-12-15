@@ -17,6 +17,11 @@ import {
 import CloseIcon from '@mui/icons-material/Close';
 import SaveIcon from '@mui/icons-material/Save';
 import DeleteIcon from '@mui/icons-material/Delete';
+import AddIcon from '@mui/icons-material/Add';
+import dayjs, { Dayjs } from 'dayjs';
+import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 
 interface EmailFormData {
     id?: number;
@@ -27,6 +32,11 @@ interface EmailFormData {
     link_donation: string;
     link_contact_us: string;
     custom_links: string;
+    scheduled_sends?: Array<{
+        send_at: Dayjs;
+        service: string;
+        segment_tag?: string;
+    }>;
 }
 
 interface EmailModalProps {
@@ -54,7 +64,8 @@ export const EmailModal: React.FC<EmailModalProps> = ({
         button_name: '',
         link_donation: '',
         link_contact_us: '',
-        custom_links: ''
+        custom_links: '',
+        scheduled_sends: []
     });
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
@@ -70,7 +81,8 @@ export const EmailModal: React.FC<EmailModalProps> = ({
                 button_name: '',
                 link_donation: '',
                 link_contact_us: '',
-                custom_links: ''
+                custom_links: '',
+                scheduled_sends: []
             });
         }
         setError('');
@@ -222,6 +234,62 @@ export const EmailModal: React.FC<EmailModalProps> = ({
                         size="small"
                         sx={{ '& .MuiOutlinedInput-root': { borderRadius: '12px' } }}
                     />
+
+                    <Divider sx={{ my: 1 }}>
+                        <Typography variant="caption" color="text.secondary">SCHEDULED SENDS</Typography>
+                    </Divider>
+
+                    <LocalizationProvider dateAdapter={AdapterDayjs}>
+                        <Stack spacing={2}>
+                            {formData.scheduled_sends && formData.scheduled_sends.map((send, index) => (
+                                <Box key={index} sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                                    <DateTimePicker
+                                        label={`Send #${index + 1}`}
+                                        value={send.send_at}
+                                        onChange={(newValue) => {
+                                            const newSends = [...(formData.scheduled_sends || [])];
+                                            newSends[index] = { ...newSends[index], send_at: newValue || dayjs() };
+                                            handleChange('scheduled_sends', newSends);
+                                        }}
+                                        slotProps={{
+                                            textField: {
+                                                size: 'small',
+                                                fullWidth: true,
+                                                sx: { '& .MuiOutlinedInput-root': { borderRadius: '12px' } }
+                                            }
+                                        }}
+                                    />
+                                    <IconButton
+                                        size="small"
+                                        color="error"
+                                        onClick={() => {
+                                            const newSends = formData.scheduled_sends?.filter((_, i) => i !== index);
+                                            handleChange('scheduled_sends', newSends);
+                                        }}
+                                    >
+                                        <DeleteIcon />
+                                    </IconButton>
+                                </Box>
+                            ))}
+                            <Button
+                                startIcon={<AddIcon />}
+                                onClick={() => {
+                                    const newSends = [...(formData.scheduled_sends || [])];
+                                    newSends.push({
+                                        send_at: dayjs(),
+                                        service: 'Other',
+                                        segment_tag: undefined
+                                    });
+                                    handleChange('scheduled_sends', newSends);
+                                }}
+                                variant="outlined"
+                                size="small"
+                                sx={{ borderRadius: '8px', textTransform: 'none' }}
+                            >
+                                Add Scheduled Send
+                            </Button>
+                        </Stack>
+                    </LocalizationProvider>
                 </Stack>
             </DialogContent>
 

@@ -1,14 +1,36 @@
-import { Box, Paper, Typography, useTheme, alpha } from '@mui/material';
+import { Paper, Typography, useTheme, alpha } from '@mui/material';
 
-interface SchedulerCalendarViewProps {
-    events: any[];
-    onEventClick: (event: any) => void;
+interface CalendarEvent {
+    id: string;
+    title: string;
+    start: string;
+    end?: string;
+    backgroundColor: string;
+    borderColor: string;
+    textColor: string;
+    extendedProps: {
+        type: 'campaign' | 'send';
+        campaign_id: number;
+        campaign_email_id?: number;
+        send_id?: number;
+        notes?: string;
+        category?: string;
+        title?: string;
+        service?: string;
+        status?: string;
+        segment_tag?: string;
+        parent_title?: string;
+        parent_category?: string;
+        segmentation_mode?: string;
+    };
 }
 
-export const SchedulerCalendarView: React.FC<SchedulerCalendarViewProps> = ({
-    events,
-    onEventClick
-}) => {
+interface SchedulerCalendarViewProps {
+    events: CalendarEvent[];
+    onEventClick: (event: CalendarEvent) => void;
+}
+
+export const SchedulerCalendarView: React.FC<SchedulerCalendarViewProps> = () => {
     const theme = useTheme();
 
     return (

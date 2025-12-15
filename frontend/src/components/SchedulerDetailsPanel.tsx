@@ -11,14 +11,11 @@ import {
     Collapse,
     useTheme,
     alpha,
-    Stack,
-    Divider,
-    Tooltip
+    Stack
 } from '@mui/material';
 import { motion, AnimatePresence } from 'framer-motion';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
-import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import EmailIcon from '@mui/icons-material/Email';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import LinkIcon from '@mui/icons-material/Link';
@@ -27,6 +24,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import PendingIcon from '@mui/icons-material/Pending';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
+import CloseIcon from '@mui/icons-material/Close';
 import dayjs from 'dayjs';
 
 interface CalendarEvent {
@@ -36,6 +34,7 @@ interface CalendarEvent {
     end?: string;
     backgroundColor: string;
     borderColor: string;
+    textColor: string;
     extendedProps: {
         type: 'campaign' | 'send';
         campaign_id: number;
@@ -72,14 +71,11 @@ export const SchedulerDetailsPanel: React.FC<SchedulerDetailsPanelProps> = ({
     const theme = useTheme();
     const [expanded, setExpanded] = useState(true);
     const [activeTab, setActiveTab] = useState(0);
-    const [copiedLink, setCopiedLink] = useState<string | null>(null);
 
     if (!selectedEvent) return null;
 
     const isCampaign = selectedEvent.extendedProps.type === 'campaign';
-    const campaignId = isCampaign
-        ? selectedEvent.extendedProps.campaign_id
-        : selectedEvent.extendedProps.campaign_id;
+    const campaignId = selectedEvent.extendedProps.campaign_id;
 
     // Get all emails for this campaign
     const campaignEmails = allEvents.filter(
@@ -104,11 +100,7 @@ export const SchedulerDetailsPanel: React.FC<SchedulerDetailsPanelProps> = ({
         return acc;
     }, {} as Record<number, { emailId: number; title: string; sends: CalendarEvent[] }>);
 
-    const handleCopyLink = (link: string, label: string) => {
-        navigator.clipboard.writeText(link);
-        setCopiedLink(label);
-        setTimeout(() => setCopiedLink(null), 2000);
-    };
+
 
     return (
         <AnimatePresence>
@@ -199,6 +191,9 @@ export const SchedulerDetailsPanel: React.FC<SchedulerDetailsPanelProps> = ({
                         )}
                         <IconButton onClick={() => setExpanded(!expanded)} size="small">
                             {expanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                        </IconButton>
+                        <IconButton onClick={onClose} size="small" sx={{ ml: 0.5 }}>
+                            <CloseIcon />
                         </IconButton>
                     </Box>
                 </Box>

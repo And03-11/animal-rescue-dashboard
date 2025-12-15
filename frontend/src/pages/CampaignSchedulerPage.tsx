@@ -1,303 +1,141 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
-import { Box, CircularProgress, Alert, useTheme, alpha } from '@mui/material';
+import { useState, useCallback, useEffect } from 'react';
+import { Box, CircularProgress, Alert, useTheme, alpha, Button } from '@mui/material';
 import { motion } from 'framer-motion';
-import dayjs, { Dayjs } from 'dayjs';
+import dayjs from 'dayjs';
 import apiClient from '../api/axiosConfig';
 
-import { useState, useCallback, useEffect, useMemo } from 'react';
-import { Box, CircularProgress, Alert, useTheme, alpha } from '@mui/material';
-import { motion } from 'framer-motion';
-import dayjs, { Dayjs } from 'dayjs';
-import apiClient from '../api/axiosConfig';
+// Import shared types
+import type { Campaign, CampaignEmail, ScheduledSend, FilterState } from '../types/scheduler.types';
 
-// Import components
-import { SchedulerHeader } from '../components/SchedulerHeader';
-import { SchedulerFilters } from '../components/SchedulerFilters';
-import { SchedulerDetailsPanel } from '../components/SchedulerDetailsPanel';
-import { SchedulerTimeline, type TimelineItem, type TimelineGroup } from '../components/SchedulerTimeline';
-import { SchedulerListView } from '../components/SchedulerListView';
-import { SchedulerCalendarView } from '../components/SchedulerCalendarView';
+// Import new components
+import { SplitPanelLayout } from '../components/SplitPanelLayout';
+import { CampaignListPanel } from '../components/CampaignListPanel';
+import { CampaignDetailsPanel } from '../components/CampaignDetailsPanel';
 import { CampaignModal } from '../components/CampaignModal';
-import { EmailModal } from '../components/EmailModal';
-
-// Types
-interface CalendarEvent {
-  id: string;
-  title: string;
-  start: string;
-  end?: string;
-  backgroundColor: string;
-  borderColor: string;
-  textColor: string;
-  opacity?: number;
-  allDay?: boolean;
-  extendedProps: {
-    type: 'campaign' | 'send';
-    campaign_id: number;
-    campaign_email_id?: number;
-    send_id?: number;
-    notes?: string;
-    category?: string;
-    title?: string;
-    service?: string;
-    status?: string;
-    segment_tag?: string;
-    parent_title?: string;
-    parent_category?: string;
-    segmentation_mode?: string;
-  };
-}
-
-interface FilterState {
-  search: string;
-  categories: string[];
-  platforms: string[];
-  statuses: string[];
-}
-
-interface CampaignFormData {
-  id?: number;
-  title: string;
-  start_date: Dayjs;
-  end_date: Dayjs;
-  category: string;
-  notes: string;
-  segmentation_mode: 'bc' | 'single' | 'split';
-}
-
-interface EmailFormData {
-  id?: number;
-  campaign_id: number;
-  title: string;
-  subject: string;
-  button_name: string;
-  link_donation: string;
-  link_contact_us: string;
-  custom_links: string;
-}
-
-type ViewMode = 'timeline' | 'calendar' | 'list';
+import { SendWizardModal } from '../components/SendWizardModal';
 
 // Main Component
 export const CampaignSchedulerPage = () => {
   const theme = useTheme();
 
   // State
-  const [currentView, setCurrentView] = useState<ViewMode>('timeline');
-  const [events, setEvents] = useState<CalendarEvent[]>([]);
-  const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [selectedCampaignId, setSelectedCampaignId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-
-  // Modal State
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editingCampaign, setEditingCampaign] = useState<CampaignFormData | null>(null);
-
-  // Email Modal State
-  const [emailModalOpen, setEmailModalOpen] = useState(false);
-  const [editingEmail, setEditingEmail] = useState<EmailFormData | null>(null);
-  const [selectedCampaignIdForEmail, setSelectedCampaignIdForEmail] = useState<number | null>(null);
-
   const [filters, setFilters] = useState<FilterState>({
     search: '',
-    categories: [],
-    platforms: [],
-    statuses: []
+    categories: []
   });
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isSendWizardOpen, setIsSendWizardOpen] = useState(false);
 
-  // Timeline state
-  const [timelineItems, setTimelineItems] = useState<TimelineItem[]>([]);
-  const [timelineGroups, setTimelineGroups] = useState<TimelineGroup[]>([]);
+  // Get selected campaign
+  const selectedCampaign = campaigns.find(c => c.id === selectedCampaignId) || null;
 
   // Fetch data
-  const fetchSchedulerData = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
-    setError('');
-
-    const start = dayjs().subtract(1, 'month').startOf('month').toISOString();
-    const end = dayjs().add(3, 'month').endOf('month').toISOString();
-    const params = new URLSearchParams({ start, end });
-
     try {
-      const response = await apiClient.get<CalendarEvent[]>(`/scheduler/events?${params.toString()}`);
-      const fetchedEvents = response.data;
-      setEvents(fetchedEvents);
+      // Fetch campaigns
+      const campaignsRes = await apiClient.get('/scheduler/events', {
+        params: {
+          start: dayjs().subtract(6, 'month').toISOString(),
+          end: dayjs().add(6, 'month').toISOString()
+        }
+      });
 
-      // Transform for timeline
-      const newItems: TimelineItem[] = [];
-      const groupsMap = new Map<string, TimelineGroup>();
+      // Process events into campaigns
+      const events = campaignsRes.data;
+      const campaignMap = new Map<number, Campaign>();
 
-      fetchedEvents.forEach(event => {
-        const props = event.extendedProps;
-
-        if (props.type === 'campaign') {
-          if (!groupsMap.has(event.id)) {
-            groupsMap.set(event.id, {
-              id: event.id,
-              content: event.title,
-              notes: props.notes,
-              category: props.category,
-              segmentation_mode: props.segmentation_mode,
-              start: dayjs(event.start).startOf('day').toDate(),
-              end: dayjs(event.end).endOf('day').toDate(),
-            });
-          }
-
-          newItems.push({
-            id: `bg_${event.id}`,
-            content: '',
-            start: dayjs(event.start).startOf('day').toDate(),
-            end: dayjs(event.end).endOf('day').toDate(),
-            group: event.id,
-            type: 'background',
-            className: 'timeline-campaign-background',
-            style: `background-color: ${event.backgroundColor}33; border-color: ${event.borderColor};`
-          });
-        } else if (props.type === 'send') {
-          const parentGroupId = `campaign_${props.campaign_id}`;
-          if (!groupsMap.has(parentGroupId)) {
-            groupsMap.set(parentGroupId, {
-              id: parentGroupId,
-              content: props.parent_title || `Campaign #${props.campaign_id}`,
-            });
-          }
-
-          const startTime = dayjs(event.start).format('HH:mm');
-          const tooltipTitle = `[${startTime}] ${event.title}`;
-
-          newItems.push({
-            id: event.id,
-            content: event.title,
-            start: new Date(event.start),
-            group: parentGroupId,
-            type: 'point',
-            className: `timeline-send-item status-${props.status || 'pending'}`,
-            style: `
-              border-color: ${event.borderColor};
-              background-color: ${event.backgroundColor}CC;
-            `,
-            title: tooltipTitle,
-            campaign_id: props.campaign_id
+      // First pass: create campaigns
+      events.forEach((event: any) => {
+        if (event.extendedProps.type === 'campaign') {
+          const campaignId = event.extendedProps.campaign_id;
+          campaignMap.set(campaignId, {
+            id: campaignId,
+            title: event.extendedProps.title || event.title,
+            category: event.extendedProps.category || 'Other',
+            start_date: event.start,
+            end_date: event.end || event.start,
+            notes: event.extendedProps.notes,
+            segmentation_mode: event.extendedProps.segmentation_mode,
+            sendCount: 0,
+            status: 'active',
+            sends: []
           });
         }
       });
 
-      setTimelineGroups(Array.from(groupsMap.values()));
-      setTimelineItems(newItems);
+      // Second pass: add sends to campaigns
+      events.forEach((event: any) => {
+        if (event.extendedProps.type === 'send') {
+          const campaignId = event.extendedProps.campaign_id;
+          const campaign = campaignMap.get(campaignId);
+          if (campaign) {
+            campaign.sendCount = (campaign.sendCount || 0) + 1;
+            campaign.sends = campaign.sends || [];
+            campaign.sends.push({
+              id: event.extendedProps.send_id,
+              campaign_email_id: event.extendedProps.campaign_email_id,
+              send_at: dayjs(event.start),
+              service: event.extendedProps.service || 'Other',
+              status: event.extendedProps.status || 'pending',
+              segment_tag: event.extendedProps.segment_tag
+            });
 
-    } catch (err) {
-      console.error('Error fetching scheduler data:', err);
-      setError('Failed to load scheduler data');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+            // Set next send
+            if (!campaign.nextSend || dayjs(event.start).isBefore(dayjs(campaign.nextSend))) {
+              campaign.nextSend = event.start;
+            }
+          }
+        }
+      });
 
-  useEffect(() => {
-    fetchSchedulerData();
-  }, [fetchSchedulerData]);
+      // Fetch emails for each campaign (if selected)
+      const campaignsArray = Array.from(campaignMap.values());
 
-  // Extract available categories and platforms
-  const availableCategories = useMemo(() => {
-    const categories = new Set<string>();
-    events.forEach(event => {
-      if (event.extendedProps.category) {
-        categories.add(event.extendedProps.category);
-      }
-    });
-    return Array.from(categories);
-  }, [events]);
-
-  const availablePlatforms = useMemo(() => {
-    const platforms = new Set<string>();
-    events.forEach(event => {
-      if (event.extendedProps.service) {
-        platforms.add(event.extendedProps.service);
-      }
-    });
-    return Array.from(platforms);
-  }, [events]);
-
-  // Filter events
-  const filteredEvents = useMemo(() => {
-    return events.filter(event => {
-      // Search filter
-      if (filters.search && !event.title.toLowerCase().includes(filters.search.toLowerCase())) {
-        return false;
-      }
-
-      // Category filter
-      if (filters.categories.length > 0 && !filters.categories.includes(event.extendedProps.category || '')) {
-        return false;
-      }
-
-      // Platform filter
-      if (filters.platforms.length > 0 && !filters.platforms.includes(event.extendedProps.service || '')) {
-        return false;
-      }
-
-      // Status filter
-      if (filters.statuses.length > 0) {
-        const status = event.extendedProps.status || 'pending';
-        if (!filters.statuses.map(s => s.toLowerCase()).includes(status.toLowerCase())) {
-          return false;
+      // For now, fetch all campaign emails
+      for (const campaign of campaignsArray) {
+        try {
+          const emailsRes = await apiClient.get(`/scheduler/campaigns/${campaign.id}/emails`);
+          if (emailsRes.data) {
+            campaign.emails = emailsRes.data;
+          }
+        } catch (err) {
+          console.error(`Error fetching emails for campaign ${campaign.id}:`, err);
         }
       }
 
-      return true;
-    });
-  }, [events, filters]);
+      console.log('Processed campaigns:', campaignsArray);
+      setCampaigns(campaignsArray);
 
-  // Update timeline items when filters change
-  useEffect(() => {
-    const filteredIds = new Set(filteredEvents.map(e => e.id));
-    const filteredTimelineItems = timelineItems.filter(item => {
-      if (item.id.toString().startsWith('bg_')) {
-        const campaignId = item.id.toString().replace('bg_', '');
-        return filteredIds.has(campaignId);
+      // Auto-select first campaign if none selected
+      if (!selectedCampaignId && campaignsArray.length > 0) {
+        setSelectedCampaignId(campaignsArray[0].id);
       }
-      return filteredIds.has(item.id.toString());
-    });
-    setTimelineItems(filteredTimelineItems);
-  }, [filteredEvents]);
 
-  // Handle event selection
-  const handleEventClick = useCallback((event: CalendarEvent) => {
-    setSelectedEvent(event);
+    } catch (err: any) {
+      console.error('Error fetching data:', err);
+      setError(err.message || 'Failed to load campaigns');
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedCampaignId]);
+
+  useEffect(() => {
+    fetchData();
   }, []);
 
-  // Handle timeline item click
-  const handleTimelineItemClick = useCallback((itemId: string | number) => {
-    const clickedEvent = events.find(e => e.id === itemId);
-    if (clickedEvent) {
-      setSelectedEvent(clickedEvent);
-    }
-  }, [events]);
-
-  // CRUD Operations
-  const handleNewCampaign = () => {
-    setEditingCampaign(null);
-    setModalOpen(true);
+  // Handlers
+  const handleCreateCampaign = () => {
+    setIsCreateModalOpen(true);
   };
 
-  const handleEditCampaign = (event: CalendarEvent) => {
-    if (event.extendedProps.type !== 'campaign') return;
-
-    setEditingCampaign({
-      id: event.extendedProps.campaign_id,
-      title: event.title.replace('CAMPAÑA: ', ''),
-      start_date: dayjs(event.start),
-      end_date: dayjs(event.end),
-      category: event.extendedProps.category || 'Other',
-      notes: event.extendedProps.notes || '',
-      segmentation_mode: (event.extendedProps.segmentation_mode as any) || 'bc'
-    });
-    setModalOpen(true);
-  };
-
-  const handleSaveCampaign = async (formData: CampaignFormData) => {
+  const handleSaveNewCampaign = async (formData: any) => {
     try {
-      const payload = {
+      const newCampaignData = {
         title: formData.title,
         start_date: formData.start_date.toISOString(),
         end_date: formData.end_date.toISOString(),
@@ -306,122 +144,144 @@ export const CampaignSchedulerPage = () => {
         segmentation_mode: formData.segmentation_mode
       };
 
-      if (formData.id) {
-        // Update
-        await apiClient.put(`/scheduler/events/campaign_${formData.id}`, payload);
+      const res = await apiClient.post('/scheduler/events', newCampaignData);
+      await fetchData();
+      setSelectedCampaignId(res.data.id);
+      setIsCreateModalOpen(false);
+    } catch (err) {
+      console.error('Error creating campaign:', err);
+      throw err;
+    }
+  };
+
+  const handleDeleteCampaign = async () => {
+    if (!selectedCampaignId) return;
+    if (!window.confirm('Are you sure you want to delete this campaign? This will delete all associated emails and sends.')) return;
+
+    try {
+      await apiClient.delete(`/scheduler/events/campaign_${selectedCampaignId}`);
+      setSelectedCampaignId(null);
+      await fetchData();
+    } catch (err) {
+      console.error('Error deleting campaign:', err);
+    }
+  };
+
+  const handleUpdateCampaign = async (updatedCampaign: Campaign) => {
+    try {
+      await apiClient.put(`/scheduler/events/campaign_${updatedCampaign.id}`, {
+        title: updatedCampaign.title,
+        start_date: updatedCampaign.start_date,
+        end_date: updatedCampaign.end_date,
+        category: updatedCampaign.category,
+        notes: updatedCampaign.notes,
+        segmentation_mode: updatedCampaign.segmentation_mode
+      });
+      await fetchData();
+    } catch (err) {
+      console.error('Error updating campaign:', err);
+    }
+  };
+
+  const handleUpdateEmail = async (email: CampaignEmail) => {
+    try {
+      if (email.id) {
+        await apiClient.put(`/scheduler/emails/${email.id}`, email);
       } else {
-        // Create
-        await apiClient.post('/scheduler/events', payload);
+        await apiClient.post('/scheduler/emails', email);
+      }
+      await fetchData();
+    } catch (err) {
+      console.error('Error updating email:', err);
+    }
+  };
+
+  const handleAddSend = async () => {
+    setIsSendWizardOpen(true);
+  };
+
+  const handleBatchCreateSends = async (sends: any[]) => {
+    const campaign = selectedCampaign;
+    if (!campaign) return;
+
+    try {
+      const baseEmail = campaign.emails?.[0];
+
+      for (const send of sends) {
+        const newEmailData = {
+          campaign_id: campaign.id,
+          title: `Email for ${send.segment_tag}`,
+          subject: baseEmail?.subject || 'New Subject',
+          button_name: baseEmail?.button_name || 'Donate Now',
+          link_donation: baseEmail?.link_donation || '',
+          link_contact_us: baseEmail?.link_contact_us || '',
+          custom_links: baseEmail?.custom_links || ''
+        };
+
+        const emailRes = await apiClient.post('/scheduler/emails', newEmailData);
+        const newEmailId = emailRes.data.id;
+
+        await apiClient.post('/scheduler/sends', {
+          campaign_email_id: newEmailId,
+          send_at: send.send_at.toISOString(),
+          service: send.service,
+          status: send.status,
+          segment_tag: send.segment_tag
+        });
       }
 
-      await fetchSchedulerData();
-      setModalOpen(false);
-      setSelectedEvent(null);
-    } catch (error) {
-      console.error('Error saving campaign:', error);
-      throw error;
+      await fetchData();
+      setIsSendWizardOpen(false);
+    } catch (err) {
+      console.error('Error batch creating sends:', err);
     }
   };
 
-  const handleDeleteCampaign = async (id: number) => {
+  const handleUpdateSend = async (send: ScheduledSend) => {
     try {
-      await apiClient.delete(`/scheduler/events/campaign_${id}`);
-      await fetchSchedulerData();
-      setModalOpen(false);
-      setSelectedEvent(null);
-    } catch (error) {
-      console.error('Error deleting campaign:', error);
-      throw error;
+      await apiClient.put(`/scheduler/sends/${send.id}`, {
+        send_at: send.send_at.toISOString(),
+        service: send.service,
+        status: send.status,
+        segment_tag: send.segment_tag
+      });
+      await fetchData();
+    } catch (err) {
+      console.error('Error updating send:', err);
     }
   };
 
-  // Email CRUD Operations
-  const handleAddEmail = (campaignId: number) => {
-    setSelectedCampaignIdForEmail(campaignId);
-    setEditingEmail(null);
-    setEmailModalOpen(true);
-  };
-
-  const handleEditEmail = (emailEvent: CalendarEvent) => {
-    if (emailEvent.extendedProps.type !== 'send') return;
-
-    // We need to fetch the full email details or reconstruct them
-    // Since the event props might not have everything, let's assume we need to fetch or use what we have
-    // For now, let's use extendedProps if available, or fetch.
-    // Actually, the backend 'events' endpoint might not return all email fields (like links).
-    // But let's check what we have. The event has extendedProps.
-    // If we need more data, we should fetch it. But let's try to populate with what we have for now,
-    // or better, fetch the email details.
-
-    // To keep it simple and consistent, let's just open the modal with the IDs and let the user edit.
-    // Ideally we should have the data.
-    // Let's assume we can pass the data we have.
-
-    // Wait, the 'events' endpoint returns CalendarEvents.
-    // Does it include email links?
-    // Looking at scheduler.py:
-    // It joins CampaignEmail.
-    // But CalendarEvent extendedProps only has a few fields.
-    // We might need to fetch the specific email.
-
-    // Let's implement a fetch for the single email or just use what we have and risk missing fields.
-    // Better: Fetch the email details.
-
-    // Since I can't easily add a new fetch right here without more code, 
-    // I'll assume for this iteration we might need to fetch or just use defaults.
-    // Actually, I'll implement a quick fetch inside the modal or here.
-    // Let's do it here.
-
-    const emailId = emailEvent.extendedProps.campaign_email_id;
-    if (!emailId) return;
-
-    // We'll set the ID and let the modal handle it? No, modal expects data.
-    // Let's fetch it.
-    apiClient.get(`/scheduler/campaigns/${emailEvent.extendedProps.campaign_id}/emails`)
-      .then(res => {
-        const email = res.data.find((e: any) => e.id === emailId);
-        if (email) {
-          setEditingEmail(email);
-          setSelectedCampaignIdForEmail(emailEvent.extendedProps.campaign_id);
-          setEmailModalOpen(true);
-        }
-      })
-      .catch(err => console.error("Error fetching email details", err));
-  };
-
-  const handleSaveEmail = async (formData: EmailFormData) => {
+  const handleDeleteSend = async (id: number) => {
     try {
-      if (formData.id) {
-        await apiClient.put(`/scheduler/emails/${formData.id}`, formData);
-      } else {
-        await apiClient.post('/scheduler/emails', formData);
-      }
-      await fetchSchedulerData();
-      setEmailModalOpen(false);
-      // Refresh selected event if it's the campaign
-      if (selectedEvent && selectedEvent.extendedProps.type === 'campaign' && selectedEvent.extendedProps.campaign_id === formData.campaign_id) {
-        // We might need to refresh the selected event's data? 
-        // The fetchSchedulerData updates 'events', but 'selectedEvent' is a separate state object.
-        // We should probably update selectedEvent to point to the new object in 'events'.
-        // But 'events' is updated async.
-        // For now, let's just close the modal. The details panel uses 'allEvents' prop which will be updated.
-      }
-    } catch (error) {
-      console.error('Error saving email:', error);
-      throw error;
+      await apiClient.delete(`/scheduler/sends/${id}`);
+      await fetchData();
+    } catch (err) {
+      console.error('Error deleting send:', err);
     }
   };
 
-  const handleDeleteEmail = async (id: number) => {
-    try {
-      await apiClient.delete(`/scheduler/emails/${id}`);
-      await fetchSchedulerData();
-      setEmailModalOpen(false);
-    } catch (error) {
-      console.error('Error deleting email:', error);
-      throw error;
-    }
-  };
+  if (loading) {
+    return (
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          height: '100vh'
+        }}
+      >
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (error) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Alert severity="error">{error}</Alert>
+      </Box>
+    );
+  }
 
   return (
     <Box
@@ -430,118 +290,101 @@ export const CampaignSchedulerPage = () => {
       animate={{ opacity: 1 }}
       transition={{ duration: 0.5 }}
       sx={{
-        width: '100%',
-        maxWidth: '1600px',
-        mx: 'auto',
+        minHeight: '100vh',
+        background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.02)} 0%, ${alpha(
+          theme.palette.secondary.main,
+          0.02
+        )} 100%)`,
         p: 3
       }}
     >
       {/* Header */}
-      <SchedulerHeader
-        currentView={currentView}
-        onViewChange={setCurrentView}
-        onRefresh={fetchSchedulerData}
-        onNewCampaign={handleNewCampaign}
-        loading={loading}
-      />
-
-      {/* Error Alert */}
-      {error && (
-        <Alert severity="error" sx={{ mb: 3 }}>
-          {error}
-        </Alert>
-      )}
-
-      {/* Main Content */}
-      <Box sx={{ display: 'flex', gap: 3 }}>
-        {/* Filters Sidebar */}
-        <Box sx={{ width: 280, flexShrink: 0 }}>
-          <SchedulerFilters
-            filters={filters}
-            onFilterChange={setFilters}
-            availableCategories={availableCategories}
-            availablePlatforms={availablePlatforms}
-          />
-        </Box>
-
-        {/* Main View Area */}
-        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 3 }}>
-          {/* Loading State */}
-          {loading ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
-              <CircularProgress />
+      <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Box>
+          <motion.div
+            initial={{ y: -20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ delay: 0.1 }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <Box
+                sx={{
+                  width: 48,
+                  height: 48,
+                  borderRadius: '12px',
+                  background: `linear-gradient(45deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '24px'
+                }}
+              >
+                📧
+              </Box>
+              <Box>
+                <h1 style={{ margin: 0, fontSize: '28px', fontWeight: 700 }}>Campaign Scheduler</h1>
+                <p style={{ margin: 0, color: theme.palette.text.secondary }}>
+                  Manage your email campaigns and scheduled sends
+                </p>
+              </Box>
             </Box>
-          ) : (
-            <>
-              {/* Timeline View */}
-              {currentView === 'timeline' && (
-                <Box
-                  sx={{
-                    bgcolor: theme.palette.background.paper,
-                    borderRadius: '16px',
-                    p: 2,
-                    border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
-                    minHeight: 400
-                  }}
-                >
-                  <SchedulerTimeline
-                    items={timelineItems}
-                    groups={timelineGroups}
-                    onItemDoubleClick={handleTimelineItemClick}
-                    onItemMove={() => { }} // Read-only
-                  />
-                </Box>
-              )}
-
-              {/* Calendar View */}
-              {currentView === 'calendar' && (
-                <SchedulerCalendarView
-                  events={filteredEvents}
-                  onEventClick={handleEventClick}
-                />
-              )}
-
-              {/* List View */}
-              {currentView === 'list' && (
-                <SchedulerListView
-                  events={filteredEvents}
-                  onEventClick={handleEventClick}
-                />
-              )}
-
-              {/* Details Panel */}
-              {selectedEvent && (
-                <SchedulerDetailsPanel
-                  selectedEvent={selectedEvent}
-                  allEvents={events}
-                  onClose={() => setSelectedEvent(null)}
-                  onEdit={handleEditCampaign}
-                  onAddEmail={handleAddEmail}
-                  onEditEmail={handleEditEmail}
-                />
-              )}
-            </>
-          )}
+          </motion.div>
         </Box>
+        <Button
+          variant="contained"
+          onClick={handleCreateCampaign}
+          sx={{
+            borderRadius: '12px',
+            textTransform: 'none',
+            fontWeight: 600,
+            px: 3,
+            background: `linear-gradient(45deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`
+          }}
+        >
+          + New Campaign
+        </Button>
       </Box>
 
-      {/* Campaign Modal */}
+      {/* Main Content - Split Panel */}
+      <Box sx={{ height: 'calc(100vh - 200px)' }}>
+        <SplitPanelLayout
+          leftWidth={40}
+          leftPanel={
+            <CampaignListPanel
+              campaigns={campaigns}
+              selectedId={selectedCampaignId}
+              onSelect={setSelectedCampaignId}
+              filters={filters}
+              onFilterChange={setFilters}
+            />
+          }
+          rightPanel={
+            <CampaignDetailsPanel
+              campaign={selectedCampaign}
+              onUpdateEmail={handleUpdateEmail}
+              onAddSend={handleAddSend}
+              onUpdateSend={handleUpdateSend}
+              onDeleteSend={handleDeleteSend}
+              onDeleteCampaign={handleDeleteCampaign}
+              onUpdateCampaign={handleUpdateCampaign}
+            />
+          }
+        />
+      </Box>
+
       <CampaignModal
-        open={modalOpen}
-        campaign={editingCampaign}
-        onClose={() => setModalOpen(false)}
-        onSave={handleSaveCampaign}
-        onDelete={handleDeleteCampaign}
+        open={isCreateModalOpen}
+        campaign={null}
+        onClose={() => setIsCreateModalOpen(false)}
+        onSave={handleSaveNewCampaign}
       />
 
-      {/* Email Modal */}
-      <EmailModal
-        open={emailModalOpen}
-        email={editingEmail}
-        campaignId={selectedCampaignIdForEmail || 0}
-        onClose={() => setEmailModalOpen(false)}
-        onSave={handleSaveEmail}
-        onDelete={handleDeleteEmail}
+      <SendWizardModal
+        open={isSendWizardOpen}
+        onClose={() => setIsSendWizardOpen(false)}
+        onSave={handleBatchCreateSends}
+        campaignCategory={selectedCampaign?.category || ''}
+        segmentationMode={selectedCampaign?.segmentation_mode || 'standard'}
       />
     </Box>
   );

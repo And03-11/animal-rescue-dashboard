@@ -97,7 +97,7 @@ export default function LoginForm() {
           >
             <img src={logo} alt="Logo" style={{ height: '120px', marginBottom: '40px' }} />
             <Typography variant="h3" fontWeight={800} sx={{ color: '#fff', mb: 2, letterSpacing: '-1px' }}>
-              Animal Love
+              Animal love
             </Typography>
             <Typography variant="h4" fontWeight={600} sx={{ color: alpha('#fff', 0.85), mb: 1 }}>
               No-Kill Rescue Center
