@@ -9,12 +9,14 @@ from pydantic import BaseModel, Field
 # 🔧 FIX: sin prefix aquí; el prefix ya lo aporta main.py: "/api/v1/form-titles"
 router = APIRouter(tags=["form-titles"])
 
+from datetime import datetime
+
 class DonationDetail(BaseModel):
     id: str
     donorName: str
     donorEmail: str
     amount: float
-    date: str
+    date: datetime
 
 class FormTitlesDonationsRequest(BaseModel):
     form_title_ids: List[str] = Field(..., min_items=1)

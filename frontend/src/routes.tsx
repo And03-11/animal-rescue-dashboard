@@ -19,7 +19,8 @@ const ContactSearchPage = lazy(() => import('./pages/ContactSearchPage'));
 const EmailSenderPage = lazy(() => import('./pages/EmailSenderPage'));
 const CampaignDetailPage = lazy(() => import('./pages/CampaignDetailPage'));
 const CampaignSchedulerPage = lazy(() => import('./pages/CampaignSchedulerPage'));
-const SettingsPage = lazy(() => import('./pages/SettingsPage')); // ✅ NUEVO
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const SharedAnalyticsPage = lazy(() => import('./pages/SharedAnalyticsPage'));
 
 const SpinnerFallback = () => (
   <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
@@ -55,6 +56,7 @@ export function AppRoutes() {
       <Routes>
         {/* --- Ruta Pública --- */}
         <Route path="/login" element={<LoginForm />} />
+        <Route path="/shared/:token" element={<SharedAnalyticsPage />} />
 
         {/* --- Rutas Protegidas con Layout --- */}
         <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>

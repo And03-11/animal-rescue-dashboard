@@ -19,6 +19,7 @@ from backend.app.api.v1.endpoints import (
 )
 from backend.app.api.v1.endpoints import campaigns_fast
 from backend.app.api.v1.endpoints.search import router as search_router
+from backend.app.api.v1.endpoints.analytics import router as analytics_router
 
 # ✅ Import email scheduler worker
 from backend.app.core.scheduler_worker import start_scheduler, stop_scheduler
@@ -81,3 +82,4 @@ app.include_router(auth_sqlite.router, prefix="/api/v1", tags=["auth"])
 app.include_router(users.router, prefix="/api/v1", tags=["users"])
 app.include_router(websockets.router, prefix="/api/v1")
 app.include_router(scheduler.router, prefix="/api/v1")
+app.include_router(analytics_router, prefix="/api/v1/analytics", tags=["analytics"])

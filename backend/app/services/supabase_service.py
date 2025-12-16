@@ -674,6 +674,50 @@ class SupabaseService:
         """
         return []
 
+    # ==========================================
+    # SHARED VIEWS
+    # ==========================================
+
+    def create_shared_view(self, configuration: Dict[str, Any], created_by: Optional[str] = None) -> str:
+        """
+        Create a new shared view configuration and return the token.
+        """
+        query = """
+            INSERT INTO analytics_shared_views (configuration, created_by)
+            VALUES (%s, %s)
+            RETURNING token
+        """
+        
+        # Ensure configuration is JSON serializable (psycopg2 handles dict as jsonb automatically)
+        result = self._execute_one(query, (psycopg2.extras.Json(configuration), created_by))
+        
+        if result and 'token' in result:
+            return str(result['token'])
+        raise Exception("Failed to create shared view")
+
+    def get_shared_view(self, token: str) -> Optional[Dict[str, Any]]:
+        """
+        Get a shared view configuration by token.
+        """
+        query = """
+            SELECT configuration, is_active
+            FROM analytics_shared_views
+            WHERE token = %s
+        """
+        
+        # We need to cast token to UUID in the query if it's passed as string, 
+        # but psycopg2 usually handles it if the column is UUID.
+        # However, to be safe against invalid UUID strings, we should try/catch or validate.
+        try:
+            result = self._execute_one(query, (token,))
+            
+            if result and result['is_active']:
+                return result['configuration']
+            return None
+        except Exception as e:
+            print(f"Error fetching shared view {token}: {e}")
+            return None
+
     def close(self):
         """Close database connection"""
         if self._pool:
