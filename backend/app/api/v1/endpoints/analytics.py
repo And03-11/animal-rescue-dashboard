@@ -8,7 +8,9 @@ router = APIRouter()
 
 class SharedViewConfig(BaseModel):
     source_id: str
+    source_name: Optional[str] = None
     campaign_id: Optional[str] = None
+    campaign_name: Optional[str] = None
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     form_titles: Optional[str] = None  # Comma-separated list from frontend

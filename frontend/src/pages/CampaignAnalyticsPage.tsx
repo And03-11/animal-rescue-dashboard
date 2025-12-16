@@ -104,10 +104,18 @@ export const CampaignAnalyticsPage: React.FC = () => {
         setIsGeneratingLink(true);
         setError('');
         try {
+            // Find source and campaign names for display in shared view
+            const sourceName = sources.find(s => s.id === selectedSource)?.name || selectedSource;
+            const campaignName = campaigns.find(c => c.id === selectedCampaign)?.name || '';
+
             const payload: any = {
-                source_id: selectedSource
+                source_id: selectedSource,
+                source_name: sourceName
             };
-            if (selectedCampaign) payload.campaign_id = selectedCampaign;
+            if (selectedCampaign) {
+                payload.campaign_id = selectedCampaign;
+                payload.campaign_name = campaignName;
+            }
             if (startDate) payload.start_date = startDate.toISOString();
             if (endDate) payload.end_date = endDate.toISOString();
             if (selectedTitles.length > 0) payload.form_titles = selectedTitles.join(',');

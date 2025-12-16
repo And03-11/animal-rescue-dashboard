@@ -12,7 +12,9 @@ import { useWebSocket } from '../context/WebSocketProvider';
 
 interface SharedViewConfig {
     source: string;
+    source_name?: string;
     campaign_id?: string;
+    campaign_name?: string;
     form_title_id?: string;
 }
 
@@ -80,13 +82,18 @@ const SharedAnalyticsPage: React.FC = () => {
             .then(res => {
                 // Normalize config from backend format to frontend format
                 const rawConfig = res.data;
+
+                // Only filter by form_title if exactly ONE is specified
+                // If multiple form titles in array, it means "All Form Titles" was selected
+                const formTitles = Array.isArray(rawConfig.form_titles) ? rawConfig.form_titles : [];
+                const singleFormTitle = formTitles.length === 1 ? formTitles[0] : undefined;
+
                 const normalizedConfig: SharedViewConfig = {
                     source: rawConfig.source_id || rawConfig.source || '',
+                    source_name: rawConfig.source_name || rawConfig.source_id || '',
                     campaign_id: rawConfig.campaign_id,
-                    // form_titles is stored as array, take first one if available
-                    form_title_id: Array.isArray(rawConfig.form_titles) && rawConfig.form_titles.length > 0
-                        ? rawConfig.form_titles[0]
-                        : rawConfig.form_title_id,
+                    campaign_name: rawConfig.campaign_name || '',
+                    form_title_id: singleFormTitle,
                 };
                 setConfig(normalizedConfig);
             })
@@ -319,6 +326,7 @@ const SharedAnalyticsPage: React.FC = () => {
                             >
                                 CAMPAIGN IMPACT
                             </Typography>
+                            {/* Dynamic Header based on filter level */}
                             <Typography
                                 variant="h4"
                                 fontWeight="800"
@@ -329,21 +337,26 @@ const SharedAnalyticsPage: React.FC = () => {
                                     lineHeight: 1.2
                                 }}
                             >
-                                {config?.source || 'Analytics'}
+                                {/* Show campaign name if available, otherwise source name */}
+                                {config?.campaign_name || config?.source_name || config?.source || 'Analytics'}
                             </Typography>
-                            {/* Show Form Title name if filtered */}
-                            {stats && stats.breakdown.length === 1 && (
-                                <Typography
-                                    variant="h6"
-                                    sx={{
-                                        mt: 0.5,
-                                        color: theme.palette.text.secondary,
-                                        fontWeight: 500
-                                    }}
-                                >
-                                    {stats.breakdown[0].name}
-                                </Typography>
-                            )}
+                            {/* Subtitle showing context */}
+                            <Typography
+                                variant="h6"
+                                sx={{
+                                    mt: 0.5,
+                                    color: theme.palette.text.secondary,
+                                    fontWeight: 500
+                                }}
+                            >
+                                {/* Determine what to show based on filter level */}
+                                {config?.form_title_id && stats && stats.breakdown.length === 1
+                                    ? stats.breakdown[0].name  // Single form title: show its name
+                                    : config?.campaign_id
+                                        ? 'All Form Titles'  // Campaign selected but no form title filter
+                                        : 'All Campaigns'    // Source only, no campaign filter
+                                }
+                            </Typography>
                         </Box>
 
                         {stats && (
