@@ -22,6 +22,7 @@ interface DonationsTableProps {
     tableContainerRef: React.RefObject<HTMLDivElement | null>;
     loadMoreRef: React.RefObject<HTMLDivElement | null>;
     maxHeight?: string | number;
+    hideEmail?: boolean;
     sx?: any;
 }
 
@@ -45,6 +46,7 @@ export const DonationsTable: React.FC<DonationsTableProps> = ({
     tableContainerRef,
     loadMoreRef,
     maxHeight = 600,
+    hideEmail = false,
     sx = {}
 }) => {
     const theme = useTheme();
@@ -121,7 +123,7 @@ export const DonationsTable: React.FC<DonationsTableProps> = ({
                             <TableRow>
                                 <TableCell sx={{ background: theme.palette.background.paper, fontWeight: 700, color: theme.palette.text.secondary }}>Date</TableCell>
                                 <TableCell sx={{ background: theme.palette.background.paper, fontWeight: 700, color: theme.palette.text.secondary }}>Donor</TableCell>
-                                <TableCell sx={{ background: theme.palette.background.paper, fontWeight: 700, color: theme.palette.text.secondary }}>Email</TableCell>
+                                {!hideEmail && <TableCell sx={{ background: theme.palette.background.paper, fontWeight: 700, color: theme.palette.text.secondary }}>Email</TableCell>}
                                 <TableCell align="right" sx={{ background: theme.palette.background.paper, fontWeight: 700, color: theme.palette.text.secondary }}>Amount</TableCell>
                             </TableRow>
                         </TableHead>
@@ -140,17 +142,19 @@ export const DonationsTable: React.FC<DonationsTableProps> = ({
                                     <TableCell sx={{ fontWeight: 600, color: theme.palette.text.primary }}>
                                         {donation.donorName}
                                     </TableCell>
-                                    <TableCell sx={{ color: theme.palette.text.secondary }}>
-                                        {donation.donorEmail}
-                                    </TableCell>
+                                    {!hideEmail && (
+                                        <TableCell sx={{ color: theme.palette.text.secondary }}>
+                                            {donation.donorEmail}
+                                        </TableCell>
+                                    )}
                                     <TableCell align="right" sx={{ fontWeight: 700, color: theme.palette.success.main }}>
-                                        ${donation.amount.toFixed(2)}
+                                        ${(Number(donation.amount) || 0).toFixed(2)}
                                     </TableCell>
                                 </TableRow>
                             ))}
                             {hasMore && (
                                 <TableRow>
-                                    <TableCell colSpan={4} align="center" sx={{ py: 3 }}>
+                                    <TableCell colSpan={hideEmail ? 3 : 4} align="center" sx={{ py: 3 }}>
                                         <div ref={loadMoreRef} style={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
                                             {isLoadingMore ? (
                                                 <CircularProgress size={24} thickness={4} />

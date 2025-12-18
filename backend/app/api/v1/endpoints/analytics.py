@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, Body
-from typing import Dict, Any, Optional
+from fastapi import APIRouter, Depends, HTTPException, Body, Query
+from typing import Dict, Any, Optional, List
 from pydantic import BaseModel
 from backend.app.services.supabase_service import get_supabase_service, SupabaseService
+from backend.app.services.data_service import DataService, get_data_service
 from backend.app.core.security import get_current_user
 
 router = APIRouter()
@@ -61,3 +62,117 @@ async def get_shared_view(
         raise HTTPException(status_code=404, detail="Shared view not found or expired")
         
     return config
+
+
+# ============ PUBLIC ENDPOINTS FOR SHARED VIEW DATA ============
+
+@router.get("/share/{token}/stats", response_model=Dict[str, Any])
+async def get_shared_view_stats(
+    token: str,
+    service: SupabaseService = Depends(get_supabase_service),
+    data_service: DataService = Depends(get_data_service)
+):
+    """
+    Get stats for a shared view. Public endpoint (no auth required).
+    """
+    # First validate the token and get config
+    config = service.get_shared_view(token)
+    if not config:
+        raise HTTPException(status_code=404, detail="Shared view not found or expired")
+    
+    try:
+        # Extract filter params from config
+        source_id = config.get('source_id')
+        campaign_id = config.get('campaign_id')
+        start_date = config.get('start_date')
+        end_date = config.get('end_date')
+        form_titles = config.get('form_titles')  # This is an array
+        
+        # Only filter by form_title if exactly ONE is specified
+        form_title_ids = None
+        if isinstance(form_titles, list) and len(form_titles) == 1:
+            form_title_ids = form_titles
+        
+        # Call appropriate stats function based on config
+        if campaign_id:
+            return data_service.get_campaign_stats(
+                campaign_id=campaign_id,
+                start_date=start_date,
+                end_date=end_date,
+                form_title_ids=form_title_ids
+            )
+        else:
+            return data_service.get_source_stats(
+                source=source_id,
+                start_date=start_date,
+                end_date=end_date
+            )
+    except Exception as e:
+        print(f"Error fetching shared view stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/share/{token}/donations", response_model=Dict[str, Any])
+async def get_shared_view_donations(
+    token: str,
+    page_size: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    service: SupabaseService = Depends(get_supabase_service),
+    data_service: DataService = Depends(get_data_service)
+):
+    """
+    Get donations for a shared view. Public endpoint (no auth required).
+    Email addresses are redacted for privacy.
+    """
+    # First validate the token and get config
+    config = service.get_shared_view(token)
+    if not config:
+        raise HTTPException(status_code=404, detail="Shared view not found or expired")
+    
+    try:
+        # Extract filter params from config
+        source_id = config.get('source_id')
+        campaign_id = config.get('campaign_id')
+        start_date = config.get('start_date')
+        end_date = config.get('end_date')
+        form_titles = config.get('form_titles')  # This is an array
+        
+        # For single form title, use form title donations endpoint
+        if isinstance(form_titles, list) and len(form_titles) == 1:
+            result = data_service.get_donations_for_form_title(
+                form_title_ids=form_titles,
+                start_date=start_date,
+                end_date=end_date,
+                page_size=page_size,
+                offset=offset
+            )
+        elif campaign_id:
+            result = data_service.get_campaign_donations(
+                campaign_id=campaign_id,
+                start_date=start_date,
+                end_date=end_date,
+                page_size=page_size,
+                offset=offset
+            )
+        else:
+            result = data_service.get_source_donations(
+                source=source_id,
+                start_date=start_date,
+                end_date=end_date,
+                page_size=page_size,
+                offset=offset
+            )
+        
+        # Redact email addresses for privacy in shared views
+        if 'donations' in result:
+            for donation in result['donations']:
+                if 'donorEmail' in donation:
+                    donation['donorEmail'] = '***@***.***'
+                if 'email' in donation:
+                    donation['email'] = '***@***.***'
+        
+        return result
+        
+    except Exception as e:
+        print(f"Error fetching shared view donations: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

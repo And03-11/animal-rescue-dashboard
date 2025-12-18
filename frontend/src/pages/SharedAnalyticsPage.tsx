@@ -104,9 +104,9 @@ const SharedAnalyticsPage: React.FC = () => {
             .finally(() => setLoading(false));
     }, [token]);
 
-    // 2. Fetch Data based on Config
+    // 2. Fetch Data based on Config - Using PUBLIC endpoints
     const fetchData = useCallback(async (isSilent = false) => {
-        if (!config) return;
+        if (!config || !token) return;
 
         if (inFlightStats.current) inFlightStats.current.abort();
         if (inFlightDonations.current) inFlightDonations.current.abort();
@@ -122,15 +122,10 @@ const SharedAnalyticsPage: React.FC = () => {
         }
 
         try {
-            // --- Fetch Stats ---
-            const statsParams = new URLSearchParams();
-            if (config.form_title_id) statsParams.append('form_title_id', config.form_title_id);
-
-            const statsUrl = config.campaign_id
-                ? `/campaigns/${config.campaign_id}/stats?${statsParams.toString()}`
-                : `/campaigns/source/${config.source}/stats?${statsParams.toString()}`;
-
-            const statsRes = await apiClient.get(statsUrl, { signal: statsController.signal });
+            // --- Fetch Stats using PUBLIC endpoint ---
+            const statsRes = await apiClient.get(`/analytics/share/${token}/stats`, {
+                signal: statsController.signal
+            });
 
             // Normalize stats data
             const rawBreakdown = statsRes.data?.stats_by_campaign ?? statsRes.data?.stats_by_form_title ?? [];
@@ -150,36 +145,17 @@ const SharedAnalyticsPage: React.FC = () => {
                 breakdown: breakdown
             });
 
-            // --- Fetch Donations (First Page) ---
-            let donationsRes;
-            const commonParams = { page_size: DONATIONS_PAGE_SIZE, offset: 0 };
+            // --- Fetch Donations using PUBLIC endpoint ---
+            const donationsRes = await apiClient.get<PaginatedDonationsResponse>(
+                `/analytics/share/${token}/donations`,
+                {
+                    params: { page_size: DONATIONS_PAGE_SIZE, offset: 0 },
+                    signal: donationsController.signal
+                }
+            );
 
-            if (config.campaign_id && config.form_title_id) {
-                const payload = {
-                    form_title_ids: [config.form_title_id],
-                    ...commonParams
-                };
-                donationsRes = await apiClient.post<PaginatedDonationsResponse>(
-                    '/form-titles/donations',
-                    JSON.stringify(payload),
-                    {
-                        signal: donationsController.signal,
-                        headers: { 'Content-Type': 'application/json' }
-                    }
-                );
-            } else if (config.campaign_id) {
-                donationsRes = await apiClient.get<PaginatedDonationsResponse>(
-                    `/campaigns/${config.campaign_id}/donations`,
-                    { params: commonParams, signal: donationsController.signal }
-                );
-            } else {
-                donationsRes = await apiClient.get<PaginatedDonationsResponse>(
-                    `/campaigns/source/${config.source}/donations`,
-                    { params: commonParams, signal: donationsController.signal }
-                );
-            }
-
-            const { donations: newDonations, total_count } = donationsRes.data;
+            const newDonations = donationsRes.data?.donations ?? [];
+            const total_count = donationsRes.data?.total_count ?? 0;
             setDonations(newDonations);
             setTotalDonationsCount(total_count);
             setCurrentOffset(newDonations.length);
@@ -189,7 +165,7 @@ const SharedAnalyticsPage: React.FC = () => {
             if (err?.name === 'CanceledError') return;
             console.error(err);
         }
-    }, [config]);
+    }, [config, token]);
 
     // Initial Fetch
     useEffect(() => {
@@ -206,36 +182,16 @@ const SharedAnalyticsPage: React.FC = () => {
         return () => unsubscribe();
     }, [subscribe, fetchData]);
 
-    // Infinite Scroll
+    // Infinite Scroll - Using PUBLIC endpoint
     const fetchMoreDonations = useCallback(async () => {
-        if (isLoadingMore || !hasMoreDonations || !config) return;
+        if (isLoadingMore || !hasMoreDonations || !config || !token) return;
         setIsLoadingMore(true);
 
         try {
-            const commonParams = { page_size: DONATIONS_PAGE_SIZE, offset: currentOffset };
-            let donationsRes;
-
-            if (config.campaign_id && config.form_title_id) {
-                const payload = {
-                    form_title_ids: [config.form_title_id],
-                    ...commonParams
-                };
-                donationsRes = await apiClient.post<PaginatedDonationsResponse>(
-                    '/form-titles/donations',
-                    JSON.stringify(payload),
-                    { headers: { 'Content-Type': 'application/json' } }
-                );
-            } else if (config.campaign_id) {
-                donationsRes = await apiClient.get<PaginatedDonationsResponse>(
-                    `/campaigns/${config.campaign_id}/donations`,
-                    { params: commonParams }
-                );
-            } else {
-                donationsRes = await apiClient.get<PaginatedDonationsResponse>(
-                    `/campaigns/source/${config.source}/donations`,
-                    { params: commonParams }
-                );
-            }
+            const donationsRes = await apiClient.get<PaginatedDonationsResponse>(
+                `/analytics/share/${token}/donations`,
+                { params: { page_size: DONATIONS_PAGE_SIZE, offset: currentOffset } }
+            );
 
             const { donations: newDonations, total_count } = donationsRes.data;
             setDonations(prev => [...prev, ...newDonations]);
@@ -248,7 +204,7 @@ const SharedAnalyticsPage: React.FC = () => {
         } finally {
             setIsLoadingMore(false);
         }
-    }, [isLoadingMore, hasMoreDonations, config, currentOffset]);
+    }, [isLoadingMore, hasMoreDonations, config, currentOffset, token]);
 
     useEffect(() => {
         const currentTableContainer = tableContainerRef.current;
@@ -350,8 +306,8 @@ const SharedAnalyticsPage: React.FC = () => {
                                 }}
                             >
                                 {/* Determine what to show based on filter level */}
-                                {config?.form_title_id && stats && stats.breakdown.length === 1
-                                    ? stats.breakdown[0].name  // Single form title: show its name
+                                {config?.form_title_id && stats?.breakdown?.length === 1
+                                    ? stats.breakdown[0]?.name ?? 'Unknown'  // Single form title: show its name
                                     : config?.campaign_id
                                         ? 'All Form Titles'  // Campaign selected but no form title filter
                                         : 'All Campaigns'    // Source only, no campaign filter
@@ -450,6 +406,7 @@ const SharedAnalyticsPage: React.FC = () => {
                         tableContainerRef={tableContainerRef}
                         loadMoreRef={loadMoreRef}
                         maxHeight="100%"
+                        hideEmail={true}
                         sx={{
                             height: '100%',
                             borderRadius: 0,
