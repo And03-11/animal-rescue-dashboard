@@ -83,3 +83,9 @@ app.include_router(users.router, prefix="/api/v1", tags=["users"])
 app.include_router(websockets.router, prefix="/api/v1")
 app.include_router(scheduler.router, prefix="/api/v1")
 app.include_router(analytics_router, prefix="/api/v1/analytics", tags=["analytics"])
+
+# --- Health Check Endpoint (for Docker) ---
+@app.get("/health", tags=["health"])
+async def health_check():
+    """Health check endpoint for Docker container monitoring."""
+    return {"status": "healthy", "version": "1.0.0"}

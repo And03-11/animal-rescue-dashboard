@@ -34,7 +34,7 @@ export const SendWizardModal: React.FC<SendWizardModalProps> = ({
     open,
     onClose,
     onSave,
-    campaignCategory,
+    campaignCategory: _campaignCategory,
     segmentationMode
 }) => {
     const theme = useTheme();

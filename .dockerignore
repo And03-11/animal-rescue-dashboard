@@ -1,0 +1,49 @@
+# Dependencies
+node_modules
+.venv
+venv
+__pycache__
+
+# Build outputs
+dist
+build
+*.egg-info
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Environment files (copy manually)
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test files
+tests
+*.test.js
+*.spec.js
+coverage
+
+# Documentation
+*.md
+!README.md
+
+# Token files
+token_credentials*.json
+gmail_credentials
+
+# Misc
+.DS_Store
+Thumbs.db
+*.sqlite3
+*.db

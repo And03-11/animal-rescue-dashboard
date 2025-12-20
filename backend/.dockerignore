@@ -1,0 +1,44 @@
+# Virtual environments
+.venv
+venv
+env
+
+# Python cache
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info
+
+# Test files
+tests
+.pytest_cache
+.coverage
+htmlcov
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+
+# Logs
+*.log
+
+# Local data
+*.sqlite3
+*.db
+db.sqlite3
+
+# Credentials (should be passed via env vars)
+token_credentials*.json
+gmail_credentials
+*.json.json
+
+# Misc
+.DS_Store
+Thumbs.db
+*.md
