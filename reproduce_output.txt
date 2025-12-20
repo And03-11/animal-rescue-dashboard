@@ -1,0 +1,9 @@
+Querying daily summaries for 2025-12-19 to 2025-12-19...
+Found 1 records:
+{'date': '2025-12-19', 'total': 2957.04, 'count': 55}
+
+--- Inspecting daily_metrics schema (first row) ---
+RealDictRow({'date': datetime.date(2025, 12, 20), 'type': 'date', 'total_amount': Decimal('1302.88'), 'donation_count': 23})
+
+--- Checking Dec 20 data ---
+RealDictRow({'date': datetime.date(2025, 12, 20), 'donation_count': 23, 'total_amount': Decimal('1302.88')})

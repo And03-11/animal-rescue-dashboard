@@ -420,6 +420,46 @@ class SupabaseService:
             for row in results
         ]
 
+    def get_hourly_trend(self, target_date: date) -> List[Dict[str, Any]]:
+        """
+        Get hourly trend for a specific date.
+        Aggregates donations by hour in Costa Rica timezone.
+        """
+        query = """
+            SELECT 
+                to_char(d.donation_date AT TIME ZONE 'America/Costa_Rica', 'HH24:00') as hour,
+                COALESCE(SUM(d.amount), 0) as total,
+                COUNT(d.id) as count
+            FROM donations d
+            WHERE (d.donation_date AT TIME ZONE 'America/Costa_Rica')::date = %s
+            GROUP BY hour
+            ORDER BY hour ASC
+        """
+        
+        results = self._execute_query(query, (target_date,))
+        
+        # Fill in missing hours for a complete 00-23 timeline
+        hourly_map = {row['hour']: row for row in results}
+        final_results = []
+        
+        for h in range(24):
+            hour_str = f"{h:02d}:00"
+            if hour_str in hourly_map:
+                row = hourly_map[hour_str]
+                final_results.append({
+                    "date": hour_str, # Using 'date' key to match frontend expectation
+                    "total": float(row['total']),
+                    "count": int(row['count'])
+                })
+            else:
+                final_results.append({
+                    "date": hour_str,
+                    "total": 0.0,
+                    "count": 0
+                })
+                
+        return final_results
+
     # ==========================================
     # TOP DONORS (Optimized)
     # ==========================================

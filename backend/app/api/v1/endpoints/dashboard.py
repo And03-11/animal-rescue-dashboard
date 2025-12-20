@@ -126,7 +126,13 @@ def get_dashboard_metrics(
 
                 amount_in_range = sum(s.get("total", 0) for s in summaries_in_range)
                 count_in_range = sum(s.get("count", 0) for s in summaries_in_range)
-                filtered_trend = summaries_in_range
+                
+                # If start_date == end_date, fetch hourly trend for that day
+                filtered_trend = []
+                if s_date_obj == e_date_obj:
+                    filtered_trend = data_service.get_hourly_trend(s_date_obj)
+                else:
+                    filtered_trend = summaries_in_range
 
                 filtered_metrics = {
                     "amountInRange": round(amount_in_range, 2),

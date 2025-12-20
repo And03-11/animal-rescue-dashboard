@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Typography, Box, CircularProgress, Alert, Paper, Button, useTheme, alpha, Card } from '@mui/material';
+import { Typography, Box, CircularProgress, Alert, Paper, Button, useTheme, alpha, Card, Chip } from '@mui/material';
 import Grid from '@mui/material/Grid';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
@@ -136,7 +136,7 @@ export const DashboardHomePage = () => {
     try {
       const params = {
         start_date: startDate.format('YYYY-MM-DD'),
-        end_date: endDate.add(1, 'day').format('YYYY-MM-DD'),
+        end_date: endDate.format('YYYY-MM-DD'),
       };
       const response = await apiClient.get<{ filtered: FilteredData }>('/dashboard/metrics', { params });
       setFilteredData(response.data.filtered);
@@ -165,7 +165,10 @@ export const DashboardHomePage = () => {
     };
   }, [subscribe, fetchGlanceMetrics, fetchSources, handleSearchByRange, startDate, endDate]);
 
-  const formatXAxis = (tickItem: string) => dayjs(tickItem).format('D/M');
+  const formatXAxis = (tickItem: string) => {
+    if (tickItem.includes(':')) return tickItem;
+    return dayjs(tickItem).format('D/M');
+  };
 
   return (
     <Box
@@ -381,6 +384,48 @@ export const DashboardHomePage = () => {
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
             <FilterAltIcon color="primary" />
             <Typography variant="h6" fontWeight="700">Custom Analysis</Typography>
+          </Box>
+
+          <Box sx={{ mb: 3 }}>
+            <Typography variant="subtitle2" color="text.secondary" gutterBottom>Quick Select</Typography>
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+              <Chip
+                label="Last 7 Days"
+                onClick={() => {
+                  setStartDate(dayjs().subtract(6, 'day'));
+                  setEndDate(dayjs());
+                }}
+                variant="outlined"
+                clickable
+              />
+              <Chip
+                label="Last 30 Days"
+                onClick={() => {
+                  setStartDate(dayjs().subtract(29, 'day'));
+                  setEndDate(dayjs());
+                }}
+                variant="outlined"
+                clickable
+              />
+              <Chip
+                label="This Month"
+                onClick={() => {
+                  setStartDate(dayjs().startOf('month'));
+                  setEndDate(dayjs());
+                }}
+                variant="outlined"
+                clickable
+              />
+              <Chip
+                label="Last Month"
+                onClick={() => {
+                  setStartDate(dayjs().subtract(1, 'month').startOf('month'));
+                  setEndDate(dayjs().subtract(1, 'month').endOf('month'));
+                }}
+                variant="outlined"
+                clickable
+              />
+            </Box>
           </Box>
 
           <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap', mb: 4 }}>

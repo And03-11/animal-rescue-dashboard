@@ -147,7 +147,18 @@ class DataService:
         except Exception as e:
             print(f"⚠️ Supabase Error (get_campaigns): {e}")
             print("Falling back to Airtable...")
+            print("Falling back to Airtable...")
             return self.airtable.get_campaigns(source)
+
+    def get_hourly_trend(self, target_date: date) -> List[Dict[str, Any]]:
+        """
+        Get hourly trend for a specific date from Supabase.
+        """
+        try:
+            return self.supabase.get_hourly_trend(target_date)
+        except Exception as e:
+            print(f"Supabase get_hourly_trend failed: {e}")
+            return []
 
     def get_unique_campaign_sources(self) -> List[str]:
         """
