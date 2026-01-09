@@ -468,15 +468,9 @@ def run_campaign_task(campaign_id: str):
 
     # El comentario '# --- Fin función ---' sigue siendo válido después de este bloque.
     # --- 5. Finalizar y Actualizar Estado ---
-    print(f"[{campaign_id}] Campaign finished. Sent {sent_count_this_run} emails in this run. Total sent: {len(sent_emails)}/{len(contact_data)}")
-    config['status'] = 'Completed'
-    # Opcional: Guardar fecha de finalización
-    config['completedAt'] = datetime.now().isoformat()
-    try:
-        with open(campaign_file_path, 'w') as f:
-            json.dump(config, f, indent=4)
-    except Exception as e:
-        print(f"[{campaign_id}] WARNING: Could not update status to 'Completed': {e}")
+    # (El estado ya se actualizó correctamente en el bloque anterior)
+    print(f"[{campaign_id}] Campaign finished. Sent {sent_count_this_run} emails in this run. Total sent (cumulative): {final_sent_count}/{len(contact_data)}")
+
 
 # --- Fin función ---
 
