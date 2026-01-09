@@ -59,6 +59,7 @@ import { EmailPreview } from '../components/EmailPreview'; // Componente de vist
 import DeleteIcon from '@mui/icons-material/Delete';
 import PauseCircleOutlineIcon from '@mui/icons-material/PauseCircleOutline'; // Para Pausar
 import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
+import SendIcon from '@mui/icons-material/Send';
 
 // --- Interfaces ---
 interface CampaignFormProps {
@@ -111,6 +112,12 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
   const [loadingSenders, setLoadingSenders] = useState<boolean>(true);
   const [campaignName, setCampaignName] = useState<string>('');
   const [scheduledAt, setScheduledAt] = useState<Dayjs | null>(null);
+
+  // --- Estados para Test Email ---
+  const [testEmailDialogOpen, setTestEmailDialogOpen] = useState(false);
+  const [testEmails, setTestEmails] = useState('');
+  const [sendingTest, setSendingTest] = useState(false);
+  const [testSuccessMessage, setTestSuccessMessage] = useState<string | null>(null);
   // --- FIN: NUEVOS ESTADOS ---
 
 
@@ -165,33 +172,33 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
 
   // useEffect para manejar la lógica de preview/mapeo CSV (sin cambios respecto a lo anterior)
   useEffect(() => {
-  console.log("--- useEffect CAMPAIGNFORM ---");
-  console.log(`ID State: ${campaignId}, ID Prop: ${initialCampaignId}, Source: ${sourceType}, File: ${!!csvFile}, Preview: ${!!csvPreview}, Loading: ${isPreviewLoading}, ShowingMap: ${showMapping}`);
-  if (initialCampaignId && initialCampaignId !== campaignId) {
+    console.log("--- useEffect CAMPAIGNFORM ---");
+    console.log(`ID State: ${campaignId}, ID Prop: ${initialCampaignId}, Source: ${sourceType}, File: ${!!csvFile}, Preview: ${!!csvPreview}, Loading: ${isPreviewLoading}, ShowingMap: ${showMapping}`);
+    if (initialCampaignId && initialCampaignId !== campaignId) {
       console.log("   useEffect: Prop initialCampaignId recibida/actualizada:", initialCampaignId);
       setCampaignId(initialCampaignId);
       setCsvPreview(null);
       setShowMapping(false);
       setColumnMapping({ email: '', name: '' });
       if (sourceType === 'csv' && !isPreviewLoading) {
-          console.log("   useEffect: DISPARANDO fetchCsvPreview por nuevo ID Prop.");
-          fetchCsvPreview(initialCampaignId);
+        console.log("   useEffect: DISPARANDO fetchCsvPreview por nuevo ID Prop.");
+        fetchCsvPreview(initialCampaignId);
       }
-  }
-  if (csvPreview && !showMapping) {
+    }
+    if (csvPreview && !showMapping) {
       console.log("   useEffect: DISPARANDO setShowMapping(true)");
       setShowMapping(true);
-  }
-   if (sourceType === 'airtable' || (sourceType ==='csv' && !csvFile && !campaignId)) {
-       if (showMapping || csvPreview) {
-          console.log("   useEffect: Limpiando/ocultando mapeo por cambio de fuente/archivo.");
-          setShowMapping(false);
-          setCsvPreview(null);
-          setColumnMapping({ email: '', name: '' });
-       }
-   }
-   console.log("--- Fin useEffect ---");
-}, [initialCampaignId, campaignId, sourceType, csvFile, csvPreview, isPreviewLoading, showMapping, fetchCsvPreview]);
+    }
+    if (sourceType === 'airtable' || (sourceType === 'csv' && !csvFile && !campaignId)) {
+      if (showMapping || csvPreview) {
+        console.log("   useEffect: Limpiando/ocultando mapeo por cambio de fuente/archivo.");
+        setShowMapping(false);
+        setCsvPreview(null);
+        setColumnMapping({ email: '', name: '' });
+      }
+    }
+    console.log("--- Fin useEffect ---");
+  }, [initialCampaignId, campaignId, sourceType, csvFile, csvPreview, isPreviewLoading, showMapping, fetchCsvPreview]);
 
 
   // --- Manejadores ---
@@ -201,20 +208,20 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
     reader.onload = (e) => {
       const text = e.target?.result as string;
       if (!text) return;
-      
+
       // Detectar delimitador
       const firstLine = text.split('\n')[0];
       let delimiter = ',';
       if (firstLine.includes(';')) delimiter = ';';
       else if (firstLine.includes('\t')) delimiter = '\t';
-      
+
       // Parsear filas
       const lines = text.split('\n').filter(line => line.trim());
       if (lines.length === 0) {
         setFormError('CSV file is empty.');
         return;
       }
-      
+
       const splitLine = (line: string) => {
         const result: string[] = [];
         let current = '';
@@ -227,27 +234,27 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
         result.push(current.trim());
         return result;
       };
-      
+
       const firstRow = splitLine(lines[0]);
       const secondRow = lines.length > 1 ? splitLine(lines[1]) : [];
-      
+
       // Detectar si tiene header (si todas las celdas de la primera fila son texto)
       const hasHeader = firstRow.every(cell => {
         const cleaned = cell.replace(/[.,]/g, '');
         return isNaN(Number(cleaned)) || cleaned === '';
       });
-      
+
       // Construir preview
       const columns = hasHeader ? firstRow : firstRow.map((_, i) => `Columna ${i + 1}`);
       const previewData = hasHeader ? secondRow : firstRow;
-      
+
       console.log("Local CSV parse:", { columns, hasHeader, previewData, delimiter });
-      
+
       // Auto-detectar columnas de email y nombre
       const columnsLower = columns.map(c => c.toLowerCase());
       const emailIdx = columnsLower.findIndex(c => c === 'email' || c === 'correo' || c.includes('mail'));
       const nameIdx = columnsLower.findIndex(c => c === 'name' || c === 'nombre' || c.includes('first'));
-      
+
       setCsvPreview({
         columns,
         has_header: hasHeader,
@@ -278,7 +285,7 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
       setCsvFileName(file.name);
       setFormError('');
       console.log("Archivo CSV seleccionado:", file.name, file.type, file.size);
-      
+
       // ✅ Parsear CSV localmente para mostrar mapeo inmediatamente
       parseCSVLocally(file);
     } else {
@@ -291,7 +298,7 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
 
   const handleViewChange = (_event: React.MouseEvent<HTMLElement>, newViewMode: 'code' | 'preview' | null) => {
     // ... (sin cambios respecto a lo anterior) ...
-     if (newViewMode !== null) {
+    if (newViewMode !== null) {
       setViewMode(newViewMode);
     }
   };
@@ -325,11 +332,11 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
 
     // Validación específica para selección manual de remitentes
     if (senderSelectionMode === 'manual' && selectedAccounts.length === 0) {
-        setFormError('Please select at least one account for manual sender selection.'); return;
+      setFormError('Please select at least one account for manual sender selection.'); return;
     }
     // Validación específica para selección por grupo
     if (senderSelectionMode === 'group' && !selectedGroup) {
-         setFormError('Please select a sender group.'); return;
+      setFormError('Please select a sender group.'); return;
     }
 
     // --- Obtener sender_config ---
@@ -356,13 +363,13 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
       if (!csvFile && !campaignId) {
         setFormError('Please select a CSV file.'); return;
       }
-      
+
       // Validar mapeo si tenemos preview local
       if (showMapping && csvPreview) {
         if (!columnMapping.email) { setFormError('Please select the column containing Email addresses.'); return; }
         if (!columnMapping.name) { setFormError('Please select the column containing the recipient Name.'); return; }
         if (columnMapping.email === columnMapping.name) { setFormError('Email and Name must be mapped to different columns.'); return; }
-        
+
         // ✅ Enviar todo junto: campaña + archivo + mapeo
         console.log('CSV con mapeo local - enviando todo junto:', { ...columnMapping, has_header: csvPreview?.has_header ?? false });
         onSave(payload, {
@@ -379,6 +386,57 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
       // --- Airtable - enviar directamente ---
       console.log('Airtable: Llamando a onSave con payload');
       onSave(payload);
+    }
+  };
+
+  const handleSendTest = async () => {
+    // Ya no requerimos campaignId para enviar test
+    setSendingTest(true);
+    setTestSuccessMessage(null);
+    setFormError('');
+
+    try {
+      const emailList = testEmails.split(',').map(e => e.trim()).filter(e => e);
+      if (emailList.length === 0) {
+        alert("Please enter at least one email address.");
+        setSendingTest(false);
+        return;
+      }
+
+      const senderConfig = getSenderConfigValue();
+
+      if (campaignId) {
+        // Usar endpoint de campaña existente
+        const payload = {
+          emails: emailList,
+          subject: subject,
+          html_body: htmlBody,
+          sender_config: senderConfig
+        };
+        await apiClient.post(`/sender/campaigns/${campaignId}/send-test`, payload);
+      } else {
+        // Usar endpoint ad-hoc (sin guardar)
+        const payload = {
+          emails: emailList,
+          subject: subject,
+          html_body: htmlBody,
+          sender_config: senderConfig
+        };
+        await apiClient.post(`/sender/send-test-adhoc`, payload);
+      }
+
+      setTestEmailDialogOpen(false);
+      setTestEmails('');
+      setTestSuccessMessage(`Test email sent to ${emailList.length} recipient(s)!`);
+
+      setTimeout(() => setTestSuccessMessage(null), 5000);
+
+    } catch (err: any) {
+      console.error("Error sending test:", err);
+      setFormError(err.response?.data?.detail || "Failed to send test emails.");
+      setTestEmailDialogOpen(false);
+    } finally {
+      setSendingTest(false);
     }
   };
 
@@ -405,9 +463,9 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
             <FormControl component="fieldset" margin="dense" fullWidth>
               <FormLabel component="legend">Target Region</FormLabel>
               <RadioGroup row value={region} onChange={(e) => setRegion(e.target.value)}>
-                <FormControlLabel value="USA" control={<Radio size="small"/>} label="USA" />
-                <FormControlLabel value="EUR" control={<Radio size="small"/>} label="EUR" />
-                <FormControlLabel value="TEST" control={<Radio size="small"/>} label="TEST" />
+                <FormControlLabel value="USA" control={<Radio size="small" />} label="USA" />
+                <FormControlLabel value="EUR" control={<Radio size="small" />} label="EUR" />
+                <FormControlLabel value="TEST" control={<Radio size="small" />} label="TEST" />
               </RadioGroup>
             </FormControl>
             <FormControlLabel
@@ -421,80 +479,80 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
         {/* Subida y Mapeo CSV */}
         {sourceType === 'csv' && (
           <Paper variant="outlined" sx={{ p: 2, mt: 1, mb: 2, borderColor: 'secondary.main' }}>
-             <Typography variant="subtitle2" sx={{ mb: 2, color: 'secondary.main' }}>CSV Upload & Mapping</Typography>
-             {/* ... (Botón de subida y lógica de Mapeo sin cambios respecto a lo anterior) ... */}
-             {(!campaignId || !showMapping) && (
-                <Button
-                  variant="outlined" component="label" startIcon={<CloudUploadIcon />} fullWidth
-                  color={formError.includes('CSV file') ? "error" : "primary"} sx={{ mb: 2 }}
-                >
-                  {csvFileName ? `Archivo: ${csvFileName}` : 'Select CSV File'}
-                  <Input type="file" sx={{ display: 'none' }} onChange={handleFileChange} inputProps={{ accept: ".csv, text/csv" }} />
-                </Button>
-              )}
-              {(campaignId && showMapping && csvFileName) && (
-                  <Typography variant="body2" sx={{mb: 2}}>Archivo subido: <strong>{csvFileName}</strong></Typography>
-              )}
-              <Collapse in={showMapping} timeout="auto" sx={{ width: '100%' }}>
-                {isPreviewLoading ? (
-                  <Box sx={{ display: 'flex', justifyContent: 'center', my: 2 }}><CircularProgress size={30} /></Box>
-                ) : csvPreview ? (
-                  <>
-                    <Typography variant="body2" sx={{ mb: 1 }}>
-                      Map CSV columns to required fields: <Chip label={csvPreview.has_header ? "Header Detected" : "No Header Detected"} size="small" variant="outlined" sx={{ml: 0.5}}/>
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" display="block">Data Preview (First Row):</Typography>
-                    <Box sx={{ display: 'flex', overflowX: 'auto', gap: 1, p: 1, mb: 2, bgcolor: 'action.hover', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
-                      {csvPreview.columns.map((colName, index) => (
-                        <Tooltip key={index} title={colName} placement="top">
-                          <Chip label={`"${csvPreview.preview_row[index] || ''}"`} variant="outlined" size="small" sx={{ flexShrink: 0 }} />
-                        </Tooltip>
-                      ))}
-                    </Box>
-                    {/* --- Usa Grid para los Selects de mapeo --- */}
-                    <Grid container spacing={2}>
-                      <Grid size={{ xs: 12, sm: 6 }}> {/* Mantenemos tu estilo de Grid item */}
-                        <FormControl fullWidth required error={formError.includes('Email column') && !columnMapping.email}>
-                          <InputLabel id="email-column-label">Email Column *</InputLabel>
-                          <Select
-                            labelId="email-column-label" label="Email Column *" value={columnMapping.email}
-                            onChange={(e) => { setColumnMapping(prev => ({ ...prev, email: e.target.value })); setFormError(''); }}
-                          >
-                            <MenuItem value=""><em>-- Select Column --</em></MenuItem>
-                            {csvPreview.columns.map((colName, index) => (
-                              <MenuItem key={`${index}-${colName}`} value={colName}>{colName}</MenuItem>
-                            ))}
-                          </Select>
-                        </FormControl>
-                      </Grid>
-                      <Grid size={{ xs: 12, sm: 6 }}> {/* Mantenemos tu estilo de Grid item */}
-                        <FormControl fullWidth required error={formError.includes('Name column') && !columnMapping.name}>
-                          <InputLabel id="name-column-label">Name Column *</InputLabel>
-                          <Select
-                            labelId="name-column-label" label="Name Column *" value={columnMapping.name}
-                            onChange={(e) => { setColumnMapping(prev => ({ ...prev, name: e.target.value })); setFormError(''); }}
-                          >
-                            <MenuItem value=""><em>-- Select Column --</em></MenuItem>
-                            {csvPreview.columns.map((colName, index) => (
-                              <MenuItem key={`${index}-${colName}`} value={colName}>{colName}</MenuItem>
-                            ))}
-                          </Select>
-                        </FormControl>
-                      </Grid>
+            <Typography variant="subtitle2" sx={{ mb: 2, color: 'secondary.main' }}>CSV Upload & Mapping</Typography>
+            {/* ... (Botón de subida y lógica de Mapeo sin cambios respecto a lo anterior) ... */}
+            {(!campaignId || !showMapping) && (
+              <Button
+                variant="outlined" component="label" startIcon={<CloudUploadIcon />} fullWidth
+                color={formError.includes('CSV file') ? "error" : "primary"} sx={{ mb: 2 }}
+              >
+                {csvFileName ? `Archivo: ${csvFileName}` : 'Select CSV File'}
+                <Input type="file" sx={{ display: 'none' }} onChange={handleFileChange} inputProps={{ accept: ".csv, text/csv" }} />
+              </Button>
+            )}
+            {(campaignId && showMapping && csvFileName) && (
+              <Typography variant="body2" sx={{ mb: 2 }}>Archivo subido: <strong>{csvFileName}</strong></Typography>
+            )}
+            <Collapse in={showMapping} timeout="auto" sx={{ width: '100%' }}>
+              {isPreviewLoading ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', my: 2 }}><CircularProgress size={30} /></Box>
+              ) : csvPreview ? (
+                <>
+                  <Typography variant="body2" sx={{ mb: 1 }}>
+                    Map CSV columns to required fields: <Chip label={csvPreview.has_header ? "Header Detected" : "No Header Detected"} size="small" variant="outlined" sx={{ ml: 0.5 }} />
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" display="block">Data Preview (First Row):</Typography>
+                  <Box sx={{ display: 'flex', overflowX: 'auto', gap: 1, p: 1, mb: 2, bgcolor: 'action.hover', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+                    {csvPreview.columns.map((colName, index) => (
+                      <Tooltip key={index} title={colName} placement="top">
+                        <Chip label={`"${csvPreview.preview_row[index] || ''}"`} variant="outlined" size="small" sx={{ flexShrink: 0 }} />
+                      </Tooltip>
+                    ))}
+                  </Box>
+                  {/* --- Usa Grid para los Selects de mapeo --- */}
+                  <Grid container spacing={2}>
+                    <Grid size={{ xs: 12, sm: 6 }}> {/* Mantenemos tu estilo de Grid item */}
+                      <FormControl fullWidth required error={formError.includes('Email column') && !columnMapping.email}>
+                        <InputLabel id="email-column-label">Email Column *</InputLabel>
+                        <Select
+                          labelId="email-column-label" label="Email Column *" value={columnMapping.email}
+                          onChange={(e) => { setColumnMapping(prev => ({ ...prev, email: e.target.value })); setFormError(''); }}
+                        >
+                          <MenuItem value=""><em>-- Select Column --</em></MenuItem>
+                          {csvPreview.columns.map((colName, index) => (
+                            <MenuItem key={`${index}-${colName}`} value={colName}>{colName}</MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
                     </Grid>
-                  </>
-                ) : !isPreviewLoading && campaignId ? (
-                    <Alert severity="warning" sx={{mt: 2}}>Could not load CSV preview. Please check the file format or try uploading again.</Alert>
-                ) : null }
-              </Collapse>
+                    <Grid size={{ xs: 12, sm: 6 }}> {/* Mantenemos tu estilo de Grid item */}
+                      <FormControl fullWidth required error={formError.includes('Name column') && !columnMapping.name}>
+                        <InputLabel id="name-column-label">Name Column *</InputLabel>
+                        <Select
+                          labelId="name-column-label" label="Name Column *" value={columnMapping.name}
+                          onChange={(e) => { setColumnMapping(prev => ({ ...prev, name: e.target.value })); setFormError(''); }}
+                        >
+                          <MenuItem value=""><em>-- Select Column --</em></MenuItem>
+                          {csvPreview.columns.map((colName, index) => (
+                            <MenuItem key={`${index}-${colName}`} value={colName}>{colName}</MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    </Grid>
+                  </Grid>
+                </>
+              ) : !isPreviewLoading && campaignId ? (
+                <Alert severity="warning" sx={{ mt: 2 }}>Could not load CSV preview. Please check the file format or try uploading again.</Alert>
+              ) : null}
+            </Collapse>
           </Paper>
         )}
 
         {/* --- INICIO: NUEVA SECCIÓN JSX - Selección de Remitente --- */}
-        <Divider sx={{ my: 2 }}><Chip label="Sender Options" size="small"/></Divider>
+        <Divider sx={{ my: 2 }}><Chip label="Sender Options" size="small" /></Divider>
         <FormControl component="fieldset" margin="normal" fullWidth required disabled={loadingSenders}>
           <FormLabel component="legend">Select Sender Accounts</FormLabel>
-          {loadingSenders ? <CircularProgress size={24} sx={{mt: 1, mb: 1}}/> : (
+          {loadingSenders ? <CircularProgress size={24} sx={{ mt: 1, mb: 1 }} /> : (
             <RadioGroup
               row aria-label="sender selection mode" name="senderSelectionMode"
               value={senderSelectionMode}
@@ -509,7 +567,7 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
             >
               <FormControlLabel value="all" control={<Radio />} label="All Available" />
               <FormControlLabel value="group" control={<Radio />} label="Specific Group" disabled={senderOptions.groups.length === 0} />
-              <FormControlLabel value="manual" control={<Radio />} label="Manual Selection" disabled={senderOptions.accounts.length === 0}/>
+              <FormControlLabel value="manual" control={<Radio />} label="Manual Selection" disabled={senderOptions.accounts.length === 0} />
             </RadioGroup>
           )}
         </FormControl>
@@ -532,34 +590,34 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
 
         {/* Autocomplete para Selección Manual */}
         <Collapse in={senderSelectionMode === 'manual' && !loadingSenders && senderOptions.accounts.length > 0} timeout="auto" sx={{ width: '100%' }}>
-           <Autocomplete
-                multiple
-                options={senderOptions.accounts} // {id, group}[]
-                getOptionLabel={(option) => `${option.id} (${option.group})`}
-                value={selectedAccounts} // Usa el estado que guarda objetos
-                onChange={(_event, newValue) => {
-                    setSelectedAccounts(newValue); // Actualiza con los objetos seleccionados
-                    setFormError(''); // Limpia error al seleccionar/deseleccionar
-                }}
-                isOptionEqualToValue={(option, value) => option.id === value.id && option.group === value.group}
-                renderInput={(params) => (
-                    <TextField
-                        {...params} variant="outlined" label="Select Specific Accounts"
-                        placeholder="Accounts" margin="dense"
-                        // Error si modo manual está activo y no hay selección Y el error es sobre esto
-                        error={senderSelectionMode === 'manual' && selectedAccounts.length === 0 && formError.includes('at least one account')}
-                        required={senderSelectionMode === 'manual'} // Solo visualmente requerido
-                    />
-                )}
-                renderOption={(props, option, { selected }) => (
-                     <li {...props}>
-                        <Checkbox checked={selected} />
-                        {`${option.id} (${option.group})`}
-                     </li>
-                 )}
-                disableCloseOnSelect
-                sx={{ mt: 1 }}
-            />
+          <Autocomplete
+            multiple
+            options={senderOptions.accounts} // {id, group}[]
+            getOptionLabel={(option) => `${option.id} (${option.group})`}
+            value={selectedAccounts} // Usa el estado que guarda objetos
+            onChange={(_event, newValue) => {
+              setSelectedAccounts(newValue); // Actualiza con los objetos seleccionados
+              setFormError(''); // Limpia error al seleccionar/deseleccionar
+            }}
+            isOptionEqualToValue={(option, value) => option.id === value.id && option.group === value.group}
+            renderInput={(params) => (
+              <TextField
+                {...params} variant="outlined" label="Select Specific Accounts"
+                placeholder="Accounts" margin="dense"
+                // Error si modo manual está activo y no hay selección Y el error es sobre esto
+                error={senderSelectionMode === 'manual' && selectedAccounts.length === 0 && formError.includes('at least one account')}
+                required={senderSelectionMode === 'manual'} // Solo visualmente requerido
+              />
+            )}
+            renderOption={(props, option, { selected }) => (
+              <li {...props}>
+                <Checkbox checked={selected} />
+                {`${option.id} (${option.group})`}
+              </li>
+            )}
+            disableCloseOnSelect
+            sx={{ mt: 1 }}
+          />
         </Collapse>
 
 
@@ -569,18 +627,18 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
           variant="outlined"
           value={campaignName}
           // Limpia el error específico de este campo al escribir
-          onChange={(e) => {setCampaignName(e.target.value); setFormError('');}}
+          onChange={(e) => { setCampaignName(e.target.value); setFormError(''); }}
           margin="normal"
           required // Marcarlo como requerido visualmente
           // Mostrar error si el formError general incluye "Name"
           error={formError.includes('Campaign Name')}
           sx={{ mt: 2 }} // Añadir margen superior si es necesario
-      />
+        />
         {/* --- FIN: NUEVA SECCIÓN JSX --- */}
 
 
         {/* Campos Comunes: Subject y Editor/Preview */}
-        
+
         {/* --- Programar Envío --- */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 2 }}>
           <LocalizationProvider dateAdapter={AdapterDayjs}>
@@ -606,28 +664,76 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
           )}
         </Box>
 
-        <TextField fullWidth label="Email Subject" variant="outlined" value={subject} onChange={(e) => {setSubject(e.target.value); setFormError('');}} margin="normal" required error={formError.includes('Subject')}/>
+        <TextField fullWidth label="Email Subject" variant="outlined" value={subject} onChange={(e) => { setSubject(e.target.value); setFormError(''); }} margin="normal" required error={formError.includes('Subject')} />
 
-        <Box sx={{display: 'flex', justifyContent: 'flex-end', my: 1}}>
-            <ToggleButtonGroup value={viewMode} exclusive onChange={handleViewChange} size="small">
-                <ToggleButton value="code" aria-label="code view"><CodeIcon sx={{mr:1}}/> Code</ToggleButton>
-                <ToggleButton value="preview" aria-label="preview"><VisibilityIcon sx={{mr:1}}/> Preview</ToggleButton>
-            </ToggleButtonGroup>
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', my: 1 }}>
+          <ToggleButtonGroup value={viewMode} exclusive onChange={handleViewChange} size="small">
+            <ToggleButton value="code" aria-label="code view"><CodeIcon sx={{ mr: 1 }} /> Code</ToggleButton>
+            <ToggleButton value="preview" aria-label="preview"><VisibilityIcon sx={{ mr: 1 }} /> Preview</ToggleButton>
+          </ToggleButtonGroup>
         </Box>
 
         {viewMode === 'code' ? (
-            <TextField fullWidth label="Email Body (HTML)" variant="outlined" multiline rows={10} value={htmlBody} onChange={(e) => {setHtmlBody(e.target.value); setFormError('');}} required error={formError.includes('Body')}/>
+          <TextField fullWidth label="Email Body (HTML)" variant="outlined" multiline rows={10} value={htmlBody} onChange={(e) => { setHtmlBody(e.target.value); setFormError(''); }} required error={formError.includes('Body')} />
         ) : (
-            <EmailPreview subject={subject} htmlBody={htmlBody} />
+          <EmailPreview subject={subject} htmlBody={htmlBody} />
         )}
 
       </DialogContent>
       <DialogActions>
+        <Button
+          onClick={() => setTestEmailDialogOpen(true)}
+          color="secondary"
+          startIcon={<SendIcon />}
+          disabled={sendingTest}
+          sx={{ mr: 'auto' }} // Push to left
+        >
+          Send Test
+        </Button>
         <Button onClick={onCancel}>Cancel</Button>
         <Button onClick={handleSave} variant="contained">
           {showMapping ? 'Confirm Mapping & Save' : (scheduledAt ? '📅 Schedule Campaign' : 'Save Campaign')}
         </Button>
       </DialogActions>
+
+      {/* Dialog para Enviar Test */}
+      <Dialog open={testEmailDialogOpen} onClose={() => !sendingTest && setTestEmailDialogOpen(false)}>
+        <DialogTitle>Send Test Email</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Enter email addresses separated by commas. The current subject and body will be used.
+          </DialogContentText>
+          <TextField
+            autoFocus
+            margin="dense"
+            label="Email Addresses"
+            type="text"
+            fullWidth
+            variant="outlined"
+            value={testEmails}
+            onChange={(e) => setTestEmails(e.target.value)}
+            placeholder="test@example.com, another@example.com"
+            disabled={sendingTest}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setTestEmailDialogOpen(false)} disabled={sendingTest}>Cancel</Button>
+          <Button onClick={handleSendTest} variant="contained" color="secondary" disabled={sendingTest}>
+            {sendingTest ? <CircularProgress size={24} /> : 'Send'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Snackbar
+        open={!!testSuccessMessage}
+        autoHideDuration={6000}
+        onClose={() => setTestSuccessMessage(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert onClose={() => setTestSuccessMessage(null)} severity="success" sx={{ width: '100%' }}>
+          {testSuccessMessage}
+        </Alert>
+      </Snackbar>
     </>
   );
 };
@@ -655,8 +761,8 @@ export const EmailSenderPage = () => {
       setCampaigns(response.data);
       if (loading) setError(null); // Limpia error solo si era carga inicial
     } catch (err: any) {
-       // Solo muestra error si no es un error de cancelación (AbortError)
-       // y si es la carga inicial o ya no hay campañas en la lista (para evitar parpadeo)
+      // Solo muestra error si no es un error de cancelación (AbortError)
+      // y si es la carga inicial o ya no hay campañas en la lista (para evitar parpadeo)
       if (err.name !== 'AbortError' && (loading || campaigns.length === 0)) {
         setError('Failed to load campaigns.');
         console.error(err);
@@ -748,27 +854,27 @@ export const EmailSenderPage = () => {
         try {
           await apiClient.post(`/sender/campaigns/${campaignId}/upload-csv`, formData);
           console.log(`Etapa 1: CSV subido para ${campaignId}`);
-          
+
           // ✅ SI HAY MAPPING, GUARDARLO INMEDIATAMENTE
           if (mapping) {
-             console.log("Mapeo recibido en Etapa 1, guardando inmediatamente...");
-             setSnackbarMessage(`Saving column mapping...`);
-             await apiClient.post(`/sender/campaigns/${campaignId}/save-mapping`, mapping);
-             console.log("Mapeo guardado exitosamente.");
-             setSnackbarMessage(`Campaign saved successfully!`);
-             setIsModalOpen(false);
-             setEditingCampaignId(null);
-             fetchCampaigns();
-             return;
+            console.log("Mapeo recibido en Etapa 1, guardando inmediatamente...");
+            setSnackbarMessage(`Saving column mapping...`);
+            await apiClient.post(`/sender/campaigns/${campaignId}/save-mapping`, mapping);
+            console.log("Mapeo guardado exitosamente.");
+            setSnackbarMessage(`Campaign saved successfully!`);
+            setIsModalOpen(false);
+            setEditingCampaignId(null);
+            fetchCampaigns();
+            return;
           }
 
           setSnackbarMessage(`CSV uploaded! Please map columns below.`);
           // Si no hay mapping (flujo antiguo), dejamos abierto
         } catch (uploadErr: any) {
-           console.error("Error uploading/mapping CSV:", uploadErr);
-           setError(uploadErr.response?.data?.detail || 'Failed to upload/map CSV file.');
-           setSnackbarMessage(null);
-           return; // Detiene
+          console.error("Error uploading/mapping CSV:", uploadErr);
+          setError(uploadErr.response?.data?.detail || 'Failed to upload/map CSV file.');
+          setSnackbarMessage(null);
+          return; // Detiene
         }
 
       } else if (source_type === 'airtable' && campaignId) {
@@ -784,9 +890,9 @@ export const EmailSenderPage = () => {
       // Captura errores de la creación inicial de campaña (si falló antes de subir CSV)
       console.error("Error en handleSaveCampaign (Etapa 1 - Creación):", err);
       let errorMessage = 'Failed operation.';
-       if (err.response) { errorMessage = err.response.data?.detail || `Server error: ${err.response.status}`; }
-       else if (err.request) { errorMessage = 'No response from server.'; }
-       else { errorMessage = `Error: ${err.message}`; }
+      if (err.response) { errorMessage = err.response.data?.detail || `Server error: ${err.response.status}`; }
+      else if (err.request) { errorMessage = 'No response from server.'; }
+      else { errorMessage = `Error: ${err.message}`; }
       setError(errorMessage);
       setSnackbarMessage(null);
       // Resetea editingCampaignId si la creación inicial falló
@@ -798,7 +904,7 @@ export const EmailSenderPage = () => {
 
   const handleLaunchCampaign = async (campaignId: string) => {
     // ... (sin cambios respecto a lo anterior) ...
-     try {
+    try {
       const response = await apiClient.post(`/sender/campaigns/${campaignId}/launch`);
       setSnackbarMessage(response.data.message || 'Campaign launch initiated!');
       setTimeout(fetchCampaigns, 1500); // Refresca tras un delay
@@ -810,93 +916,93 @@ export const EmailSenderPage = () => {
   const handleDeleteClick = (campaign: any) => {
     setCampaignToDelete(campaign);
     setDeleteConfirmOpen(true);
-};
+  };
 
-// Cierra el diálogo de confirmación
-const handleDeleteClose = () => {
-  setCampaignToDelete(null);
-  setDeleteConfirmOpen(false);
-};
+  // Cierra el diálogo de confirmación
+  const handleDeleteClose = () => {
+    setCampaignToDelete(null);
+    setDeleteConfirmOpen(false);
+  };
 
-// Ejecuta la eliminación si se confirma
-const handleDeleteConfirm = async () => {
-        if (!campaignToDelete) return;
+  // Ejecuta la eliminación si se confirma
+  const handleDeleteConfirm = async () => {
+    if (!campaignToDelete) return;
 
-        const campaignId = campaignToDelete.id;
-        const currentStatus = campaignToDelete.status;
-        const isCancelAction = ['Sending', 'Paused'].includes(currentStatus); // Determina si es cancelar o borrar directo
-        const endpoint = isCancelAction ? `/sender/campaigns/${campaignId}/cancel` : `/sender/campaigns/${campaignId}`; // Endpoint cambia
-        const method = isCancelAction ? 'post' : 'delete'; // Método HTTP cambia
+    const campaignId = campaignToDelete.id;
+    const currentStatus = campaignToDelete.status;
+    const isCancelAction = ['Sending', 'Paused'].includes(currentStatus); // Determina si es cancelar o borrar directo
+    const endpoint = isCancelAction ? `/sender/campaigns/${campaignId}/cancel` : `/sender/campaigns/${campaignId}`; // Endpoint cambia
+    const method = isCancelAction ? 'post' : 'delete'; // Método HTTP cambia
 
-        setDeleting(true); // Usamos el estado 'deleting' existente
-        setError(null);
-        setSnackbarMessage(null);
+    setDeleting(true); // Usamos el estado 'deleting' existente
+    setError(null);
+    setSnackbarMessage(null);
 
-        try {
-            // Llama al endpoint correcto (POST para /cancel, DELETE para /sender/campaigns/{id})
-            await apiClient({ method: method, url: endpoint });
+    try {
+      // Llama al endpoint correcto (POST para /cancel, DELETE para /sender/campaigns/{id})
+      await apiClient({ method: method, url: endpoint });
 
-            setSnackbarMessage(`Campaign '${campaignToDelete.subject}' ${isCancelAction ? 'cancelled and deleted' : 'deleted successfully'}.`);
-            handleDeleteClose(); // Cierra el modal
-            // Esperamos un poco antes de refrescar si fue cancelación,
-            // para dar tiempo al backend a procesar si la tarea estaba activa.
-            setTimeout(fetchCampaigns, isCancelAction ? 1000 : 0);
+      setSnackbarMessage(`Campaign '${campaignToDelete.subject}' ${isCancelAction ? 'cancelled and deleted' : 'deleted successfully'}.`);
+      handleDeleteClose(); // Cierra el modal
+      // Esperamos un poco antes de refrescar si fue cancelación,
+      // para dar tiempo al backend a procesar si la tarea estaba activa.
+      setTimeout(fetchCampaigns, isCancelAction ? 1000 : 0);
 
-        } catch (err: any) {
-            console.error(`Error ${isCancelAction ? 'cancelling' : 'deleting'} campaign:`, err);
-            setError(err.response?.data?.detail || `Failed to ${isCancelAction ? 'cancel' : 'delete'} campaign.`);
-            handleDeleteClose(); // Cerramos modal incluso si falla por ahora
-        } finally {
-            setDeleting(false);
-        }
-    };
+    } catch (err: any) {
+      console.error(`Error ${isCancelAction ? 'cancelling' : 'deleting'} campaign:`, err);
+      setError(err.response?.data?.detail || `Failed to ${isCancelAction ? 'cancel' : 'delete'} campaign.`);
+      handleDeleteClose(); // Cerramos modal incluso si falla por ahora
+    } finally {
+      setDeleting(false);
+    }
+  };
 
-const handlePauseCampaign = async (campaignId: string) => {
-        setActionLoading(prev => ({ ...prev, [campaignId]: true })); // Activa spinner para esta campaña
-        setError(null);
-        setSnackbarMessage(null);
-        try {
-            await apiClient.post(`/sender/campaigns/${campaignId}/pause`);
-            setSnackbarMessage(`Campaign '${campaignId}' paused.`);
-            fetchCampaigns(); // Refresca para actualizar el estado visual
-        } catch (err: any) {
-            console.error("Error pausing campaign:", err);
-            setError(err.response?.data?.detail || 'Failed to pause campaign.');
-        } finally {
-            setActionLoading(prev => ({ ...prev, [campaignId]: false })); // Desactiva spinner
-        }
-    };
+  const handlePauseCampaign = async (campaignId: string) => {
+    setActionLoading(prev => ({ ...prev, [campaignId]: true })); // Activa spinner para esta campaña
+    setError(null);
+    setSnackbarMessage(null);
+    try {
+      await apiClient.post(`/sender/campaigns/${campaignId}/pause`);
+      setSnackbarMessage(`Campaign '${campaignId}' paused.`);
+      fetchCampaigns(); // Refresca para actualizar el estado visual
+    } catch (err: any) {
+      console.error("Error pausing campaign:", err);
+      setError(err.response?.data?.detail || 'Failed to pause campaign.');
+    } finally {
+      setActionLoading(prev => ({ ...prev, [campaignId]: false })); // Desactiva spinner
+    }
+  };
 
   const handleResumeCampaign = async (campaignId: string) => {
-      setActionLoading(prev => ({ ...prev, [campaignId]: true })); // Activa spinner
-      setError(null);
-      setSnackbarMessage(null);
-      try {
-          await apiClient.post(`/sender/campaigns/${campaignId}/resume`);
-          setSnackbarMessage(`Campaign '${campaignId}' resuming...`);
-          // El backend la pone en 'Sending', el polling la actualizará
-          fetchCampaigns(); // Refresca para mostrar 'Sending'
-      } catch (err: any) {
-          console.error("Error resuming campaign:", err);
-          setError(err.response?.data?.detail || 'Failed to resume campaign.');
-      } finally {
-          setActionLoading(prev => ({ ...prev, [campaignId]: false })); // Desactiva spinner
-      }
- };
+    setActionLoading(prev => ({ ...prev, [campaignId]: true })); // Activa spinner
+    setError(null);
+    setSnackbarMessage(null);
+    try {
+      await apiClient.post(`/sender/campaigns/${campaignId}/resume`);
+      setSnackbarMessage(`Campaign '${campaignId}' resuming...`);
+      // El backend la pone en 'Sending', el polling la actualizará
+      fetchCampaigns(); // Refresca para mostrar 'Sending'
+    } catch (err: any) {
+      console.error("Error resuming campaign:", err);
+      setError(err.response?.data?.detail || 'Failed to resume campaign.');
+    } finally {
+      setActionLoading(prev => ({ ...prev, [campaignId]: false })); // Desactiva spinner
+    }
+  };
 
 
   // --- Renderizado ---
   if (loading && campaigns.length === 0) return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' }}>
-          <CircularProgress />
-      </Box>
+    <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' }}>
+      <CircularProgress />
+    </Box>
   );
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4" component="h1">Campaign Manager</Typography>
-        <Button variant="contained" startIcon={<AddCircleOutlineIcon />} onClick={() => { setEditingCampaignId(null); setError(null); setIsModalOpen(true);}}>
+        <Button variant="contained" startIcon={<AddCircleOutlineIcon />} onClick={() => { setEditingCampaignId(null); setError(null); setIsModalOpen(true); }}>
           Create New Campaign
         </Button>
       </Box>
@@ -916,47 +1022,47 @@ const handlePauseCampaign = async (campaignId: string) => {
                 <TableCell>Source</TableCell>
                 <TableCell>Target Info</TableCell>
                 <TableCell>Status</TableCell>
-                <TableCell sx={{minWidth: 200}}>Progress</TableCell>
+                <TableCell sx={{ minWidth: 200 }}>Progress</TableCell>
                 <TableCell align="right">Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {campaigns.length === 0 && !loading ? (
-                  <TableRow><TableCell colSpan={7} align="center">No campaigns found. Create one to get started!</TableCell></TableRow>
+                <TableRow><TableCell colSpan={7} align="center">No campaigns found. Create one to get started!</TableCell></TableRow>
               ) : (
                 campaigns.map((campaign) => (
                   <TableRow key={campaign.id} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
                     <TableCell>{new Date(campaign.createdAt).toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' })}</TableCell>
-                    <TableCell sx={{fontWeight: 500}}>
+                    <TableCell sx={{ fontWeight: 500 }}>
                       <Link component={RouterLink} to={`/campaign/${campaign.id}`} underline="hover" color="inherit">
-                          {campaign.campaign_name || `(ID: ${campaign.id.substring(9)})`} {/* Muestra nombre o ID corto */}
+                        {campaign.campaign_name || `(ID: ${campaign.id.substring(9)})`} {/* Muestra nombre o ID corto */}
                       </Link>
                     </TableCell>
                     <TableCell>
                       {campaign.subject || '(No Subject)'}
                     </TableCell>
                     <TableCell>
-                        <Chip label={campaign.source_type?.toUpperCase()} size="small"
-                            color={campaign.source_type === 'airtable' ? 'info' : 'secondary'} variant="outlined" />
+                      <Chip label={campaign.source_type?.toUpperCase()} size="small"
+                        color={campaign.source_type === 'airtable' ? 'info' : 'secondary'} variant="outlined" />
                     </TableCell>
                     <TableCell>
                       {campaign.source_type === 'airtable'
                         ? `${campaign.region} (Bounced: ${campaign.is_bounced ? 'Yes' : 'No'})`
                         : campaign.csv_filename || (campaign.status === 'Draft' ? 'CSV Pending Upload' : 'CSV Processed')}
-                        {/* Muestra nombre del archivo o estado */}
+                      {/* Muestra nombre del archivo o estado */}
                     </TableCell>
                     <TableCell>
-                      <Chip 
-                          icon={campaign.status === 'Scheduled' ? <ScheduleIcon fontSize="small" /> : undefined}
-                          label={campaign.status} 
-                          size="small"
-                          color={campaign.status === 'Completed' ? 'success' : campaign.status === 'Sending' ? 'warning' : campaign.status === 'Scheduled' ? 'info' : campaign.status.startsWith('Error') ? 'error' : 'default'}
-                        />
-                        {campaign.status === 'Scheduled' && campaign.scheduled_at && (
-                          <Typography variant="caption" display="block" color="info.main" sx={{ mt: 0.5 }}>
-                            📅 {new Date(campaign.scheduled_at).toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' })}
-                          </Typography>
-                        )}
+                      <Chip
+                        icon={campaign.status === 'Scheduled' ? <ScheduleIcon fontSize="small" /> : undefined}
+                        label={campaign.status}
+                        size="small"
+                        color={campaign.status === 'Completed' ? 'success' : campaign.status === 'Sending' ? 'warning' : campaign.status === 'Scheduled' ? 'info' : campaign.status.startsWith('Error') ? 'error' : 'default'}
+                      />
+                      {campaign.status === 'Scheduled' && campaign.scheduled_at && (
+                        <Typography variant="caption" display="block" color="info.main" sx={{ mt: 0.5 }}>
+                          📅 {new Date(campaign.scheduled_at).toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' })}
+                        </Typography>
+                      )}
                     </TableCell>
                     <TableCell>
                       {/* Lógica de progreso */}
@@ -964,21 +1070,21 @@ const handlePauseCampaign = async (campaignId: string) => {
                         <Box sx={{ display: 'flex', alignItems: 'center' }}>
                           <Box sx={{ width: '100%', mr: 1 }}>
                             <LinearProgress variant="determinate"
-                                value={Math.min(100, Math.max(0, Number(campaign.progress?.percentage) || 0))}
-                                color={campaign.status === 'Sending' ? 'warning' : campaign.status === 'Completed' ? 'success' : 'primary'} />
+                              value={Math.min(100, Math.max(0, Number(campaign.progress?.percentage) || 0))}
+                              color={campaign.status === 'Sending' ? 'warning' : campaign.status === 'Completed' ? 'success' : 'primary'} />
                           </Box>
                           <Box sx={{ minWidth: 70 }}>
                             <Typography variant="body2" color="text.secondary">{`${campaign.progress?.sent ?? campaign.sent_count_final ?? 0} / ${campaign.progress?.total ?? campaign.target_count ?? '?'}`}</Typography>
                           </Box>
                         </Box>
                       ) : campaign.status === 'Draft' ? (
-                         <Typography variant="caption" color="text.secondary">Waiting...</Typography>
-                      ): campaign.status === 'Ready' ? (
-                         <Typography variant="caption" color="success.main">Ready to Launch</Typography>
-                      ): campaign.status === 'Scheduled' ? (
-                         <Typography variant="caption" color="info.main">⏰ Scheduled</Typography>
+                        <Typography variant="caption" color="text.secondary">Waiting...</Typography>
+                      ) : campaign.status === 'Ready' ? (
+                        <Typography variant="caption" color="success.main">Ready to Launch</Typography>
+                      ) : campaign.status === 'Scheduled' ? (
+                        <Typography variant="caption" color="info.main">⏰ Scheduled</Typography>
                       ) : (
-                          <Typography variant="caption" color="text.secondary">N/A</Typography>
+                        <Typography variant="caption" color="text.secondary">N/A</Typography>
                       )}
                     </TableCell>
                     <TableCell align="right">
@@ -1003,7 +1109,7 @@ const handlePauseCampaign = async (campaignId: string) => {
                       {/* Botón Reanudar (visible si está 'Paused') */}
                       {campaign.status === 'Paused' && (
                         <Tooltip title="Resume Sending">
-                           <span>
+                          <span>
                             <IconButton
                               aria-label="resume campaign"
                               onClick={() => handleResumeCampaign(campaign.id)}
@@ -1012,12 +1118,12 @@ const handlePauseCampaign = async (campaignId: string) => {
                               disabled={actionLoading[campaign.id] || deleting}
                               sx={{ mr: 0.5 }}
                             >
-                               {actionLoading[campaign.id] ? <CircularProgress size={16} color="inherit" /> : <PlayCircleOutlineIcon fontSize="small" />}
+                              {actionLoading[campaign.id] ? <CircularProgress size={16} color="inherit" /> : <PlayCircleOutlineIcon fontSize="small" />}
                             </IconButton>
                           </span>
                         </Tooltip>
                       )}
-                      
+
                       {/* Botón Launch */}
                       <Button
                         variant="outlined" size="small" startIcon={<RocketLaunchIcon />}
@@ -1025,32 +1131,32 @@ const handlePauseCampaign = async (campaignId: string) => {
                         // Habilitado si está en 'Ready', o si es 'Airtable' y está en 'Draft'
                         // O si se completó con errores y tiene emails pendientes
                         disabled={
-                            !(
-                                campaign.status === 'Ready' ||
-                                (campaign.source_type === 'airtable' && campaign.status === 'Draft') ||
-                                (campaign.status === 'Completed with Errors' && (campaign.sent_count_final ?? campaign.progress?.sent ?? 0) < (campaign.target_count ?? campaign.progress?.total ?? 0))
-                             ) || campaign.status === 'Sending' // Siempre deshabilitado si está enviando
+                          !(
+                            campaign.status === 'Ready' ||
+                            (campaign.source_type === 'airtable' && campaign.status === 'Draft') ||
+                            (campaign.status === 'Completed with Errors' && (campaign.sent_count_final ?? campaign.progress?.sent ?? 0) < (campaign.target_count ?? campaign.progress?.total ?? 0))
+                          ) || campaign.status === 'Sending' // Siempre deshabilitado si está enviando
                         }
                       >
                         {campaign.status === 'Sending' ? 'Sending...' : (campaign.status === 'Completed with Errors' ? 'Retry Failed' : 'Launch')}
                       </Button>
                       {/* --- INICIO: NUEVO BOTÓN ELIMINAR --- */}
-              <Tooltip title="Delete Campaign">
-                {/* Span necesario para Tooltip en botón deshabilitado */}
-                <span>
-                  <IconButton
-                    aria-label="delete campaign"
-                    onClick={() => handleDeleteClick(campaign)}
-                    color="error" // Color rojo para indicar peligro
-                    size="small"
-                    disabled={campaign.status === 'Sending' || deleting} // Deshabilitado si enviando o si ya se está eliminando algo
-                    sx={{ ml: 1 }} // Margen izquierdo para separarlo
-                  >
-                    <DeleteIcon fontSize="small" />
-                  </IconButton>
-                </span>
-              </Tooltip>
-              {/* --- FIN: NUEVO BOTÓN ELIMINAR --- */}
+                      <Tooltip title="Delete Campaign">
+                        {/* Span necesario para Tooltip en botón deshabilitado */}
+                        <span>
+                          <IconButton
+                            aria-label="delete campaign"
+                            onClick={() => handleDeleteClick(campaign)}
+                            color="error" // Color rojo para indicar peligro
+                            size="small"
+                            disabled={campaign.status === 'Sending' || deleting} // Deshabilitado si enviando o si ya se está eliminando algo
+                            sx={{ ml: 1 }} // Margen izquierdo para separarlo
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                      {/* --- FIN: NUEVO BOTÓN ELIMINAR --- */}
                     </TableCell>
                   </TableRow>
                 ))
@@ -1071,13 +1177,13 @@ const handlePauseCampaign = async (campaignId: string) => {
       </Dialog>
 
       <Dialog
-    open={deleteConfirmOpen}
-    onClose={handleDeleteClose}
-    aria-labelledby="delete-confirm-title"
-    aria-describedby="delete-confirm-description"
-  >
-    <DialogTitle id="delete-confirm-title">Confirm Deletion</DialogTitle>
-    <DialogContent>
+        open={deleteConfirmOpen}
+        onClose={handleDeleteClose}
+        aria-labelledby="delete-confirm-title"
+        aria-describedby="delete-confirm-description"
+      >
+        <DialogTitle id="delete-confirm-title">Confirm Deletion</DialogTitle>
+        <DialogContent>
           <DialogContentText id="delete-confirm-description">
             {/* --- INICIO MODIFICACIÓN --- */}
             {['Sending', 'Paused'].includes(campaignToDelete?.status)
@@ -1102,12 +1208,12 @@ const handlePauseCampaign = async (campaignId: string) => {
 
       {/* Snackbar para notificaciones */}
       <Snackbar
-          open={!!snackbarMessage} autoHideDuration={6000}
-          onClose={() => setSnackbarMessage(null)} message={snackbarMessage}
-          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        open={!!snackbarMessage} autoHideDuration={6000}
+        onClose={() => setSnackbarMessage(null)} message={snackbarMessage}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       />
 
-      
+
     </Container>
   );
 };

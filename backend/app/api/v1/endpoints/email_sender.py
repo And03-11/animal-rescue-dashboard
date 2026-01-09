@@ -716,6 +716,162 @@ async def upload_campaign_csv(
 
 
 # --- Añade esta NUEVA función/endpoint al final del archivo ---
+# --- Nuevo Modelo para Test ---
+class TestEmailRequest(BaseModel):
+    emails: List[str]
+    subject: Optional[str] = None
+    html_body: Optional[str] = None
+    sender_config: Optional[Union[str, List[str]]] = None
+
+
+# --- Añade esta NUEVA función/endpoint ---
+@router.post("/sender/campaigns/{campaign_id}/send-test", response_model=Dict[str, Any])
+def send_test_email(
+    campaign_id: str,
+    req: TestEmailRequest,
+    current_user: str = Depends(get_current_user)
+):
+    """
+    Envía un correo de prueba a la lista de emails proporcionada.
+    Usa la configuración proporcionada (overrides) o la guardada en disco.
+    """
+    campaign_file_path = os.path.join(CAMPAIGN_DATA_DIR, f"{campaign_id}.json")
+    
+    # 1. Cargar Configuración Base (si existe)
+    config = {}
+    if os.path.exists(campaign_file_path):
+        try:
+            with open(campaign_file_path, 'r') as f:
+                config = json.load(f)
+        except Exception as e:
+            print(f"[{campaign_id}] Warning: Could not read config file: {e}")
+
+    # 2. Determinar valores a usar (Request > Config > Default)
+    subject = req.subject if req.subject is not None else config.get('subject', '(No Subject)')
+    html_body_template = req.html_body if req.html_body is not None else config.get('html_body', '<p>Error: Email body missing.</p>')
+    sender_config = req.sender_config if req.sender_config is not None else config.get('sender_config', 'all')
+
+    # 3. Cargar Servicios de Gmail
+    gmail_services = []
+    if credentials_manager_instance:
+        try:
+            gmail_services = credentials_manager_instance.get_gmail_services(sender_config)
+        except Exception as e:
+            print(f"[{campaign_id}] Test Send Error: {e}")
+            
+    if not gmail_services:
+        raise HTTPException(status_code=500, detail="No valid sender accounts found for this campaign configuration.")
+
+    # 4. Enviar Emails de Prueba
+    results = []
+    service_index = 0
+    
+    for email in req.emails:
+        # Personalización simulada para test
+        test_name = "Test User"
+        html_body_personalized = html_body_template.replace("{{name}}", test_name).replace("*|FNAME|*", test_name)
+        
+        # Rotación de servicios
+        current_service = gmail_services[service_index]
+        current_credential_name = os.path.basename(current_service.credentials_path)
+        service_index = (service_index + 1) % len(gmail_services)
+        
+        print(f"[{campaign_id}] Sending TEST email to {email} via {current_credential_name}")
+        
+        success = False
+        try:
+            success = current_service.send_email(
+                to_email=email,
+                subject=f"[TEST] {subject}", # Prefijo para identificar que es test
+                html_body=html_body_personalized
+            )
+        except Exception as e:
+            print(f"Error sending test email to {email}: {e}")
+            
+        results.append({
+            "email": email,
+            "status": "Sent" if success else "Failed",
+            "sender": current_credential_name
+        })
+        
+        # Pequeña pausa para no saturar si son muchos tests
+        if len(req.emails) > 1:
+            time.sleep(0.5)
+
+    return {
+        "message": "Test emails processed",
+        "results": results
+    }
+
+
+# --- Nuevo Modelo para Test Ad-hoc ---
+class AdhocTestRequest(BaseModel):
+    emails: List[str]
+    subject: str
+    html_body: str
+    sender_config: Optional[Union[str, List[str]]] = 'all'
+
+
+@router.post("/sender/send-test-adhoc", response_model=Dict[str, Any])
+def send_test_email_adhoc(
+    req: AdhocTestRequest,
+    current_user: str = Depends(get_current_user)
+):
+    """
+    Envía un correo de prueba sin necesidad de una campaña guardada.
+    """
+    # 1. Cargar Servicios de Gmail
+    gmail_services = []
+    if credentials_manager_instance:
+        try:
+            gmail_services = credentials_manager_instance.get_gmail_services(req.sender_config)
+        except Exception as e:
+            print(f"[AdhocTest] Error loading services: {e}")
+            
+    if not gmail_services:
+        raise HTTPException(status_code=500, detail="No valid sender accounts found for this configuration.")
+
+    # 2. Enviar Emails de Prueba
+    results = []
+    service_index = 0
+    
+    for email in req.emails:
+        # Personalización simulada
+        test_name = "Test User"
+        html_body_personalized = req.html_body.replace("{{name}}", test_name).replace("*|FNAME|*", test_name)
+        
+        # Rotación
+        current_service = gmail_services[service_index]
+        current_credential_name = os.path.basename(current_service.credentials_path)
+        service_index = (service_index + 1) % len(gmail_services)
+        
+        print(f"[AdhocTest] Sending to {email} via {current_credential_name}")
+        
+        success = False
+        try:
+            success = current_service.send_email(
+                to_email=email,
+                subject=f"[TEST] {req.subject}",
+                html_body=html_body_personalized
+            )
+        except Exception as e:
+            print(f"[AdhocTest] Error sending to {email}: {e}")
+            
+        results.append({
+            "email": email,
+            "status": "Sent" if success else "Failed",
+            "sender": current_credential_name
+        })
+        
+        if len(req.emails) > 1:
+            time.sleep(0.5)
+
+    return {
+        "message": "Ad-hoc test emails processed",
+        "results": results
+    }
+
+
 @router.get("/sender/campaigns/{campaign_id}/csv-preview", response_model=Dict[str, Any])
 async def get_csv_preview(
     campaign_id: str,
