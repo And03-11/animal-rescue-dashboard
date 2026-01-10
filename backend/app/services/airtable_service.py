@@ -849,27 +849,45 @@ class AirtableService:
             return [] # fallback seguro
         
 
-    def get_campaign_contacts(self, region: str, is_bounced: bool) -> List[Dict[str, Any]]:
+    def get_campaign_contacts(self, region: str, is_bounced: bool, segment: str = "standard") -> List[Dict[str, Any]]:
         """
         Obtiene contactos de Airtable filtrados por Donor's Region, Donor's Stage='Big Campaign',
         y Email's Bounced Account status.
+        
+        Args:
+            region: Región del donante (ej. 'USA', 'EUR').
+            is_bounced: Si True, busca emails rebotados. Si False, no rebotados.
+            segment: 'standard' (excluye marcados) o 'dnr' (solo marcados).
+            
         Devuelve una lista de diccionarios, cada uno con al menos la clave 'Email'.
         """
         # Nombres de campos en la tabla Donors
         region_field = DONORS_FIELDS.get("region", "Region")
         stage_field = DONORS_FIELDS.get("stage", "Stage")
         emails_link_field = DONORS_FIELDS.get("emails_link", "Emails") # Campo que enlaza a la tabla Emails
+        exclude_field = "Exclude From Current Campaign"  # Campo checkbox para excluir donantes
 
         # Nombres de campos en la tabla Emails
         email_address_field = EMAILS_FIELDS.get("email", "Email")
         bounced_account_field = EMAILS_FIELDS.get("bounced_account", "Bounced Account") # <-- Campo Checkbox
 
         try:
-            # --- Paso 1: Filtrar Donantes por Region y Stage ---
+            # --- Paso 1: Filtrar Donantes por Region, Stage y Segmento ---
             donor_formula_parts = [
                 f"{{{region_field}}} = '{region}'",
                 f"{{{stage_field}}} = 'Big Campaign'"
             ]
+            
+            # Lógica de Segmento
+            if segment == "dnr":
+                # DNR: Solo los que TIENEN el check marcado
+                donor_formula_parts.append(f"{{{exclude_field}}} = 1")
+                print("Segmento DNR seleccionado: Buscando donantes excluidos.")
+            else:
+                # Standard (default): Solo los que NO tienen el check marcado
+                donor_formula_parts.append(f"NOT({{{exclude_field}}} = 1)")
+                print("Segmento Standard seleccionado: Excluyendo donantes marcados.")
+
             donor_formula = f"AND({', '.join(donor_formula_parts)})"
 
             print(f"Airtable formula for Donors: {donor_formula}")

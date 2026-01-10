@@ -11,7 +11,7 @@ build
 
 # Git
 .git
-.gitignore
+
 
 # IDE
 .vscode
@@ -47,3 +47,8 @@ gmail_credentials
 Thumbs.db
 *.sqlite3
 *.db
+
+# Secretos y tokens
+all_token_info.txt
+*.txt
+.env

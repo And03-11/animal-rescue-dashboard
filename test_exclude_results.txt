@@ -1,0 +1,22 @@
+============================================================
+🧪 TEST: Filtro 'Exclude From Current Campaign'
+============================================================
+
+📍 Probando con región: USA
+📍 Segmento: dnr
+----------------------------------------
+
+✅ Contactos encontrados: 50
+
+📧 Primeros 10 emails:
+   1. buzzjansmith@gmail.com
+   2. lynb@spe.midco.net
+   3. cdavey_53207@yahoo.com
+   4. eleanor1119@aol.com
+   5. bkhanckel@hotmail.com
+   6. gmanzerolle@gmail.com
+   7. yvettecoll@aol.com
+   8. getarental@yahoo.com
+   9. lydiadesir@aol.com
+   10. brooknm@umich.edu
+   ... y 40 más

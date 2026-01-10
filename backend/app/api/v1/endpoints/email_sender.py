@@ -86,6 +86,8 @@ class CampaignRequest(BaseModel):
     sender_config: Union[str, List[str]] = Field(default="all", description="Grupo o lista de IDs de cuenta.")
     # ✅ Campo para programar envío
     scheduled_at: Optional[datetime] = Field(default=None, description="Fecha/hora para envío programado. Si es None, la campaña queda en Draft.")
+    # ✅ Nuevo campo para Segmento (Standard vs DNR)
+    segment: Optional[str] = Field(default="standard", description="Segmento de la campaña: 'standard' o 'dnr'.")
 
 
 # --- REEMPLAZA esta función completa ---
@@ -159,13 +161,34 @@ def run_campaign_task(campaign_id: str):
             # Usamos los filtros guardados en la config
             airtable_contacts_raw = airtable_service.get_campaign_contacts(
                 region=config.get('region'),
-                is_bounced=config.get('is_bounced', False) # Usa False si no está definido
+                is_bounced=config.get('is_bounced', False), # Usa False si no está definido
+                segment=config.get('segment', 'standard')   # ✅ Usa el segmento guardado
             )
             # Necesitamos adaptar esto si get_campaign_contacts no devuelve nombres
             # Por ahora, asumimos que solo devuelve Email
             contact_data = [{'Email': c.get('Email'), 'Name': 'Valued Supporter'} # Nombre genérico
                             for c in airtable_contacts_raw if c.get('Email')]
             print(f"[{campaign_id}] Found {len(contact_data)} contacts in Airtable.")
+            
+            # --- NUEVO: Actualizar target_count con el conteo real al momento de enviar ---
+            config['target_count'] = len(contact_data)
+            config['contacts_fetched_at'] = datetime.now().isoformat()
+            try:
+                with open(campaign_file_path, 'w') as f:
+                    json.dump(config, f, indent=4)
+                print(f"[{campaign_id}] Updated target_count to {len(contact_data)} (fresh from Airtable)")
+            except Exception as e_save:
+                print(f"[{campaign_id}] WARNING: Could not save updated target_count: {e_save}")
+            
+            # --- NUEVO: Regenerar el archivo CSV de targets con los contactos frescos ---
+            try:
+                df_data = [{'Email': contact.get('Email')} for contact in contact_data if contact.get('Email')]
+                pd.DataFrame(df_data).to_csv(target_csv_path, index=False)
+                print(f"[{campaign_id}] Regenerated target CSV with {len(df_data)} contacts")
+            except Exception as e_csv:
+                print(f"[{campaign_id}] WARNING: Could not regenerate target CSV: {e_csv}")
+            # --- FIN NUEVO ---
+            
         except Exception as e:
             print(f"[{campaign_id}] ERROR: Failed to get contacts from Airtable: {e}")
             config['status'] = 'Error - Airtable Fetch Failed' # Actualiza estado a error
@@ -498,11 +521,12 @@ def create_campaign(
                 status_code=400,
                 detail="Region and is_bounced are required for Airtable source type."
             )
-        print(f"Fetching contacts from Airtable for campaign {campaign_id} (Region: {req.region}, Bounced: {req.is_bounced})")
+        print(f"Fetching contacts from Airtable for campaign {campaign_id} (Region: {req.region}, Bounced: {req.is_bounced}, Segment: {req.segment})")
         # Llama a la función actualizada que ya incluye el filtro 'Stage'
         target_contacts_list = airtable_service.get_campaign_contacts(
             region=req.region,
-            is_bounced=req.is_bounced
+            is_bounced=req.is_bounced,
+            segment=req.segment or "standard" # ✅ Pasa el segmento
         )
         total_contacts = len(target_contacts_list)
     elif req.source_type == 'csv':

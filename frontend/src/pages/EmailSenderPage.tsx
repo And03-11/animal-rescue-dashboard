@@ -90,8 +90,11 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
   const [sourceType, setSourceType] = useState<'airtable' | 'csv'>('airtable');
   const [region, setRegion] = useState('USA');
   const [isBounced, setIsBounced] = useState(false);
+  const [segment, setSegment] = useState<'standard' | 'dnr'>('standard'); // ✅ Nuevo estado para Segmento
   const [subject, setSubject] = useState('');
   const [htmlBody, setHtmlBody] = useState('<h1>New Campaign</h1>\n<p>Write your content here.</p>');
+
+
   const [viewMode, setViewMode] = useState<'code' | 'preview'>('code');
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [csvFileName, setCsvFileName] = useState<string>('');
@@ -355,6 +358,7 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
     if (sourceType === 'airtable') {
       payload.region = region;
       payload.is_bounced = isBounced;
+      payload.segment = segment; // ✅ Incluir segmento en payload
     }
 
     // --- Lógica para CSV ---
@@ -465,14 +469,57 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
               <RadioGroup row value={region} onChange={(e) => setRegion(e.target.value)}>
                 <FormControlLabel value="USA" control={<Radio size="small" />} label="USA" />
                 <FormControlLabel value="EUR" control={<Radio size="small" />} label="EUR" />
-                <FormControlLabel value="TEST" control={<Radio size="small" />} label="TEST" />
               </RadioGroup>
             </FormControl>
-            <FormControlLabel
-              control={<Checkbox checked={isBounced} onChange={(e) => setIsBounced(e.target.checked)} />}
-              label="Target Bounced Accounts Only"
-              sx={{ display: 'block', mt: 1 }}
-            />
+
+            {/* ✅ Segment Selector (Nuevo) */}
+            <FormControl component="fieldset" margin="dense" fullWidth sx={{ mt: 2 }}>
+              <FormLabel component="legend">Target Segment</FormLabel>
+              <RadioGroup row value={segment} onChange={(e) => setSegment(e.target.value as 'standard' | 'dnr')}>
+                <FormControlLabel
+                  value="standard"
+                  control={<Radio size="small" />}
+                  label={
+                    <Box>
+                      <Typography variant="body2">Not Donors</Typography>
+                      <Typography variant="caption" color="text.secondary">Standard Campaign</Typography>
+                    </Box>
+                  }
+                />
+                <FormControlLabel
+                  value="dnr"
+                  control={<Radio size="small" color="warning" />}
+                  label={
+                    <Box>
+                      <Typography variant="body2" color="warning.main">Donors</Typography>
+                      <Typography variant="caption" color="text.secondary">Special Campaign</Typography>
+                    </Box>
+                  }
+                />
+              </RadioGroup>
+            </FormControl>
+
+
+            {/* Bounce Filter (Clarified) */}
+            <FormControl component="fieldset" margin="dense" fullWidth sx={{ mt: 2 }}>
+              <FormLabel component="legend">Bounce Status</FormLabel>
+              <RadioGroup
+                row
+                value={isBounced ? "bounced" : "valid"}
+                onChange={(e) => setIsBounced(e.target.value === "bounced")}
+              >
+                <FormControlLabel
+                  value="valid"
+                  control={<Radio size="small" />}
+                  label="Valid Emails Only"
+                />
+                <FormControlLabel
+                  value="bounced"
+                  control={<Radio size="small" color="error" />}
+                  label="Bounced Emails Only"
+                />
+              </RadioGroup>
+            </FormControl>
           </Paper>
         )}
 
@@ -679,7 +726,7 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
           <EmailPreview subject={subject} htmlBody={htmlBody} />
         )}
 
-      </DialogContent>
+      </DialogContent >
       <DialogActions>
         <Button
           onClick={() => setTestEmailDialogOpen(true)}
