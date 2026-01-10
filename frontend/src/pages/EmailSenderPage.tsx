@@ -42,7 +42,20 @@ import {
   ToggleButtonGroup,
   Tooltip,
   Typography,
+  Card,
+  CardActionArea,
+  CardContent,
 } from '@mui/material'; // Agrupadas importaciones de MUI
+import {
+  Public as PublicIcon,
+  Flag as FlagIcon,
+  Person as PersonIcon,
+  Star as StarIcon,
+  CheckCircle as CheckCircleIcon,
+  Cancel as CancelIcon,
+  MarkEmailRead as MarkEmailReadIcon,
+  MarkEmailUnread as MarkEmailUnreadIcon
+} from '@mui/icons-material';
 import { Link as RouterLink } from 'react-router-dom';
 import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -91,6 +104,34 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
   const [region, setRegion] = useState('USA');
   const [isBounced, setIsBounced] = useState(false);
   const [segment, setSegment] = useState<'standard' | 'dnr'>('standard'); // ✅ Nuevo estado para Segmento
+  const [isDragging, setIsDragging] = useState(false); // ✅ Estado para Drag & Drop
+
+  // --- Handlers para Drag & Drop ---
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      const file = files[0];
+      if (file.type === "text/csv" || file.name.endsWith(".csv")) {
+        // Simular evento de cambio de archivo
+        const event = { target: { files: [file] } } as unknown as React.ChangeEvent<HTMLInputElement>;
+        handleFileChange(event);
+      } else {
+        setFormError("Only CSV files are allowed.");
+      }
+    }
+  };
   const [subject, setSubject] = useState('');
   const [htmlBody, setHtmlBody] = useState('<h1>New Campaign</h1>\n<p>Write your content here.</p>');
 
@@ -462,64 +503,111 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
 
         {/* Filtros Airtable */}
         {sourceType === 'airtable' && (
-          <Paper variant="outlined" sx={{ p: 2, mt: 1, mb: 2, borderColor: 'primary.main' }}>
-            <Typography variant="subtitle2" sx={{ mb: 1, color: 'primary.main' }}>Airtable Filters</Typography>
-            <FormControl component="fieldset" margin="dense" fullWidth>
-              <FormLabel component="legend">Target Region</FormLabel>
-              <RadioGroup row value={region} onChange={(e) => setRegion(e.target.value)}>
-                <FormControlLabel value="USA" control={<Radio size="small" />} label="USA" />
-                <FormControlLabel value="EUR" control={<Radio size="small" />} label="EUR" />
-              </RadioGroup>
-            </FormControl>
+          <Paper variant="outlined" sx={{ p: 3, mt: 1, mb: 2, borderColor: 'primary.main', borderRadius: 2 }}>
+            <Typography variant="h6" sx={{ mb: 2, color: 'primary.main', display: 'flex', alignItems: 'center', gap: 1 }}>
+              <PublicIcon /> Airtable Filters
+            </Typography>
 
-            {/* ✅ Segment Selector (Nuevo) */}
-            <FormControl component="fieldset" margin="dense" fullWidth sx={{ mt: 2 }}>
-              <FormLabel component="legend">Target Segment</FormLabel>
-              <RadioGroup row value={segment} onChange={(e) => setSegment(e.target.value as 'standard' | 'dnr')}>
-                <FormControlLabel
-                  value="standard"
-                  control={<Radio size="small" />}
-                  label={
-                    <Box>
-                      <Typography variant="body2">Not Donors</Typography>
-                      <Typography variant="caption" color="text.secondary">Standard Campaign</Typography>
-                    </Box>
-                  }
-                />
-                <FormControlLabel
-                  value="dnr"
-                  control={<Radio size="small" color="warning" />}
-                  label={
-                    <Box>
-                      <Typography variant="body2" color="warning.main">Donors</Typography>
-                      <Typography variant="caption" color="text.secondary">Special Campaign</Typography>
-                    </Box>
-                  }
-                />
-              </RadioGroup>
-            </FormControl>
+            {/* Region Selector - Compact Cards */}
+            <Typography variant="subtitle2" sx={{ mb: 1, mt: 2 }}>Target Region</Typography>
+            <Grid container spacing={1}>
+              {[
+                { value: 'USA', label: 'USA', icon: <FlagIcon fontSize="small" color="primary" /> },
+                { value: 'EUR', label: 'EUR', icon: <PublicIcon fontSize="small" color="secondary" /> }
+              ].map((option) => (
+                <Grid item xs={6} key={option.value}>
+                  <Card
+                    variant="outlined"
+                    sx={{
+                      borderColor: region === option.value ? 'primary.main' : 'divider',
+                      bgcolor: region === option.value ? 'action.selected' : 'background.paper',
+                      transition: 'all 0.2s'
+                    }}
+                  >
+                    <CardActionArea onClick={() => setRegion(option.value)} sx={{ p: 1 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
+                        {option.icon}
+                        <Typography variant="body2" fontWeight="bold">{option.label}</Typography>
+                      </Box>
+                    </CardActionArea>
+                  </Card>
+                </Grid>
+              ))}
+            </Grid>
 
+            {/* Segment Selector - Compact Cards */}
+            <Typography variant="subtitle2" sx={{ mb: 1, mt: 2 }}>Target Segment</Typography>
+            <Grid container spacing={1}>
+              {[
+                {
+                  value: 'standard',
+                  label: 'Not Donors',
+                  icon: <PersonIcon fontSize="small" color="action" />,
+                  color: 'text.primary'
+                },
+                {
+                  value: 'dnr',
+                  label: 'Donors',
+                  icon: <StarIcon fontSize="small" color="warning" />,
+                  color: 'warning.main'
+                }
+              ].map((option) => (
+                <Grid item xs={6} key={option.value}>
+                  <Card
+                    variant="outlined"
+                    sx={{
+                      borderColor: segment === option.value ? (option.value === 'dnr' ? 'warning.main' : 'primary.main') : 'divider',
+                      bgcolor: segment === option.value ? 'action.selected' : 'background.paper',
+                      transition: 'all 0.2s'
+                    }}
+                  >
+                    <CardActionArea onClick={() => setSegment(option.value as 'standard' | 'dnr')} sx={{ p: 1 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
+                        {option.icon}
+                        <Typography variant="body2" fontWeight="bold" sx={{ color: option.color }}>{option.label}</Typography>
+                      </Box>
+                    </CardActionArea>
+                  </Card>
+                </Grid>
+              ))}
+            </Grid>
 
-            {/* Bounce Filter (Clarified) */}
-            <FormControl component="fieldset" margin="dense" fullWidth sx={{ mt: 2 }}>
-              <FormLabel component="legend">Bounce Status</FormLabel>
-              <RadioGroup
-                row
-                value={isBounced ? "bounced" : "valid"}
-                onChange={(e) => setIsBounced(e.target.value === "bounced")}
-              >
-                <FormControlLabel
-                  value="valid"
-                  control={<Radio size="small" />}
-                  label="Valid Emails Only"
-                />
-                <FormControlLabel
-                  value="bounced"
-                  control={<Radio size="small" color="error" />}
-                  label="Bounced Emails Only"
-                />
-              </RadioGroup>
-            </FormControl>
+            {/* Bounce Filter - Compact Cards */}
+            <Typography variant="subtitle2" sx={{ mb: 1, mt: 2 }}>Bounce Status</Typography>
+            <Grid container spacing={1}>
+              {[
+                {
+                  value: 'valid',
+                  label: 'Valid Emails',
+                  icon: <MarkEmailReadIcon fontSize="small" color="success" />,
+                  isBouncedValue: false
+                },
+                {
+                  value: 'bounced',
+                  label: 'Bounced Emails',
+                  icon: <MarkEmailUnreadIcon fontSize="small" color="error" />,
+                  isBouncedValue: true
+                }
+              ].map((option) => (
+                <Grid item xs={6} key={option.value}>
+                  <Card
+                    variant="outlined"
+                    sx={{
+                      borderColor: isBounced === option.isBouncedValue ? (option.isBouncedValue ? 'error.main' : 'success.main') : 'divider',
+                      bgcolor: isBounced === option.isBouncedValue ? 'action.selected' : 'background.paper',
+                      transition: 'all 0.2s'
+                    }}
+                  >
+                    <CardActionArea onClick={() => setIsBounced(option.isBouncedValue)} sx={{ p: 1 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
+                        {option.icon}
+                        <Typography variant="body2" fontWeight="bold">{option.label}</Typography>
+                      </Box>
+                    </CardActionArea>
+                  </Card>
+                </Grid>
+              ))}
+            </Grid>
           </Paper>
         )}
 
@@ -529,13 +617,38 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
             <Typography variant="subtitle2" sx={{ mb: 2, color: 'secondary.main' }}>CSV Upload & Mapping</Typography>
             {/* ... (Botón de subida y lógica de Mapeo sin cambios respecto a lo anterior) ... */}
             {(!campaignId || !showMapping) && (
-              <Button
-                variant="outlined" component="label" startIcon={<CloudUploadIcon />} fullWidth
-                color={formError.includes('CSV file') ? "error" : "primary"} sx={{ mb: 2 }}
+              <Box
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                sx={{
+                  border: '2px dashed',
+                  borderColor: isDragging ? 'primary.main' : 'divider',
+                  borderRadius: 2,
+                  p: 4,
+                  textAlign: 'center',
+                  bgcolor: isDragging ? 'action.hover' : 'background.paper',
+                  transition: 'all 0.2s',
+                  cursor: 'pointer',
+                  mb: 2
+                }}
               >
-                {csvFileName ? `Archivo: ${csvFileName}` : 'Select CSV File'}
-                <Input type="file" sx={{ display: 'none' }} onChange={handleFileChange} inputProps={{ accept: ".csv, text/csv" }} />
-              </Button>
+                <CloudUploadIcon sx={{ fontSize: 48, color: isDragging ? 'primary.main' : 'text.secondary', mb: 1 }} />
+                <Typography variant="h6" color="text.primary" gutterBottom>
+                  {isDragging ? "Drop CSV here" : "Drag & Drop CSV here"}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  or
+                </Typography>
+                <Button
+                  variant="contained"
+                  component="label"
+                  color={formError.includes('CSV file') ? "error" : "primary"}
+                >
+                  {csvFileName ? `Change File: ${csvFileName}` : 'Browse Files'}
+                  <Input type="file" sx={{ display: 'none' }} onChange={handleFileChange} inputProps={{ accept: ".csv, text/csv" }} />
+                </Button>
+              </Box>
             )}
             {(campaignId && showMapping && csvFileName) && (
               <Typography variant="body2" sx={{ mb: 2 }}>Archivo subido: <strong>{csvFileName}</strong></Typography>
