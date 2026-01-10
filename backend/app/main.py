@@ -15,7 +15,8 @@ from backend.app.api.v1.endpoints import (
     form_titles,
     email_sender,
     websockets,
-    scheduler
+    scheduler,
+    templates  # Added for email templates
 )
 from backend.app.api.v1.endpoints import campaigns_fast
 from backend.app.api.v1.endpoints.search import router as search_router
@@ -83,6 +84,7 @@ app.include_router(users.router, prefix="/api/v1", tags=["users"])
 app.include_router(websockets.router, prefix="/api/v1")
 app.include_router(scheduler.router, prefix="/api/v1")
 app.include_router(analytics_router, prefix="/api/v1/analytics", tags=["analytics"])
+app.include_router(templates.router, prefix="/api/v1", tags=["templates"])  # Email templates
 
 # --- Health Check Endpoint (for Docker) ---
 @app.get("/health", tags=["health"])

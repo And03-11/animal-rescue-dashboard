@@ -1,6 +1,7 @@
 # --- File: backend/app/db/models.py (MODIFICADO) ---
 from sqlalchemy import Column, DateTime, Integer, String, Boolean, Text, ForeignKey
 from sqlalchemy.orm import relationship
+from datetime import datetime
 from .database import Base
 
 class User(Base):
@@ -73,3 +74,14 @@ class ScheduledSend(Base):
 
     campaign_email_id = Column(Integer, ForeignKey("campaign_emails.id"), nullable=False, index=True)
     email = relationship("CampaignEmail", back_populates="sends")
+
+class EmailTemplate(Base):
+    """
+    Template for reusable email content.
+    """
+    __tablename__ = "email_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True, nullable=False)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)

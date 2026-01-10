@@ -46,6 +46,17 @@ class SearchResponse(BaseModel):
     mailchimp: List[MailchimpDetail]
     brevo: List[BrevoDetail]
 
+# Modelos para Templates de Email
+class TemplateCreate(BaseModel):
+    name: str
+    content: str
+
+class TemplateResponse(BaseModel):
+    id: int
+    name: str
+    content: str
+    created_at: Any # DateTime
+
 # Ventajas de este esquema:
 # - Validación automática de datos entrantes y salientes.
 # - Documentación OpenAPI generada sin esfuerzo.

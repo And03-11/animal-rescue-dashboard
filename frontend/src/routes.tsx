@@ -21,6 +21,7 @@ const CampaignDetailPage = lazy(() => import('./pages/CampaignDetailPage'));
 const CampaignSchedulerPage = lazy(() => import('./pages/CampaignSchedulerPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const SharedAnalyticsPage = lazy(() => import('./pages/SharedAnalyticsPage'));
+const TemplatesPage = lazy(() => import('./pages/TemplatesPage'));
 
 const SpinnerFallback = () => (
   <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
@@ -89,6 +90,12 @@ export function AppRoutes() {
           <Route
             path="scheduler"
             element={<PageTransition><CampaignSchedulerPage /></PageTransition>}
+          />
+
+          {/* Email Templates Route */}
+          <Route
+            path="templates"
+            element={<PageTransition><TemplatesPage /></PageTransition>}
           />
 
           {/* ✅ NUEVA RUTA DE SETTINGS (Accesible a todos, el tab interno controla permisos si es necesario) */}

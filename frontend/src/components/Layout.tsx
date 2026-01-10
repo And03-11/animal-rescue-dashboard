@@ -15,6 +15,7 @@ import CompareArrowsRoundedIcon from '@mui/icons-material/CompareArrowsRounded';
 import PersonSearchRoundedIcon from '@mui/icons-material/PersonSearchRounded';
 import EventNoteRoundedIcon from '@mui/icons-material/EventNoteRounded';
 import EmailRoundedIcon from '@mui/icons-material/EmailRounded';
+import ArticleRoundedIcon from '@mui/icons-material/ArticleRounded'; // For Templates
 import SettingsRoundedIcon from '@mui/icons-material/SettingsRounded'; // ✅ Nuevo icono
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded';
 import MenuIcon from '@mui/icons-material/Menu';
@@ -70,6 +71,7 @@ export const Layout: React.FC = () => {
     { text: 'Contacts', icon: <PersonSearchRoundedIcon />, path: '/contact-search' },
     { text: 'Scheduler', icon: <EventNoteRoundedIcon />, path: '/scheduler' },
     { text: 'Email', icon: <EmailRoundedIcon />, path: '/email-sender' },
+    { text: 'Templates', icon: <ArticleRoundedIcon />, path: '/templates' },
   ];
 
   // ✅ ELIMINADO: "Users" ya no está en el menú lateral

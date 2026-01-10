@@ -45,6 +45,7 @@ import {
   Card,
   CardActionArea,
   CardContent,
+  InputAdornment, // Added for icons in inputs
 } from '@mui/material'; // Agrupadas importaciones de MUI
 import {
   Public as PublicIcon,
@@ -54,7 +55,13 @@ import {
   CheckCircle as CheckCircleIcon,
   Cancel as CancelIcon,
   MarkEmailRead as MarkEmailReadIcon,
-  MarkEmailUnread as MarkEmailUnreadIcon
+  MarkEmailUnread as MarkEmailUnreadIcon,
+  AllInclusive as AllInclusiveIcon,
+  GroupWork as GroupWorkIcon,
+  TouchApp as TouchAppIcon,
+  Label as LabelIcon, // Added for Campaign Name
+  Subject as SubjectIcon, // Added for Email Subject
+  Article as ArticleIcon // Added for Content Editor
 } from '@mui/icons-material';
 import { Link as RouterLink } from 'react-router-dom';
 import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
@@ -164,6 +171,14 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
   const [testSuccessMessage, setTestSuccessMessage] = useState<string | null>(null);
   // --- FIN: NUEVOS ESTADOS ---
 
+  // --- Estados para Templates ---
+  const [templates, setTemplates] = useState<{ id: number; name: string; content: string }[]>([]);
+  const [selectedTemplate, setSelectedTemplate] = useState<string>('');
+  const [saveTemplateDialogOpen, setSaveTemplateDialogOpen] = useState(false);
+  const [newTemplateName, setNewTemplateName] = useState('');
+  const [savingTemplate, setSavingTemplate] = useState(false);
+  // --- FIN: Estados para Templates ---
+
 
   // --- useCallback para fetchCsvPreview (sin cambios respecto a lo anterior) ---
   const fetchCsvPreview = useCallback(async (campaignId: string) => {
@@ -213,6 +228,53 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
     };
     fetchSenderOptions();
   }, []); // Se ejecuta solo una vez
+
+  // --- useEffect para cargar templates ---
+  useEffect(() => {
+    const fetchTemplates = async () => {
+      try {
+        const response = await apiClient.get('/templates');
+        setTemplates(response.data);
+      } catch (error) {
+        console.error("Error fetching templates:", error);
+      }
+    };
+    fetchTemplates();
+  }, []);
+
+  // --- Handler para guardar template ---
+  const handleSaveTemplate = async () => {
+    if (!newTemplateName.trim()) {
+      setFormError('Template name is required.');
+      return;
+    }
+    setSavingTemplate(true);
+    setFormError('');
+    try {
+      const response = await apiClient.post('/templates', { name: newTemplateName, content: htmlBody });
+      setTemplates([response.data, ...templates]);
+      setSaveTemplateDialogOpen(false);
+      setNewTemplateName('');
+      setTestSuccessMessage(`Template "${response.data.name}" saved!`);
+    } catch (error: any) {
+      setFormError(error.response?.data?.detail || 'Failed to save template.');
+    } finally {
+      setSavingTemplate(false);
+    }
+  };
+
+  // --- Handler para cargar template ---
+  const handleLoadTemplate = (templateId: string) => {
+    setSelectedTemplate(templateId);
+    if (templateId === '') {
+      setHtmlBody('<h1>New Campaign</h1>\n<p>Write your content here.</p>');
+      return;
+    }
+    const template = templates.find(t => t.id === parseInt(templateId));
+    if (template) {
+      setHtmlBody(template.content);
+    }
+  };
 
   // useEffect para manejar la lógica de preview/mapeo CSV (sin cambios respecto a lo anterior)
   useEffect(() => {
@@ -515,7 +577,7 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
                 { value: 'USA', label: 'USA', icon: <FlagIcon fontSize="small" color="primary" /> },
                 { value: 'EUR', label: 'EUR', icon: <PublicIcon fontSize="small" color="secondary" /> }
               ].map((option) => (
-                <Grid item xs={6} key={option.value}>
+                <Grid size={6} key={option.value}>
                   <Card
                     variant="outlined"
                     sx={{
@@ -552,7 +614,7 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
                   color: 'warning.main'
                 }
               ].map((option) => (
-                <Grid item xs={6} key={option.value}>
+                <Grid size={6} key={option.value}>
                   <Card
                     variant="outlined"
                     sx={{
@@ -589,7 +651,7 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
                   isBouncedValue: true
                 }
               ].map((option) => (
-                <Grid item xs={6} key={option.value}>
+                <Grid size={6} key={option.value}>
                   <Card
                     variant="outlined"
                     sx={{
@@ -713,22 +775,58 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
         <FormControl component="fieldset" margin="normal" fullWidth required disabled={loadingSenders}>
           <FormLabel component="legend">Select Sender Accounts</FormLabel>
           {loadingSenders ? <CircularProgress size={24} sx={{ mt: 1, mb: 1 }} /> : (
-            <RadioGroup
-              row aria-label="sender selection mode" name="senderSelectionMode"
-              value={senderSelectionMode}
-              onChange={(e) => {
-                const newMode = e.target.value;
-                setSenderSelectionMode(newMode);
-                // Resetea selecciones al cambiar de modo
-                if (newMode !== 'group') setSelectedGroup('');
-                if (newMode !== 'manual') setSelectedAccounts([]);
-                setFormError(''); // Limpia errores al cambiar modo
-              }}
-            >
-              <FormControlLabel value="all" control={<Radio />} label="All Available" />
-              <FormControlLabel value="group" control={<Radio />} label="Specific Group" disabled={senderOptions.groups.length === 0} />
-              <FormControlLabel value="manual" control={<Radio />} label="Manual Selection" disabled={senderOptions.accounts.length === 0} />
-            </RadioGroup>
+            <Grid container spacing={1}>
+              {[
+                {
+                  value: 'all',
+                  label: 'All Available',
+                  icon: <AllInclusiveIcon fontSize="small" color="primary" />,
+                  disabled: false
+                },
+                {
+                  value: 'group',
+                  label: 'Specific Group',
+                  icon: <GroupWorkIcon fontSize="small" color="secondary" />,
+                  disabled: senderOptions.groups.length === 0
+                },
+                {
+                  value: 'manual',
+                  label: 'Manual Selection',
+                  icon: <TouchAppIcon fontSize="small" color="info" />,
+                  disabled: senderOptions.accounts.length === 0
+                }
+              ].map((option) => (
+                <Grid size={4} key={option.value}>
+                  <Card
+                    variant="outlined"
+                    sx={{
+                      borderColor: senderSelectionMode === option.value ? 'primary.main' : 'divider',
+                      bgcolor: senderSelectionMode === option.value ? 'action.selected' : 'background.paper',
+                      opacity: option.disabled ? 0.5 : 1,
+                      pointerEvents: option.disabled ? 'none' : 'auto',
+                      transition: 'all 0.2s',
+                      height: '100%'
+                    }}
+                  >
+                    <CardActionArea
+                      onClick={() => {
+                        setSenderSelectionMode(option.value);
+                        if (option.value !== 'group') setSelectedGroup('');
+                        if (option.value !== 'manual') setSelectedAccounts([]);
+                        setFormError('');
+                      }}
+                      sx={{ p: 1, height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}
+                      disabled={option.disabled}
+                    >
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        {option.icon}
+                        <Typography variant="body2" fontWeight="bold" align="center">{option.label}</Typography>
+                      </Box>
+                    </CardActionArea>
+                  </Card>
+                </Grid>
+              ))}
+            </Grid>
           )}
         </FormControl>
 
@@ -781,63 +879,175 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
         </Collapse>
 
 
-        <TextField
-          fullWidth
-          label="Campaign Name"
-          variant="outlined"
-          value={campaignName}
-          // Limpia el error específico de este campo al escribir
-          onChange={(e) => { setCampaignName(e.target.value); setFormError(''); }}
-          margin="normal"
-          required // Marcarlo como requerido visualmente
-          // Mostrar error si el formError general incluye "Name"
-          error={formError.includes('Campaign Name')}
-          sx={{ mt: 2 }} // Añadir margen superior si es necesario
-        />
+        {/* --- INICIO: NUEVA SECCIÓN JSX - Detalles de Campaña --- */}
+        <Divider sx={{ my: 2 }}><Chip label="Campaign Details" size="small" /></Divider>
+
+        <Grid container spacing={2} sx={{ mt: 1 }}>
+          {/* Fila 1: Nombre y Fecha */}
+          <Grid size={{ xs: 12, md: 6 }}>
+            <TextField
+              fullWidth
+              label="Campaign Name"
+              variant="outlined"
+              value={campaignName}
+              onChange={(e) => { setCampaignName(e.target.value); setFormError(''); }}
+              required
+              error={formError.includes('Campaign Name')}
+              slotProps={{
+                input: {
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <LabelIcon color="action" />
+                    </InputAdornment>
+                  ),
+                },
+              }}
+            />
+          </Grid>
+
+          <Grid size={{ xs: 12, md: 6 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <LocalizationProvider dateAdapter={AdapterDayjs}>
+                <DateTimePicker
+                  label="Schedule Send (optional)"
+                  value={scheduledAt}
+                  onChange={(newValue) => setScheduledAt(newValue)}
+                  slotProps={{
+                    textField: {
+                      fullWidth: true,
+                      helperText: scheduledAt ? 'Auto-launch at this time' : 'Leave empty for Draft'
+                    }
+                  }}
+                  minDateTime={dayjs()}
+                />
+              </LocalizationProvider>
+              {scheduledAt && (
+                <Tooltip title="Clear scheduled time">
+                  <IconButton onClick={() => setScheduledAt(null)} color="warning" size="small">
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              )}
+            </Box>
+          </Grid>
+
+          {/* Fila 2: Asunto */}
+          <Grid size={12}>
+            <TextField
+              fullWidth
+              label="Email Subject"
+              variant="outlined"
+              value={subject}
+              onChange={(e) => { setSubject(e.target.value); setFormError(''); }}
+              required
+              error={formError.includes('Subject')}
+              slotProps={{
+                input: {
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SubjectIcon color="action" />
+                    </InputAdornment>
+                  ),
+                },
+              }}
+            />
+          </Grid>
+        </Grid>
         {/* --- FIN: NUEVA SECCIÓN JSX --- */}
 
+        {/* --- INICIO: NUEVA SECCIÓN JSX - Content Editor --- */}
+        <Divider sx={{ my: 2 }}><Chip label="Content Editor" icon={<ArticleIcon />} size="small" /></Divider>
 
-        {/* Campos Comunes: Subject y Editor/Preview */}
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+          {/* Template Selector */}
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <FormControl size="small" sx={{ minWidth: 200 }}>
+              <InputLabel>Load Template</InputLabel>
+              <Select
+                label="Load Template"
+                value={selectedTemplate}
+                onChange={(e) => handleLoadTemplate(e.target.value as string)}
+              >
+                <MenuItem value=""><em>None (Blank)</em></MenuItem>
+                {templates.map((t) => (
+                  <MenuItem key={t.id} value={t.id.toString()}>{t.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => setSaveTemplateDialogOpen(true)}
+              disabled={!htmlBody.trim()}
+            >
+              Save Template
+            </Button>
+          </Box>
 
-        {/* --- Programar Envío --- */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 2 }}>
-          <LocalizationProvider dateAdapter={AdapterDayjs}>
-            <DateTimePicker
-              label="Schedule Send (optional)"
-              value={scheduledAt}
-              onChange={(newValue) => setScheduledAt(newValue)}
-              slotProps={{
-                textField: {
-                  fullWidth: true,
-                  helperText: scheduledAt ? 'Campaign will launch automatically at this time' : 'Leave empty to save as Draft'
-                }
-              }}
-              minDateTime={dayjs()}
-            />
-          </LocalizationProvider>
-          {scheduledAt && (
-            <Tooltip title="Clear scheduled time">
-              <IconButton onClick={() => setScheduledAt(null)} color="warning" size="small">
-                <DeleteIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          )}
-        </Box>
-
-        <TextField fullWidth label="Email Subject" variant="outlined" value={subject} onChange={(e) => { setSubject(e.target.value); setFormError(''); }} margin="normal" required error={formError.includes('Subject')} />
-
-        <Box sx={{ display: 'flex', justifyContent: 'flex-end', my: 1 }}>
+          {/* View Toggle Toolbar */}
           <ToggleButtonGroup value={viewMode} exclusive onChange={handleViewChange} size="small">
-            <ToggleButton value="code" aria-label="code view"><CodeIcon sx={{ mr: 1 }} /> Code</ToggleButton>
-            <ToggleButton value="preview" aria-label="preview"><VisibilityIcon sx={{ mr: 1 }} /> Preview</ToggleButton>
+            <ToggleButton value="code" aria-label="code view">
+              <CodeIcon sx={{ mr: 1 }} /> Code
+            </ToggleButton>
+            <ToggleButton value="preview" aria-label="preview">
+              <VisibilityIcon sx={{ mr: 1 }} /> Preview
+            </ToggleButton>
           </ToggleButtonGroup>
         </Box>
 
         {viewMode === 'code' ? (
-          <TextField fullWidth label="Email Body (HTML)" variant="outlined" multiline rows={10} value={htmlBody} onChange={(e) => { setHtmlBody(e.target.value); setFormError(''); }} required error={formError.includes('Body')} />
+          <TextField
+            fullWidth
+            label="Email Body (HTML)"
+            variant="outlined"
+            multiline
+            rows={12}
+            value={htmlBody}
+            onChange={(e) => { setHtmlBody(e.target.value); setFormError(''); }}
+            required
+            error={formError.includes('Body')}
+            sx={{
+              '& .MuiInputBase-root': {
+                fontFamily: '"Fira Code", "Roboto Mono", monospace',
+                fontSize: '0.875rem',
+                backgroundColor: '#1e1e1e', // Dark background for code editor feel
+                color: '#d4d4d4', // Light text
+              },
+            }}
+          />
         ) : (
-          <EmailPreview subject={subject} htmlBody={htmlBody} />
+          <Paper variant="outlined" sx={{ p: 2, minHeight: '300px', bgcolor: '#f5f5f5' }}>
+            <EmailPreview subject={subject} htmlBody={htmlBody} />
+          </Paper>
         )}
+        {/* --- FIN: NUEVA SECCIÓN JSX --- */}
+
+        {/* --- Dialog para Guardar Template --- */}
+        <Dialog open={saveTemplateDialogOpen} onClose={() => !savingTemplate && setSaveTemplateDialogOpen(false)}>
+          <DialogTitle>Save Template</DialogTitle>
+          <DialogContent>
+            <DialogContentText>
+              Enter a name for this template. You can load it later from "Load Template".
+            </DialogContentText>
+            <TextField
+              autoFocus
+              margin="dense"
+              label="Template Name"
+              type="text"
+              fullWidth
+              variant="outlined"
+              value={newTemplateName}
+              onChange={(e) => setNewTemplateName(e.target.value)}
+              disabled={savingTemplate}
+            />
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setSaveTemplateDialogOpen(false)} disabled={savingTemplate}>Cancel</Button>
+            <Button onClick={handleSaveTemplate} variant="contained" disabled={savingTemplate || !newTemplateName.trim()}>
+              {savingTemplate ? <CircularProgress size={24} /> : 'Save'}
+            </Button>
+          </DialogActions>
+        </Dialog>
 
       </DialogContent >
       <DialogActions>
