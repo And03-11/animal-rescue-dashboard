@@ -126,12 +126,14 @@ def send_test_email(template_id: int, request: SendTestRequest, db: Session = De
     
     for email in request.emails:
         try:
-            gmail_service.send_email(
-                to=email,
+            if gmail_service.send_email(
+                to_email=email,
                 subject=request.subject,
-                html_content=template.content
-            )
-            sent_count += 1
+                html_body=template.content
+            ):
+                sent_count += 1
+            else:
+                errors.append(f"{email}: Failed to send email (check server logs)")
         except Exception as e:
             errors.append(f"{email}: {str(e)}")
     
