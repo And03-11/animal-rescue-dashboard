@@ -127,7 +127,7 @@ def send_test_email(template_id: int, request: SendTestRequest, db: Session = De
     for email in request.emails:
         try:
             # Personalize content for test
-            test_name = "Valued Supporter"
+            test_name = "Test User"
             html_body_personalized = template.content.replace("{{name}}", test_name).replace("*|FNAME|*", test_name)
 
             if gmail_service.send_email(
