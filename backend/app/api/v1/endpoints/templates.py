@@ -126,10 +126,14 @@ def send_test_email(template_id: int, request: SendTestRequest, db: Session = De
     
     for email in request.emails:
         try:
+            # Personalize content for test
+            test_name = "Valued Supporter"
+            html_body_personalized = template.content.replace("{{name}}", test_name).replace("*|FNAME|*", test_name)
+
             if gmail_service.send_email(
                 to_email=email,
                 subject=request.subject,
-                html_body=template.content
+                html_body=html_body_personalized
             ):
                 sent_count += 1
             else:
