@@ -64,17 +64,26 @@ export const Layout: React.FC = () => {
     logout();
   };
 
-  const menuItems = [
-    { text: 'Dashboard', icon: <HomeRoundedIcon />, path: '/dashboard' },
-    { text: 'Analytics', icon: <AnalyticsRoundedIcon />, path: '/analytics' },
-    { text: 'Comparison', icon: <CompareArrowsRoundedIcon />, path: '/comparison' },
-    { text: 'Contacts', icon: <PersonSearchRoundedIcon />, path: '/contact-search' },
-    { text: 'Scheduler', icon: <EventNoteRoundedIcon />, path: '/scheduler' },
-    { text: 'Email', icon: <EmailRoundedIcon />, path: '/email-sender' },
-    { text: 'Templates', icon: <ArticleRoundedIcon />, path: '/templates' },
+  // Menu sections for organized navigation
+  const menuSections = [
+    {
+      title: 'CRM',
+      items: [
+        { text: 'Dashboard', icon: <HomeRoundedIcon />, path: '/dashboard' },
+        { text: 'Analytics', icon: <AnalyticsRoundedIcon />, path: '/analytics' },
+        { text: 'Comparison', icon: <CompareArrowsRoundedIcon />, path: '/comparison' },
+        { text: 'Contacts', icon: <PersonSearchRoundedIcon />, path: '/contact-search' },
+      ]
+    },
+    {
+      title: 'Email Marketing',
+      items: [
+        { text: 'Scheduler', icon: <EventNoteRoundedIcon />, path: '/scheduler' },
+        { text: 'Email', icon: <EmailRoundedIcon />, path: '/email-sender' },
+        { text: 'Templates', icon: <ArticleRoundedIcon />, path: '/templates' },
+      ]
+    }
   ];
-
-  // ✅ ELIMINADO: "Users" ya no está en el menú lateral
 
   const drawerContent = (
     <Box sx={{
@@ -111,61 +120,71 @@ export const Layout: React.FC = () => {
         )}
       </Toolbar>
 
-      <Box sx={{ px: 2, mb: 2 }}>
-        {!collapsed && (
-          <Typography variant="overline" color="text.secondary" sx={{ fontWeight: 700, letterSpacing: 1.2 }}>
-            Menu
-          </Typography>
-        )}
-      </Box>
+      <Box sx={{ px: 1.5, flexGrow: 1, overflowY: 'auto' }}>
+        {menuSections.map((section, sectionIndex) => (
+          <Box key={section.title}>
+            {/* Section Header */}
+            {!collapsed && (
+              <Typography
+                variant="overline"
+                color="text.secondary"
+                sx={{ fontWeight: 700, letterSpacing: 1.2, px: 1, mt: sectionIndex > 0 ? 2 : 0, display: 'block' }}
+              >
+                {section.title}
+              </Typography>
+            )}
+            {collapsed && sectionIndex > 0 && <Divider sx={{ my: 1 }} />}
 
-      <List sx={{ px: 1.5, flexGrow: 1 }}>
-        {menuItems.map((item) => {
-          const isActive = location.pathname === item.path;
-          return (
-            <ListItem key={item.text} disablePadding sx={{ mb: 1 }}>
-              <Tooltip title={collapsed ? item.text : ""} placement="right" arrow>
-                <ListItemButton
-                  component={RouterLink}
-                  to={item.path}
-                  sx={{
-                    minHeight: 48,
-                    justifyContent: collapsed ? 'center' : 'initial',
-                    px: 2.5,
-                    borderRadius: '12px',
-                    backgroundColor: isActive ? 'primary.main' : 'transparent',
-                    color: isActive ? 'primary.contrastText' : 'text.primary',
-                    '&:hover': {
-                      backgroundColor: isActive ? 'primary.dark' : 'rgba(0,0,0,0.04)',
-                    },
-                    transition: 'all 0.2s ease-in-out',
-                  }}
-                >
-                  <ListItemIcon
-                    sx={{
-                      minWidth: 0,
-                      mr: collapsed ? 0 : 2,
-                      justifyContent: 'center',
-                      color: isActive ? 'inherit' : 'text.secondary',
-                    }}
-                  >
-                    {item.icon}
-                  </ListItemIcon>
-                  {!collapsed && (
-                    <ListItemText
-                      primary={item.text}
-                      primaryTypographyProps={{
-                        fontWeight: isActive ? 600 : 500,
-                        fontSize: '0.95rem'
-                      }}
-                    />
-                  )}
-                </ListItemButton>
-              </Tooltip>
-            </ListItem>
-          );
-        })}
-      </List>
+            <List disablePadding>
+              {section.items.map((item) => {
+                const isActive = location.pathname === item.path;
+                return (
+                  <ListItem key={item.text} disablePadding sx={{ mb: 0.5 }}>
+                    <Tooltip title={collapsed ? item.text : ""} placement="right" arrow>
+                      <ListItemButton
+                        component={RouterLink}
+                        to={item.path}
+                        sx={{
+                          minHeight: 44,
+                          justifyContent: collapsed ? 'center' : 'initial',
+                          px: 2,
+                          borderRadius: '10px',
+                          backgroundColor: isActive ? 'primary.main' : 'transparent',
+                          color: isActive ? 'primary.contrastText' : 'text.primary',
+                          '&:hover': {
+                            backgroundColor: isActive ? 'primary.dark' : 'rgba(0,0,0,0.04)',
+                          },
+                          transition: 'all 0.2s ease-in-out',
+                        }}
+                      >
+                        <ListItemIcon
+                          sx={{
+                            minWidth: 0,
+                            mr: collapsed ? 0 : 2,
+                            justifyContent: 'center',
+                            color: isActive ? 'inherit' : 'text.secondary',
+                          }}
+                        >
+                          {item.icon}
+                        </ListItemIcon>
+                        {!collapsed && (
+                          <ListItemText
+                            primary={item.text}
+                            primaryTypographyProps={{
+                              fontWeight: isActive ? 600 : 500,
+                              fontSize: '0.9rem'
+                            }}
+                          />
+                        )}
+                      </ListItemButton>
+                    </Tooltip>
+                  </ListItem>
+                );
+              })}
+            </List>
+          </Box>
+        ))}
+      </Box>
 
       {/* ✅ Logout button at bottom of sidebar remains as quick access */}
       <Box sx={{ p: 2 }}>
