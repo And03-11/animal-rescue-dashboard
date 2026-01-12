@@ -117,8 +117,9 @@ def send_test_email(template_id: int, request: SendTestRequest, db: Session = De
     if not all_accounts:
         raise HTTPException(status_code=500, detail="No Gmail accounts configured")
     
-    account_id = all_accounts[0]['id']
-    gmail_service = GmailService(account_id)
+    # Use the full path to credentials file, not just the account ID
+    credentials_path = all_accounts[0]['path']
+    gmail_service = GmailService(credentials_path)
     
     sent_count = 0
     errors = []
