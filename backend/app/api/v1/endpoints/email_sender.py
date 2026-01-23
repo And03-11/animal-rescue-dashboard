@@ -165,8 +165,8 @@ def run_campaign_task(campaign_id: str):
                 segment=config.get('segment', 'standard')   # ✅ Usa el segmento guardado
             )
             # Necesitamos adaptar esto si get_campaign_contacts no devuelve nombres
-            # Por ahora, asumimos que solo devuelve Email
-            contact_data = [{'Email': c.get('Email'), 'Name': 'Valued Supporter'} # Nombre genérico
+            # Ahora get_campaign_contacts devuelve {'Email': ..., 'Name': ...}
+            contact_data = [{'Email': c.get('Email'), 'Name': c.get('Name', 'Valued Supporter')}
                             for c in airtable_contacts_raw if c.get('Email')]
             print(f"[{campaign_id}] Found {len(contact_data)} contacts in Airtable.")
             

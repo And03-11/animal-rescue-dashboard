@@ -30,7 +30,17 @@ DONATIONS_FIELDS = {"amount": "Amount", "date": "Date", "form_title_link": "Form
 CAMPAIGNS_FIELDS = {"name": "Name", "source": "Source", "total_amount_rollup": "Total", "total_count_rollup": "Amount of donations"}
 FORM_TITLES_FIELDS = {"name": "Name", "campaign_link": "Campaign", "donations_link": "Donations", "total_amount_rollup": "Total", "total_count_rollup": "Amount of donations"}
 DONORS_FIELDS = {"name": "Name", "last_name": "Last Name", "emails_link": "Emails", "donations_link": "Donations"}
-EMAILS_FIELDS = {"email": "Email"}
+EMAILS_FIELDS = {
+    "email": "Email", 
+    "donor": "Donor", 
+    "not_sending": "Not Sending",
+    "bounced_account": "Bounced Account",
+    "region": "Region",
+    "stage_from_donor": "Stage (from Donor)",
+    "exclude_from_campaign": "Exclude From Current Campaign",
+    "donor_name": "Name",
+    "donor_last_name": "Last Name"
+}
 DAILY_SUMMARIES_FIELDS = {
     "date": "Date",
     "total_amount": "Total Amount Today",
@@ -851,92 +861,94 @@ class AirtableService:
 
     def get_campaign_contacts(self, region: str, is_bounced: bool, segment: str = "standard") -> List[Dict[str, Any]]:
         """
-        Obtiene contactos de Airtable filtrados por Donor's Region, Donor's Stage='Big Campaign',
-        y Email's Bounced Account status.
+        Obtiene contactos directamente de la tabla Emails, usando los campos de lookup.
+        Optimizado para usar 'Name' y 'Last Name' (Lookups) directamente.
         
         Args:
             region: Región del donante (ej. 'USA', 'EUR').
             is_bounced: Si True, busca emails rebotados. Si False, no rebotados.
             segment: 'standard' (excluye marcados) o 'dnr' (solo marcados).
             
-        Devuelve una lista de diccionarios, cada uno con al menos la clave 'Email'.
+        Devuelve una lista de diccionarios con 'Email' y 'Name' del donante.
         """
-        # Nombres de campos en la tabla Donors
-        region_field = DONORS_FIELDS.get("region", "Region")
-        stage_field = DONORS_FIELDS.get("stage", "Stage")
-        emails_link_field = DONORS_FIELDS.get("emails_link", "Emails") # Campo que enlaza a la tabla Emails
-        exclude_field = "Exclude From Current Campaign"  # Campo checkbox para excluir donantes
-
         # Nombres de campos en la tabla Emails
-        email_address_field = EMAILS_FIELDS.get("email", "Email")
-        bounced_account_field = EMAILS_FIELDS.get("bounced_account", "Bounced Account") # <-- Campo Checkbox
+        email_field = EMAILS_FIELDS.get("email", "Email")
+        # Usamos los campos Lookup que ya existen en la tabla Emails
+        donor_first_name_field = EMAILS_FIELDS.get("donor_name", "Name") 
+        donor_last_name_field = EMAILS_FIELDS.get("donor_last_name", "Last Name")
+        
+        bounced_field = EMAILS_FIELDS.get("bounced_account", "Bounced Account")
+        not_sending_field = EMAILS_FIELDS.get("not_sending", "Not Sending")
+        region_field = EMAILS_FIELDS.get("region", "Region")
+        stage_field = EMAILS_FIELDS.get("stage_from_donor", "Stage (from Donor)")
+        exclude_field = EMAILS_FIELDS.get("exclude_from_campaign", "Exclude From Current Campaign")
 
         try:
-            # --- Paso 1: Filtrar Donantes por Region, Stage y Segmento ---
-            donor_formula_parts = [
+            # --- Construir fórmula directamente para la tabla Emails ---
+            formula_parts = [
                 f"{{{region_field}}} = '{region}'",
-                f"{{{stage_field}}} = 'Big Campaign'"
+                f"{{{stage_field}}} = 'Big Campaign'",
+                f"NOT({{{not_sending_field}}} = 1)"  # Siempre excluir "Not Sending"
             ]
             
-            # Lógica de Segmento
+            # Condición de Bounced Account
+            if is_bounced:
+                formula_parts.append(f"{{{bounced_field}}} = 1")
+                print("Buscando emails rebotados.")
+            else:
+                formula_parts.append(f"NOT({{{bounced_field}}} = 1)")
+                print("Excluyendo emails rebotados.")
+            
+            # Lógica de Segmento (Exclude From Current Campaign)
             if segment == "dnr":
                 # DNR: Solo los que TIENEN el check marcado
-                donor_formula_parts.append(f"{{{exclude_field}}} = 1")
+                formula_parts.append(f"{{{exclude_field}}} = 1")
                 print("Segmento DNR seleccionado: Buscando donantes excluidos.")
             else:
                 # Standard (default): Solo los que NO tienen el check marcado
-                donor_formula_parts.append(f"NOT({{{exclude_field}}} = 1)")
+                formula_parts.append(f"NOT({{{exclude_field}}} = 1)")
                 print("Segmento Standard seleccionado: Excluyendo donantes marcados.")
 
-            donor_formula = f"AND({', '.join(donor_formula_parts)})"
-
-            print(f"Airtable formula for Donors: {donor_formula}")
-            # Obtenemos solo el campo que enlaza a los Emails
-            donor_records = self.donors_table.all(formula=donor_formula, fields=[emails_link_field])
-
-            if not donor_records:
-                print("No donors found matching Region and Stage.")
-                return []
-
-            # --- Paso 2: Recopilar TODOS los IDs de Emails vinculados a esos Donantes ---
-            all_linked_email_ids = set()
-            for record in donor_records:
-                email_ids = record.get('fields', {}).get(emails_link_field, [])
-                if email_ids:
-                    all_linked_email_ids.update(email_ids)
-
-            if not all_linked_email_ids:
-                print("Donors found, but no linked emails.")
-                return []
-
-            # --- Paso 3: Filtrar los Emails por estado 'Bounced Account' ---
-            email_id_formulas = [f"RECORD_ID() = '{id}'" for id in all_linked_email_ids]
-            # La condición para el checkbox: {Bounced Account}=1 si buscamos los rebotados (is_bounced=True),
-            # o NOT({Bounced Account}=1) si buscamos los NO rebotados (is_bounced=False).
-            bounced_condition = f"{{{bounced_account_field}}} = 1"
-            if not is_bounced:
-                bounced_condition = f"NOT({bounced_condition})"
-
-            # Combinamos la lista de IDs con la condición de bounce
-            email_formula = f"AND(OR({', '.join(email_id_formulas)}), {bounced_condition})"
-
+            email_formula = f"AND({', '.join(formula_parts)})"
             print(f"Airtable formula for Emails: {email_formula}")
-            # Obtenemos solo el campo de la dirección de email
-            email_records = self.emails_table.all(formula=email_formula, fields=[email_address_field])
 
-            # --- Paso 4: Preparar la lista final con las direcciones de email ---
-            contact_list = [
-                {"Email": rec.get('fields', {}).get(email_address_field)}
-                for rec in email_records if rec.get('fields', {}).get(email_address_field)
-            ]
+            # --- Consultar directamente la tabla Emails ---
+            # Pedimos Email y Name (Lookup) - Last Name ya no es necesario
+            email_records = self.emails_table.all(
+                formula=email_formula, 
+                fields=[email_field, donor_first_name_field]
+            )
 
-            print(f"Found {len(contact_list)} emails matching all criteria (Region, Stage, Bounced).")
+            # --- Preparar la lista final ---
+            contact_list = []
+            for rec in email_records:
+                fields = rec.get('fields', {})
+                email_address = fields.get(email_field)
+                
+                if email_address:
+                    # Extraer First Name (Lookup -> Lista)
+                    first_name_raw = fields.get(donor_first_name_field)
+                    first_name = ""
+                    if isinstance(first_name_raw, list) and first_name_raw:
+                        first_name = str(first_name_raw[0]).strip()
+                    elif isinstance(first_name_raw, str):
+                        first_name = first_name_raw.strip()
+                        
+                    # Usar solo el First Name (o fallback)
+                    final_name = first_name or "Valued Supporter"
+                    
+                    contact_list.append({
+                        "Email": email_address,
+                        "Name": final_name
+                    })
+
+            print(f"Found {len(contact_list)} emails matching all criteria.")
             return contact_list
 
         except Exception as e:
-            print(f"Error getting campaign contacts from Airtable (linked tables): {e}")
+            print(f"Error getting campaign contacts from Airtable: {e}")
             traceback.print_exc()
-            return [] # Devuelve lista vacía en caso de error
+            return []
     
     def get_monthly_source_breakdown(self, start_date: date, end_date: date) -> Dict[str, Any]:
         """
