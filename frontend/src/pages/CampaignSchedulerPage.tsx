@@ -1,34 +1,34 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Box, CircularProgress, Alert, useTheme, alpha, Button } from '@mui/material';
+import { useNavigate } from 'react-router-dom';
+import { Box, CircularProgress, Alert, useTheme, alpha, Button, IconButton, Tooltip } from '@mui/material';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import FullscreenIcon from '@mui/icons-material/Fullscreen';
+import FullscreenExitIcon from '@mui/icons-material/FullscreenExit';
 import { motion } from 'framer-motion';
 import dayjs from 'dayjs';
 import apiClient from '../api/axiosConfig';
 
 // Import shared types
-import type { Campaign, CampaignEmail, ScheduledSend, FilterState } from '../types/scheduler.types';
+import type { Campaign, CampaignEmail, ScheduledSend } from '../types/scheduler.types';
 
 // Import new components
-import { SplitPanelLayout } from '../components/SplitPanelLayout';
-import { CampaignListPanel } from '../components/CampaignListPanel';
-import { CampaignDetailsPanel } from '../components/CampaignDetailsPanel';
 import { CampaignModal } from '../components/CampaignModal';
 import { SendWizardModal } from '../components/SendWizardModal';
+import { FlowchartEditor } from '../components/Scheduler/FlowchartEditor';
 
 // Main Component
 export const CampaignSchedulerPage = () => {
   const theme = useTheme();
+  const navigate = useNavigate();
 
   // State
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [selectedCampaignId, setSelectedCampaignId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [filters, setFilters] = useState<FilterState>({
-    search: '',
-    categories: []
-  });
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isSendWizardOpen, setIsSendWizardOpen] = useState(false);
+  const [isFullScreen, setIsFullScreen] = useState(false);
 
   // Get selected campaign
   const selectedCampaign = campaigns.find(c => c.id === selectedCampaignId) || null;
@@ -154,18 +154,7 @@ export const CampaignSchedulerPage = () => {
     }
   };
 
-  const handleDeleteCampaign = async () => {
-    if (!selectedCampaignId) return;
-    if (!window.confirm('Are you sure you want to delete this campaign? This will delete all associated emails and sends.')) return;
 
-    try {
-      await apiClient.delete(`/scheduler/events/campaign_${selectedCampaignId}`);
-      setSelectedCampaignId(null);
-      await fetchData();
-    } catch (err) {
-      console.error('Error deleting campaign:', err);
-    }
-  };
 
   const handleUpdateCampaign = async (updatedCampaign: Campaign) => {
     try {
@@ -196,9 +185,7 @@ export const CampaignSchedulerPage = () => {
     }
   };
 
-  const handleAddSend = async () => {
-    setIsSendWizardOpen(true);
-  };
+
 
   const handleBatchCreateSends = async (sends: any[]) => {
     const campaign = selectedCampaign;
@@ -243,11 +230,48 @@ export const CampaignSchedulerPage = () => {
         send_at: send.send_at.toISOString(),
         service: send.service,
         status: send.status,
-        segment_tag: send.segment_tag
+        segment_tag: send.segment_tag,
+        is_dnr: send.is_dnr,
+        dnr_date: send.dnr_date
       });
       await fetchData();
     } catch (err) {
       console.error('Error updating send:', err);
+    }
+  };
+
+  const handleCreateSend = async (campaignId: number, data: any) => {
+    try {
+      // 1. Create Campaign Email
+      const newEmailData = {
+        campaign_id: campaignId,
+        title: data.label || 'New Email',
+        subject: data.label || 'New Subject',
+        button_name: data.buttonName || 'Donate Now',
+        link_donation: '',
+        link_contact_us: '',
+        custom_links: ''
+      };
+
+      const emailRes = await apiClient.post('/scheduler/emails', newEmailData);
+      const newEmailId = emailRes.data.id;
+
+      // 2. Create Scheduled Send
+      const sendPayload = {
+        campaign_email_id: newEmailId,
+        send_at: dayjs(data.sendDate).toISOString(),
+        service: data.service || 'Automation',
+        status: data.status || 'pending',
+        segment_tag: 'New Segment', // Default or derived?
+        is_dnr: data.isDnr || false,
+        dnr_date: data.dnrDate ? dayjs(data.dnrDate).toISOString() : null,
+        custom_service: data.customService
+      };
+
+      await apiClient.post('/scheduler/sends', sendPayload);
+      await fetchData();
+    } catch (err) {
+      console.error('Error creating send:', err);
     }
   };
 
@@ -257,6 +281,28 @@ export const CampaignSchedulerPage = () => {
       await fetchData();
     } catch (err) {
       console.error('Error deleting send:', err);
+    }
+  };
+
+  const handleDuplicateSend = async (send: ScheduledSend) => {
+    console.log('handleDuplicateSend called with:', send);
+    try {
+      const payload = {
+        campaign_email_id: send.campaign_email_id,
+        send_at: dayjs(send.send_at).toISOString(),
+        service: send.service,
+        status: 'pending',
+        segment_tag: `${send.segment_tag || 'Segment'} (Copy)`,
+        is_dnr: send.is_dnr,
+        dnr_date: send.dnr_date ? dayjs(send.dnr_date).toISOString() : null
+      };
+      console.log('Sending duplicate payload:', payload);
+
+      await apiClient.post('/scheduler/sends', payload);
+      console.log('Duplicate successful, refreshing data...');
+      await fetchData();
+    } catch (err) {
+      console.error('Error duplicating send:', err);
     }
   };
 
@@ -290,85 +336,120 @@ export const CampaignSchedulerPage = () => {
       animate={{ opacity: 1 }}
       transition={{ duration: 0.5 }}
       sx={{
-        minHeight: '100vh',
-        background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.02)} 0%, ${alpha(
+        height: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        background: isFullScreen ? theme.palette.background.default : `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.02)} 0%, ${alpha(
           theme.palette.secondary.main,
           0.02
         )} 100%)`,
-        p: 3
+        p: isFullScreen ? 0 : 2,
+        overflow: 'hidden'
       }}
     >
-      {/* Header */}
-      <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Box>
-          <motion.div
-            initial={{ y: -20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.1 }}
-          >
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <Box
-                sx={{
-                  width: 48,
-                  height: 48,
-                  borderRadius: '12px',
-                  background: `linear-gradient(45deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '24px'
-                }}
-              >
-                📧
+      {/* Header - Hidden in Full Screen */}
+      {!isFullScreen && (
+        <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+          <Box>
+            <motion.div
+              initial={{ y: -20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.1 }}
+            >
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <Box
+                  sx={{
+                    width: 48,
+                    height: 48,
+                    borderRadius: '12px',
+                    background: `linear-gradient(45deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '24px'
+                  }}
+                >
+                  📧
+                </Box>
+                <Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Tooltip title="Back to Dashboard">
+                      <IconButton onClick={() => navigate('/dashboard')} size="small" sx={{ mr: 1 }}>
+                        <ArrowBackIcon />
+                      </IconButton>
+                    </Tooltip>
+                    <h1 style={{ margin: 0, fontSize: '28px', fontWeight: 700 }}>Campaign Scheduler</h1>
+                  </Box>
+                  <p style={{ margin: 0, color: theme.palette.text.secondary }}>
+                    Manage your email campaigns and scheduled sends
+                  </p>
+                </Box>
               </Box>
-              <Box>
-                <h1 style={{ margin: 0, fontSize: '28px', fontWeight: 700 }}>Campaign Scheduler</h1>
-                <p style={{ margin: 0, color: theme.palette.text.secondary }}>
-                  Manage your email campaigns and scheduled sends
-                </p>
-              </Box>
-            </Box>
-          </motion.div>
+            </motion.div>
+          </Box>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <Tooltip title="Full Screen">
+              <IconButton onClick={() => setIsFullScreen(true)}>
+                <FullscreenIcon />
+              </IconButton>
+            </Tooltip>
+            <Button
+              variant="contained"
+              onClick={handleCreateCampaign}
+              sx={{
+                borderRadius: '12px',
+                textTransform: 'none',
+                fontWeight: 600,
+                px: 3,
+                background: `linear-gradient(45deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`
+              }}
+            >
+              + New Campaign
+            </Button>
+          </Box>
         </Box>
-        <Button
-          variant="contained"
-          onClick={handleCreateCampaign}
-          sx={{
-            borderRadius: '12px',
-            textTransform: 'none',
-            fontWeight: 600,
-            px: 3,
-            background: `linear-gradient(45deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`
-          }}
-        >
-          + New Campaign
-        </Button>
-      </Box>
+      )}
 
-      {/* Main Content - Split Panel */}
-      <Box sx={{ height: 'calc(100vh - 200px)' }}>
-        <SplitPanelLayout
-          leftWidth={40}
-          leftPanel={
-            <CampaignListPanel
-              campaigns={campaigns}
-              selectedId={selectedCampaignId}
-              onSelect={setSelectedCampaignId}
-              filters={filters}
-              onFilterChange={setFilters}
-            />
-          }
-          rightPanel={
-            <CampaignDetailsPanel
-              campaign={selectedCampaign}
-              onUpdateEmail={handleUpdateEmail}
-              onAddSend={handleAddSend}
-              onUpdateSend={handleUpdateSend}
-              onDeleteSend={handleDeleteSend}
-              onDeleteCampaign={handleDeleteCampaign}
-              onUpdateCampaign={handleUpdateCampaign}
-            />
-          }
+      {/* Main Content - Flowchart Editor */}
+      <Box sx={{
+        flexGrow: 1,
+        bgcolor: isFullScreen ? 'transparent' : 'background.paper',
+        borderRadius: isFullScreen ? 0 : 2,
+        overflow: 'hidden',
+        boxShadow: isFullScreen ? 'none' : 1,
+        minHeight: 0,
+        position: 'relative',
+        m: 0,
+        p: 0
+      }}>
+        {/* Exit Full Screen Button */}
+        {isFullScreen && (
+          <Tooltip title="Exit Full Screen">
+            <IconButton
+              onClick={() => setIsFullScreen(false)}
+              sx={{
+                position: 'absolute',
+                top: 16,
+                right: 16,
+                zIndex: 1000,
+                bgcolor: 'background.paper',
+                boxShadow: 2,
+                '&:hover': { bgcolor: 'action.hover' }
+              }}
+            >
+              <FullscreenExitIcon />
+            </IconButton>
+          </Tooltip>
+        )}
+
+        <FlowchartEditor
+          campaigns={campaigns}
+          onUpdateCampaign={handleUpdateCampaign}
+          onUpdateEmail={handleUpdateEmail}
+          onUpdateSend={handleUpdateSend}
+          onCreateSend={handleCreateSend}
+          onDeleteSend={handleDeleteSend}
+          onDuplicateSend={handleDuplicateSend}
         />
       </Box>
 

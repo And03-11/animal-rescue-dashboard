@@ -1,52 +1,55 @@
-# --- File: backend/app/api/v1/endpoints/scheduler.py (MODIFICADO) ---
+# --- File: backend/app/api/v1/endpoints/scheduler.py ---
 import json
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional, Dict, Any
 from datetime import datetime
-
-from backend.app.db.database import get_db
-from backend.app.db.models import (
-    ScheduledCampaign, 
-    CampaignEmail, 
-    ScheduledSend, 
-    User
-)
-from backend.app.core.security import get_current_user 
 from pydantic import BaseModel
 
-# --- Lógica de Colores (Sin cambios) ---
+from backend.app.db.database import get_db
+from backend.app.db.models import ScheduledCampaign, CampaignEmail, ScheduledSend
+from backend.app.core.security import get_current_user
+
+# --- Helper Functions for Colors ---
 def get_category_color(category: Optional[str]) -> str:
-    category = (category or "other").lower()
-    if "big campaigns" in category: return "#FF8F00"
-    if "nbc" in category: return "#D32F2F"
-    if "unsubscribers" in category: return "#C2185B"
-    if "tagless" in category: return "#7B1FA2"
-    if "fundraising" in category: return "#303F9F"
-    return "#5D4037"
-def get_service_color(service: Optional[str]) -> str:
-    service = (service or "other").lower()
-    if "mailchimp" in service: return "#fbb254"
-    if "brevo" in service: return "#0b996e"
-    if "automation" in service: return "#6c5ce7"
-    if "internal" in service: return "#38AECC"
-    return "#757575"
-def get_service_text_color(service: Optional[str]) -> str:
-    service = (service or "other").lower()
-    if "mailchimp" in service: return "#000000"
+    colors = {
+        "Big Campaigns": "#6366f1",
+        "NBC": "#f43f5e",
+        "Unsubscribers": "#eab308",
+        "Tagless": "#22c55e",
+        "Influencers in Progress": "#8b5cf6",
+        "Fundraising": "#ec4899",
+        "Other": "#6b7280"
+    }
+    return colors.get(category, "#6b7280")
+
+def get_service_color(service: str) -> str:
+    colors = {
+        "Automation": "#3b82f6",
+        "Brevo": "#0ea5e9",
+        "Mailchimp": "#f59e0b",
+        "SalesHandy": "#10b981",
+        "smartlead": "#8b5cf6",
+        "GetResponse": "#ef4444",
+        "Other": "#6b7280"
+    }
+    return colors.get(service, "#6b7280")
+
+def get_service_text_color(service: str) -> str:
     return "#ffffff"
 
-# --- ✅ 1. Esquemas Pydantic ACTUALIZADOS ---
-
-# --- Nivel 1: Campaña (Sin cambios) ---
+# --- Nivel 1: Campaña (Padre) ---
 class ScheduledCampaignBase(BaseModel):
     title: str
     start_date: datetime
     end_date: datetime
     category: Optional[str] = None
     notes: Optional[str] = None
-    segmentation_mode: Optional[str] = "bc"
-class ScheduledCampaignCreate(ScheduledCampaignBase): pass
+    segmentation_mode: Optional[str] = None
+
+class ScheduledCampaignCreate(ScheduledCampaignBase):
+    pass
+
 class ScheduledCampaignUpdate(BaseModel):
     title: Optional[str] = None
     start_date: Optional[datetime] = None
@@ -54,18 +57,17 @@ class ScheduledCampaignUpdate(BaseModel):
     category: Optional[str] = None
     notes: Optional[str] = None
     segmentation_mode: Optional[str] = None
+
 class ScheduledCampaignResponse(ScheduledCampaignBase):
     id: int
-    class Config: orm_mode = True
+    class Config: 
+        orm_mode = True
 
 # --- Nivel 2: Email (Contenido) ---
 class CampaignEmailBase(BaseModel):
     title: str
-    # --- ✅ CAMBIOS AQUÍ ---
     subject: Optional[str] = None
-    button_name: Optional[str] = None # ✅ AÑADIDO
-    # html_body: Optional[str] = None # ✅ ELIMINADO
-    # --- FIN DE CAMBIOS ---
+    button_name: Optional[str] = None
     link_donation: Optional[str] = None
     link_contact_us: Optional[str] = None
     custom_links: Optional[str] = None
@@ -75,11 +77,8 @@ class CampaignEmailCreate(CampaignEmailBase):
 
 class CampaignEmailUpdate(BaseModel):
     title: Optional[str] = None
-    # --- ✅ CAMBIOS AQUÍ ---
     subject: Optional[str] = None
-    button_name: Optional[str] = None # ✅ AÑADIDO
-    # html_body: Optional[str] = None # ✅ ELIMINADO
-    # --- FIN DE CAMBIOS ---
+    button_name: Optional[str] = None
     link_donation: Optional[str] = None
     link_contact_us: Optional[str] = None
     custom_links: Optional[str] = None
@@ -87,27 +86,38 @@ class CampaignEmailUpdate(BaseModel):
 class CampaignEmailResponse(CampaignEmailBase):
     id: int
     campaign_id: int
-    class Config: orm_mode = True
+    class Config: 
+        orm_mode = True
 
-# --- Nivel 3: Envío (Horario/Segmento) (Sin cambios) ---
+# --- Nivel 3: Envío (Horario/Segmento) ---
 class ScheduledSendBase(BaseModel):
     send_at: datetime
     service: str = "Other"
+    custom_service: Optional[str] = None
     status: str = "pending"
     segment_tag: Optional[str] = None
+    is_dnr: Optional[bool] = False
+    dnr_date: Optional[datetime] = None
+
 class ScheduledSendCreate(ScheduledSendBase):
     campaign_email_id: int
+
 class ScheduledSendUpdate(BaseModel):
     send_at: Optional[datetime] = None
     service: Optional[str] = None
+    custom_service: Optional[str] = None
     status: Optional[str] = None
     segment_tag: Optional[str] = None
+    is_dnr: Optional[bool] = None
+    dnr_date: Optional[datetime] = None
+
 class ScheduledSendResponse(ScheduledSendBase):
     id: int
     campaign_email_id: int
-    class Config: orm_mode = True
+    class Config: 
+        orm_mode = True
 
-# --- Evento del Calendario (Genérico) (Sin cambios) ---
+# --- Evento del Calendario (Genérico) ---
 class CalendarEvent(BaseModel):
     id: str
     title: str
@@ -120,14 +130,14 @@ class CalendarEvent(BaseModel):
     allDay: Optional[bool] = None 
     extendedProps: Dict[str, Any]
 
-# --- Router (Sin cambios) ---
+# --- Router ---
 router = APIRouter(
     prefix="/scheduler",
     tags=["scheduler"],
     dependencies=[Depends(get_current_user)]
 )
 
-# --- Endpoints del Calendario (GET /events) (Sin cambios) ---
+# --- Endpoints del Calendario (GET /events) ---
 @router.get("/events", response_model=List[CalendarEvent])
 def get_scheduled_events(
     start: datetime = Query(...), end: datetime = Query(...),
@@ -194,57 +204,76 @@ def get_scheduled_events(
                     "type": "send", "send_id": send.id,
                     "campaign_email_id": send.campaign_email_id,
                     "campaign_id": send.email.campaign_id if send.email else None,
-                    "service": send.service, "status": send.status,
+                    "service": send.service, 
+                    "custom_service": send.custom_service,
+                    "status": send.status,
                     "segment_tag": send.segment_tag, "parent_title": parent_campaign_title,
                     "parent_category": parent_campaign_category,
-                    "parent_segmentation_mode": parent_segmentation_mode
+                    "parent_segmentation_mode": parent_segmentation_mode,
+                    "is_dnr": send.is_dnr, "dnr_date": send.dnr_date
                 }
             ))
         return events
     except Exception as e:
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Error al obtener eventos: {e}")
+        raise HTTPException(status_code=500, detail=f"Error fetching events: {e}")
 
-# --- CRUD de Campaña (Nivel 1) (Sin cambios) ---
+# --- CRUD de Campaña (Nivel 1) ---
 @router.post("/events", response_model=ScheduledCampaignResponse, status_code=status.HTTP_201_CREATED)
 def create_scheduled_campaign(campaign: ScheduledCampaignCreate, db: Session = Depends(get_db)):
     db_campaign = ScheduledCampaign(**campaign.model_dump())
     try:
-        db.add(db_campaign); db.commit(); db.refresh(db_campaign)
+        db.add(db_campaign)
+        db.commit()
+        db.refresh(db_campaign)
         return db_campaign
     except Exception as e:
-        db.rollback(); raise HTTPException(status_code=500, detail=f"Error al crear evento: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al crear evento: {e}")
 
 @router.put("/events/{event_id_str}", response_model=ScheduledCampaignResponse)
 def update_scheduled_campaign(event_id_str: str, campaign_update: ScheduledCampaignUpdate, db: Session = Depends(get_db)):
-    if not event_id_str.startswith("campaign_"): raise HTTPException(status_code=400, detail="Solo se permite mover/actualizar Campañas.")
-    try: event_id = int(event_id_str.split("_")[1])
-    except: raise HTTPException(status_code=400, detail="ID inválido")
-    db_campaign = db.query(ScheduledCampaign).filter(ScheduledCampaign.id == event_id).first()
-    if not db_campaign: raise HTTPException(status_code=404, detail="Campaña no encontrada")
-    update_data = campaign_update.model_dump(exclude_unset=True) 
-    for key, value in update_data.items(): setattr(db_campaign, key, value)
+    if not event_id_str.startswith("campaign_"):
+        raise HTTPException(status_code=400, detail="Solo se permite mover/actualizar Campañas.")
     try:
-        db.commit(); db.refresh(db_campaign)
+        event_id = int(event_id_str.split("_")[1])
+    except:
+        raise HTTPException(status_code=400, detail="ID inválido")
+    db_campaign = db.query(ScheduledCampaign).filter(ScheduledCampaign.id == event_id).first()
+    if not db_campaign:
+        raise HTTPException(status_code=404, detail="Campaña no encontrada")
+    update_data = campaign_update.model_dump(exclude_unset=True) 
+    for key, value in update_data.items():
+        setattr(db_campaign, key, value)
+    try:
+        db.commit()
+        db.refresh(db_campaign)
         return db_campaign
     except Exception as e:
-        db.rollback(); raise HTTPException(status_code=500, detail=f"Error al actualizar evento: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al actualizar evento: {e}")
 
 @router.delete("/events/{event_id_str}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_scheduled_campaign(event_id_str: str, db: Session = Depends(get_db)):
-    if not event_id_str.startswith("campaign_"): raise HTTPException(status_code=400, detail="Solo se permite eliminar Campañas.")
-    try: event_id = int(event_id_str.split("_")[1])
-    except: raise HTTPException(status_code=400, detail="ID inválido")
-    db_campaign = db.query(ScheduledCampaign).filter(ScheduledCampaign.id == event_id).first()
-    if not db_campaign: raise HTTPException(status_code=404, detail="Campaña no encontrada")
+    if not event_id_str.startswith("campaign_"):
+        raise HTTPException(status_code=400, detail="Solo se permite eliminar Campañas.")
     try:
-        db.delete(db_campaign); db.commit()
+        event_id = int(event_id_str.split("_")[1])
+    except:
+        raise HTTPException(status_code=400, detail="ID inválido")
+    db_campaign = db.query(ScheduledCampaign).filter(ScheduledCampaign.id == event_id).first()
+    if not db_campaign:
+        raise HTTPException(status_code=404, detail="Campaña no encontrada")
+    try:
+        db.delete(db_campaign)
+        db.commit()
         return None
     except Exception as e:
-        db.rollback(); raise HTTPException(status_code=500, detail=f"Error al eliminar evento: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al eliminar evento: {e}")
 
-# --- CRUD para CampaignEmail (Nivel 2) (Sin cambios) ---
+# --- CRUD para CampaignEmail (Nivel 2) ---
 @router.get("/campaigns/{campaign_id}/emails", response_model=List[CampaignEmailResponse])
 def get_campaign_emails(campaign_id: int, db: Session = Depends(get_db)):
     emails = db.query(CampaignEmail).filter(CampaignEmail.campaign_id == campaign_id).all()
@@ -253,38 +282,48 @@ def get_campaign_emails(campaign_id: int, db: Session = Depends(get_db)):
 @router.post("/emails", response_model=CampaignEmailResponse, status_code=status.HTTP_201_CREATED)
 def create_campaign_email(email: CampaignEmailCreate, db: Session = Depends(get_db)):
     db_campaign = db.query(ScheduledCampaign).filter(ScheduledCampaign.id == email.campaign_id).first()
-    if not db_campaign: raise HTTPException(status_code=404, detail="Campaña padre no encontrada")
+    if not db_campaign:
+        raise HTTPException(status_code=404, detail="Campaña padre no encontrada")
     db_email = CampaignEmail(**email.model_dump())
     try:
-        db.add(db_email); db.commit(); db.refresh(db_email)
+        db.add(db_email)
+        db.commit()
+        db.refresh(db_email)
         return db_email
     except Exception as e:
-        db.rollback(); raise HTTPException(status_code=500, detail=f"Error al crear email: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al crear email: {e}")
 
 @router.put("/emails/{email_id}", response_model=CampaignEmailResponse)
 def update_campaign_email(email_id: int, email_update: CampaignEmailUpdate, db: Session = Depends(get_db)):
-    # (Este endpoint ahora maneja 'button_name' automáticamente gracias a Pydantic)
     db_email = db.query(CampaignEmail).filter(CampaignEmail.id == email_id).first()
-    if not db_email: raise HTTPException(status_code=404, detail="Email no encontrado")
+    if not db_email:
+        raise HTTPException(status_code=404, detail="Email no encontrado")
     update_data = email_update.model_dump(exclude_unset=True)
-    for key, value in update_data.items(): setattr(db_email, key, value)
+    for key, value in update_data.items():
+        setattr(db_email, key, value)
     try:
-        db.commit(); db.refresh(db_email)
+        db.commit()
+        db.refresh(db_email)
         return db_email
     except Exception as e:
-        db.rollback(); raise HTTPException(status_code=500, detail=f"Error al actualizar email: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al actualizar email: {e}")
 
 @router.delete("/emails/{email_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_campaign_email(email_id: int, db: Session = Depends(get_db)):
     db_email = db.query(CampaignEmail).filter(CampaignEmail.id == email_id).first()
-    if not db_email: raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Email no encontrado")
+    if not db_email:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Email no encontrado")
     try:
-        db.delete(db_email); db.commit()
+        db.delete(db_email)
+        db.commit()
         return None
     except Exception as e:
-        db.rollback(); raise HTTPException(status_code=500, detail=f"Error al eliminar email: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al eliminar email: {e}")
 
-# --- CRUD para ScheduledSend (Nivel 3) (Sin cambios) ---
+# --- CRUD para ScheduledSend (Nivel 3) ---
 @router.get("/emails/{email_id}/sends", response_model=List[ScheduledSendResponse])
 def get_email_sends(email_id: int, db: Session = Depends(get_db)):
     sends = db.query(ScheduledSend).filter(ScheduledSend.campaign_email_id == email_id).order_by(ScheduledSend.send_at.asc()).all()
@@ -293,32 +332,43 @@ def get_email_sends(email_id: int, db: Session = Depends(get_db)):
 @router.post("/sends", response_model=ScheduledSendResponse, status_code=status.HTTP_201_CREATED)
 def create_scheduled_send(send: ScheduledSendCreate, db: Session = Depends(get_db)):
     db_email = db.query(CampaignEmail).filter(CampaignEmail.id == send.campaign_email_id).first()
-    if not db_email: raise HTTPException(status_code=404, detail="Email padre no encontrado")
+    if not db_email:
+        raise HTTPException(status_code=404, detail="Email padre no encontrado")
     db_send = ScheduledSend(**send.model_dump())
     try:
-        db.add(db_send); db.commit(); db.refresh(db_send)
+        db.add(db_send)
+        db.commit()
+        db.refresh(db_send)
         return db_send
     except Exception as e:
-        db.rollback(); raise HTTPException(status_code=500, detail=f"Error al crear envío: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al crear envío: {e}")
 
 @router.put("/sends/{send_id}", response_model=ScheduledSendResponse)
 def update_scheduled_send(send_id: int, send_update: ScheduledSendUpdate, db: Session = Depends(get_db)):
     db_send = db.query(ScheduledSend).filter(ScheduledSend.id == send_id).first()
-    if not db_send: raise HTTPException(status_code=404, detail="Envío no encontrado")
+    if not db_send:
+        raise HTTPException(status_code=404, detail="Envío no encontrado")
     update_data = send_update.model_dump(exclude_unset=True)
-    for key, value in update_data.items(): setattr(db_send, key, value)
+    for key, value in update_data.items():
+        setattr(db_send, key, value)
     try:
-        db.commit(); db.refresh(db_send)
+        db.commit()
+        db.refresh(db_send)
         return db_send
     except Exception as e:
-        db.rollback(); raise HTTPException(status_code=500, detail=f"Error al actualizar envío: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al actualizar envío: {e}")
 
 @router.delete("/sends/{send_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_scheduled_send(send_id: int, db: Session = Depends(get_db)):
     db_send = db.query(ScheduledSend).filter(ScheduledSend.id == send_id).first()
-    if not db_send: raise HTTPException(status_code=404, detail="Envío no encontrado")
+    if not db_send:
+        raise HTTPException(status_code=404, detail="Envío no encontrado")
     try:
-        db.delete(db_send); db.commit()
+        db.delete(db_send)
+        db.commit()
         return None
     except Exception as e:
-        db.rollback(); raise HTTPException(status_code=500, detail=f"Error al eliminar envío: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al eliminar envío: {e}")

@@ -18,8 +18,11 @@ export interface ScheduledSend {
     campaign_email_id: number;
     send_at: Dayjs;
     service: string;
+    custom_service?: string;
     status: string;
     segment_tag?: string;
+    is_dnr?: boolean;
+    dnr_date?: string;
 }
 
 export interface Campaign {

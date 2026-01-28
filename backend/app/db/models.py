@@ -68,9 +68,15 @@ class ScheduledSend(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     send_at = Column(DateTime, nullable=False, index=True) 
-    service = Column(String, nullable=False, default="Other", index=True) 
+    service = Column(String, nullable=False, default="Other", index=True)
+    custom_service = Column(String, nullable=True)  # Custom service name when 'Other' is selected
     status = Column(String, nullable=False, default="pending", index=True)
-    segment_tag = Column(String, nullable=True, index=True) 
+    segment_tag = Column(String, nullable=True, index=True)
+    
+    # --- ✅ CAMBIOS AQUÍ (DNR) ---
+    is_dnr = Column(Boolean, default=False)
+    dnr_date = Column(DateTime, nullable=True)
+    # --- FIN DE CAMBIOS ---
 
     campaign_email_id = Column(Integer, ForeignKey("campaign_emails.id"), nullable=False, index=True)
     email = relationship("CampaignEmail", back_populates="sends")

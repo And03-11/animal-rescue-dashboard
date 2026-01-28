@@ -78,7 +78,7 @@ export const SendWizardModal: React.FC<SendWizardModalProps> = ({
                     sends.push({
                         send_at: time,
                         segment_tag: tag,
-                        service: 'Other', // Default service
+                        service: 'Automation', // Default service
                         status: 'pending'
                     });
                 });
@@ -86,16 +86,16 @@ export const SendWizardModal: React.FC<SendWizardModalProps> = ({
                 // Create 3 groups
                 if (usaTime) {
                     ['Tag #1', 'Tag #4'].forEach(tag => {
-                        sends.push({ send_at: usaTime, segment_tag: tag, service: 'Other', status: 'pending' });
+                        sends.push({ send_at: usaTime, segment_tag: tag, service: 'Automation', status: 'pending' });
                     });
                 }
                 if (eurTime) {
                     ['Tag #2', 'Tag #3'].forEach(tag => {
-                        sends.push({ send_at: eurTime, segment_tag: tag, service: 'Other', status: 'pending' });
+                        sends.push({ send_at: eurTime, segment_tag: tag, service: 'Automation', status: 'pending' });
                     });
                 }
                 if (yahooTime) {
-                    sends.push({ send_at: yahooTime, segment_tag: 'Tag #5', service: 'Other', status: 'pending' });
+                    sends.push({ send_at: yahooTime, segment_tag: 'Tag #5', service: 'Automation', status: 'pending' });
                 }
             } else {
                 // Standard Mode
@@ -105,7 +105,7 @@ export const SendWizardModal: React.FC<SendWizardModalProps> = ({
                     sends.push({
                         send_at: standardTime,
                         segment_tag: tag,
-                        service: 'Other',
+                        service: 'Automation',
                         status: 'pending'
                     });
                 });

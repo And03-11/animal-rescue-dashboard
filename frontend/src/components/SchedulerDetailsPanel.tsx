@@ -43,6 +43,7 @@ interface CalendarEvent {
         notes?: string;
         category?: string;
         service?: string;
+        custom_service?: string;
         status?: string;
         segment_tag?: string;
         parent_title?: string;
@@ -240,7 +241,11 @@ export const SchedulerDetailsPanel: React.FC<SchedulerDetailsPanelProps> = ({
                                             SERVICE
                                         </Typography>
                                         <Chip
-                                            label={selectedEvent.extendedProps.service}
+                                            label={
+                                                selectedEvent.extendedProps.service === 'Other' && selectedEvent.extendedProps.custom_service
+                                                    ? selectedEvent.extendedProps.custom_service
+                                                    : selectedEvent.extendedProps.service
+                                            }
                                             size="small"
                                             sx={{ mt: 0.5, borderRadius: '6px' }}
                                         />

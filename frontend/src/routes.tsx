@@ -59,6 +59,16 @@ export function AppRoutes() {
         <Route path="/login" element={<LoginForm />} />
         <Route path="/shared/:token" element={<SharedAnalyticsPage />} />
 
+        {/* --- Standalone Private Routes (No Layout) --- */}
+        <Route
+          path="/scheduler"
+          element={
+            <PrivateRoute>
+              <CampaignSchedulerPage />
+            </PrivateRoute>
+          }
+        />
+
         {/* --- Rutas Protegidas con Layout --- */}
         <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
 
@@ -87,10 +97,7 @@ export function AppRoutes() {
             path="campaign/:campaignId"
             element={<PageTransition><CampaignDetailPage /></PageTransition>}
           />
-          <Route
-            path="scheduler"
-            element={<PageTransition><CampaignSchedulerPage /></PageTransition>}
-          />
+
 
           {/* Email Templates Route */}
           <Route
