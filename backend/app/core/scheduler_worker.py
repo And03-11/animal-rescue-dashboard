@@ -60,6 +60,24 @@ async def check_and_launch_scheduled_campaigns():
         traceback.print_exc()
 
 
+async def run_data_sync():
+    """
+    Run the Airtable -> Supabase synchronization.
+    Runs in an executor because it's synchronous.
+    """
+    print("[Scheduler Worker] 🔄 Starting Data Sync (Airtable -> Supabase)...")
+    try:
+        from backend.app.scripts.migrate_to_supabase import run_migration
+        
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, run_migration)
+        
+        print("[Scheduler Worker] ✅ Data Sync finished successfully")
+    except Exception as e:
+        print(f"[Scheduler Worker] ❌ Error in Data Sync: {e}")
+        traceback.print_exc()
+
+
 def init_scheduler():
     """Initialize the APScheduler"""
     global _scheduler
@@ -70,17 +88,27 @@ def init_scheduler():
     
     _scheduler = AsyncIOScheduler()
     
-    # Add job to check every minute
+    # 1. Email Campaign Check (Every 1 minute)
     _scheduler.add_job(
         check_and_launch_scheduled_campaigns,
         trigger=IntervalTrigger(minutes=1),
         id='email_scheduler_check',
         name='Check for scheduled email campaigns',
         replace_existing=True,
-        max_instances=1  # Prevent overlapping executions
+        max_instances=1
     )
     
-    print("[Scheduler Worker] ✅ Email scheduler initialized (checking every 1 minute)")
+    # 2. Data Sync (Every 10 minutes)
+    _scheduler.add_job(
+        run_data_sync,
+        trigger=IntervalTrigger(minutes=10),
+        id='data_sync_job',
+        name='Sync Airtable to Supabase',
+        replace_existing=True,
+        max_instances=1
+    )
+    
+    print("[Scheduler Worker] ✅ Scheduler initialized (Emails: 1min, Sync: 10min)")
     return _scheduler
 
 

@@ -715,6 +715,55 @@ class SupabaseService:
         return []
 
     # ==========================================
+    # FUNNEL STATS (Optimized)
+    # ==========================================
+
+    def get_funnel_stats(self) -> Dict[str, Any]:
+        """
+        Get funnel statistics directly from Supabase.
+        """
+        try:
+            # 1. Total Funnel (Active)
+            funnel_data = self._execute_one(
+                "SELECT COUNT(*) as count FROM donors WHERE stage = 'Funnel' AND (status IS NULL OR status != 'Unsubscribed')"
+            )
+            funnel_count = funnel_data['count'] if funnel_data else 0
+            
+            # 2. Pending Approvals
+            pending_data = self._execute_one(
+                "SELECT COUNT(*) as count FROM donors WHERE stage = 'Pending Approval' AND region IS NOT NULL AND region != '' AND (status IS NULL OR status NOT IN ('Final Check', 'Potential Duplicate'))"
+            )
+            pending_count = pending_data['count'] if pending_data else 0
+
+            # 3. Unsubscribed (Funnel only)
+            unsub_data = self._execute_one(
+                "SELECT COUNT(*) as count FROM donors WHERE stage = 'Funnel' AND status = 'Unsubscribed'"
+            )
+            unsubscribed_count = unsub_data['count'] if unsub_data else 0
+            
+            # 4. Breakdown
+            breakdown_rows = self._execute_query(
+                "SELECT COALESCE(funnel_stage, 'Unknown') as stage, COUNT(*) as count FROM donors WHERE stage = 'Funnel' AND (status IS NULL OR status != 'Unsubscribed') GROUP BY funnel_stage ORDER BY count DESC"
+            )
+            # Frontend expects list of {name: str, count: int}
+            stage_breakdown = [{"name": row['stage'], "count": int(row['count'])} for row in breakdown_rows]
+
+            return {
+                "total_funnel": int(funnel_count),
+                "pending_approvals": int(pending_count),
+                "total_unsubscribed": int(unsubscribed_count),
+                "stage_breakdown": stage_breakdown
+            }
+        except Exception as e:
+            print(f"❌ Error in Supabase get_funnel_stats: {e}")
+            return {
+                "total_funnel": 0, 
+                "pending_approvals": 0, 
+                "total_unsubscribed": 0,
+                "stage_breakdown": {}
+            }
+
+    # ==========================================
     # SHARED VIEWS
     # ==========================================
 

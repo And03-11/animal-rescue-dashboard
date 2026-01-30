@@ -22,6 +22,7 @@ const CampaignSchedulerPage = lazy(() => import('./pages/CampaignSchedulerPage')
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const SharedAnalyticsPage = lazy(() => import('./pages/SharedAnalyticsPage'));
 const TemplatesPage = lazy(() => import('./pages/TemplatesPage'));
+const FunnelPage = lazy(() => import('./pages/FunnelPage'));
 
 const SpinnerFallback = () => (
   <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
@@ -75,6 +76,10 @@ export function AppRoutes() {
           <Route
             path="dashboard"
             element={<PageTransition><DashboardHomePage /></PageTransition>}
+          />
+          <Route
+            path="funnel"
+            element={<PageTransition><FunnelPage /></PageTransition>}
           />
 
           <Route

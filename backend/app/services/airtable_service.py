@@ -29,7 +29,15 @@ COSTA_RICA_TZ = ZoneInfo("America/Costa_Rica")
 DONATIONS_FIELDS = {"amount": "Amount", "date": "Date", "form_title_link": "Form Title", "donor_link": "Donor"}
 CAMPAIGNS_FIELDS = {"name": "Name", "source": "Source", "total_amount_rollup": "Total", "total_count_rollup": "Amount of donations"}
 FORM_TITLES_FIELDS = {"name": "Name", "campaign_link": "Campaign", "donations_link": "Donations", "total_amount_rollup": "Total", "total_count_rollup": "Amount of donations"}
-DONORS_FIELDS = {"name": "Name", "last_name": "Last Name", "emails_link": "Emails", "donations_link": "Donations"}
+DONORS_FIELDS = {
+    "name": "Name", 
+    "last_name": "Last Name", 
+    "emails_link": "Emails", 
+    "donations_link": "Donations",
+    "stage": "Stage",
+    "funnel_stage": "Funnel Stage",
+    "status": "Status"
+}
 EMAILS_FIELDS = {
     "email": "Email", 
     "donor": "Donor", 
@@ -1065,6 +1073,88 @@ class AirtableService:
 
 
 
+    def get_funnel_stats(self) -> Dict[str, Any]:
+        """
+        Calcula estadísticas del funnel y aprobaciones pendientes basado en filtros de Airtable.
+        """
+        try:
+            records = self.donors_table.all()
+
+            total_funnel = 0
+            pending_approvals = 0
+            stage_breakdown = defaultdict(int)
+
+            for rec in records:
+                fields = rec.get("fields", {})
+                
+                stage = fields.get("Stage")
+                status = fields.get("Status")
+                region = fields.get("Region")
+                funnel_stage = fields.get("Funnel Stage")
+
+                # 1. PENDING APPROVAL FILTER
+                # Where Stage is Pending Approval AND Region is not empty 
+                # AND Status is not Final Check AND Status is not Potential Duplicate
+                if stage == "Pending Approval":
+                     if region: # Check if not empty/None
+                         if status != "Final Check" and status != "Potential Duplicate":
+                             pending_approvals += 1
+
+                # 2. FUNNEL FILTER
+                # Where Stage is Funnel AND Status is not Unsubscribed
+                if stage == "Funnel":
+                    if status != "Unsubscribed":
+                        # Add to total funnel count
+                        total_funnel += 1
+                        
+                        # Breakdown by Funnel Stage
+                        # If Funnel Stage is present, use it. Otherwise 'Unknown'.
+                        if funnel_stage:
+                            # Handle list if it comes as lookup (though usually string/list of strings)
+                            val = str(funnel_stage)
+                            if isinstance(funnel_stage, list) and len(funnel_stage) > 0:
+                                val = str(funnel_stage[0])
+                            
+                            stage_breakdown[val] += 1
+                        else:
+                            # Optional: Track those without funnel stage?
+                            # stage_breakdown["(No Funnel Stage)"] += 1
+                            pass
+
+            # Format Breakdown
+            breakdown_list = [
+                {"name": k, "count": v} for k, v in stage_breakdown.items()
+            ]
+            
+            # Ordenar numéricamente (Natural Sort) para que Stage 10 vaya después de Stage 9, no después de Stage 1.
+            def sort_stages(item):
+                name = item["name"]
+                import re
+                # Buscar patrón "(Stage X)"
+                match = re.search(r"\(Stage\s*(\d+)\)", name, re.IGNORECASE)
+                if match:
+                    # Retornar tupla: (orden numérico, nombre original)
+                    return (int(match.group(1)), name)
+                # Si no tiene patrón, ponlo al final ordenado alfabéticamente
+                return (9999, name)
+
+            breakdown_list.sort(key=sort_stages)
+
+            return {
+                "total_funnel": total_funnel,
+                "pending_approvals": pending_approvals,
+                "stage_breakdown": breakdown_list
+            }
+
+        except Exception as e:
+            print(f"Error en get_funnel_stats: {e}")
+            traceback.print_exc()
+            return {
+                "total_funnel": 0,
+                "pending_approvals": 0,
+                "stage_breakdown": []
+            }
+
 airtable_service_instance = AirtableService()
 
 def get_airtable_service():
@@ -1074,3 +1164,5 @@ def get_airtable_service():
 
 
     
+
+

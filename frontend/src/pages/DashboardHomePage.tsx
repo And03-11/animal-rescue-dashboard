@@ -17,6 +17,7 @@ import { CombinedStatCard } from '../components/CombinedStatCard';
 import { TopDonorsTable, type Donor } from '../components/TopDonorsTable';
 import { DonationSourceChart } from '../components/DonationSourceChart';
 
+
 // Interfaces de datos
 interface GlanceData {
   amountToday: number;
@@ -376,6 +377,7 @@ export const DashboardHomePage = () => {
             </Grid>
           </>
         )}
+
       </Grid>
 
       {/* --- SECCIÓN 2: BÚSQUEDA POR RANGO --- */}

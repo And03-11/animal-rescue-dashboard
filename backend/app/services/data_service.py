@@ -279,6 +279,18 @@ class DataService:
                 "donations": normalized_donations
             }
 
+
+    def get_funnel_stats(self) -> Dict[str, Any]:
+        """
+        Fetches funnel stats from Supabase, falling back to Airtable.
+        """
+        try:
+            return self.supabase.get_funnel_stats()
+        except Exception as e:
+            print(f"⚠️ Supabase Error (get_funnel_stats): {e}")
+            print("Falling back to Airtable...")
+            return self.airtable.get_funnel_stats()
+
 # Singleton
 _data_service_instance = None
 

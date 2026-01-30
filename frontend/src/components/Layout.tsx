@@ -16,6 +16,7 @@ import PersonSearchRoundedIcon from '@mui/icons-material/PersonSearchRounded';
 import EventNoteRoundedIcon from '@mui/icons-material/EventNoteRounded';
 import EmailRoundedIcon from '@mui/icons-material/EmailRounded';
 import ArticleRoundedIcon from '@mui/icons-material/ArticleRounded'; // For Templates
+import FilterAltRoundedIcon from '@mui/icons-material/FilterAltRounded'; // For Funnel
 import SettingsRoundedIcon from '@mui/icons-material/SettingsRounded'; // ✅ Nuevo icono
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded';
 import MenuIcon from '@mui/icons-material/Menu';
@@ -70,6 +71,7 @@ export const Layout: React.FC = () => {
       title: 'CRM',
       items: [
         { text: 'Dashboard', icon: <HomeRoundedIcon />, path: '/dashboard' },
+        { text: 'New Comer Funnel', icon: <FilterAltRoundedIcon />, path: '/funnel' },
         { text: 'Analytics', icon: <AnalyticsRoundedIcon />, path: '/analytics' },
         { text: 'Comparison', icon: <CompareArrowsRoundedIcon />, path: '/comparison' },
         { text: 'Contacts', icon: <PersonSearchRoundedIcon />, path: '/contact-search' },
