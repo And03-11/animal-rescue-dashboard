@@ -743,10 +743,23 @@ class SupabaseService:
             
             # 4. Breakdown
             breakdown_rows = self._execute_query(
-                "SELECT COALESCE(funnel_stage, 'Unknown') as stage, COUNT(*) as count FROM donors WHERE stage = 'Funnel' AND (status IS NULL OR status != 'Unsubscribed') GROUP BY funnel_stage ORDER BY count DESC"
+                "SELECT COALESCE(funnel_stage, 'Unknown') as stage, COUNT(*) as count FROM donors WHERE stage = 'Funnel' AND (status IS NULL OR status != 'Unsubscribed') GROUP BY funnel_stage"
             )
-            # Frontend expects list of {name: str, count: int}
-            stage_breakdown = [{"name": row['stage'], "count": int(row['count'])} for row in breakdown_rows]
+            
+            # Helper to extract stage number
+            import re
+            def get_stage_order(stage_name):
+                # Extract number from "(Stage X)"
+                match = re.search(r'\(Stage (\d+)\)', stage_name)
+                if match:
+                    return int(match.group(1))
+                return 9999 # Push to end if no number
+            
+            # Construct dictionary first
+            raw_breakdown = [{"name": row['stage'], "count": int(row['count'])} for row in breakdown_rows]
+            
+            # Sort by stage number ASC
+            stage_breakdown = sorted(raw_breakdown, key=lambda x: get_stage_order(x['name']))
 
             return {
                 "total_funnel": int(funnel_count),
