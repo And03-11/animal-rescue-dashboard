@@ -165,23 +165,23 @@ export const FunnelStats: React.FC = () => {
                         <Typography variant="h6" fontWeight="800" sx={{ mb: 3 }}>
                             Funnel Stage Breakdown
                         </Typography>
-                        <Box sx={{ height: 400, width: '100%' }}>
+                        <Box sx={{ height: 500, width: '100%' }}>
                             <ResponsiveContainer width="100%" height="100%">
                                 <BarChart
                                     data={data.stage_breakdown}
-                                    margin={{ top: 20, right: 30, left: 20, bottom: 60 }}
+                                    margin={{ top: 20, right: 30, left: 20, bottom: 120 }}
                                 >
                                     <CartesianGrid strokeDasharray="3 3" stroke={alpha(theme.palette.text.secondary, 0.1)} vertical={false} />
                                     <XAxis
                                         dataKey="name"
                                         stroke={theme.palette.text.secondary}
-                                        tick={{ fill: theme.palette.text.secondary, fontSize: 12 }}
+                                        tick={{ fill: theme.palette.text.secondary, fontSize: 11 }}
                                         tickLine={false}
                                         axisLine={false}
                                         angle={-45}
                                         textAnchor="end"
                                         interval={0}
-                                        height={60}
+                                        height={120}
                                     />
                                     <YAxis
                                         stroke={theme.palette.text.secondary}
