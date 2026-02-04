@@ -10,6 +10,9 @@ from pydantic import BaseModel, Field
 import pandas as pd
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Union
+import threading
+import queue
+
 
 from backend.app.services.airtable_service import AirtableService
 from backend.app.services.gmail_service import GmailService
@@ -301,147 +304,180 @@ def run_campaign_task(campaign_id: str):
     html_body_template = config.get('html_body', '<p>Error: Email body missing.</p>')
 
 
-    # --- 4. Iterar y Enviar Emails ---
-    # --- INICIO: REEMPLAZO del Bucle de Envío con Rotación ---
-    sent_emails = [] # Lista para llevar registro de emails ya enviados en esta campaña (en minúsculas)
-    sent_log_path = os.path.join(SENT_LOGS_DIR, f"sent_{campaign_id}.csv") # Ruta al log
-
-    # Cargar emails ya enviados si el log existe (para reanudar)
+    # --- 4. Parallel Email Sending ---
+    sent_emails = [] # List of already sent emails (lowercase)
+    sent_log_path = os.path.join(SENT_LOGS_DIR, f"sent_{campaign_id}.csv")
+    
+    # Load already sent emails
     if os.path.exists(sent_log_path):
         try:
             sent_df = pd.read_csv(sent_log_path)
-            # Asegurarse que la columna 'Email' existe y manejar NaNs/vacíos
             if 'Email' in sent_df.columns:
-                # Convertir a string, quitar nulos, convertir a minúsculas
                 sent_emails = sent_df['Email'].dropna().astype(str).str.lower().tolist()
-            print(f"[{campaign_id}] Reanudando campaña, encontrados {len(sent_emails)} emails ya enviados en el log.")
+            print(f"[{campaign_id}] Resuming campaign, found {len(sent_emails)} emails already sent.")
         except pd.errors.EmptyDataError:
-            print(f"[{campaign_id}] El archivo de log {sent_log_path} está vacío.")
             sent_emails = []
         except Exception as e:
-            print(f"[{campaign_id}] ADVERTENCIA: No se pudo leer el log de enviados {sent_log_path}: {e}. Empezando desde cero.")
-            sent_emails = [] # Empezar de cero si hay error leyendo el log
+            print(f"[{campaign_id}] WARNING: Could not read sent log {sent_log_path}: {e}. Starting from scratch.")
+            sent_emails = []
 
-    sent_count_this_run = 0
-    service_index = 0 # Índice para rotar entre los servicios
-    failed_contacts = [] # Opcional: para registrar fallos persistentes
-
-    # Calcula cuántos emails realmente se intentarán enviar en esta ejecución
-    emails_to_try = [c.get('Email').lower() for c in contact_data if c.get('Email') and isinstance(c.get('Email'), str) and c.get('Email').lower() not in sent_emails]
-    total_contacts_to_send = len(emails_to_try)
-    print(f"[{campaign_id}] Emails pendientes en esta ejecución: {total_contacts_to_send}")
-    processed_count = 0
-
-    # Crear conjunto de emails ya enviados para búsqueda rápida O(1)
     sent_emails_set = set(sent_emails)
-
+    
+    # Filter contacts to send
+    contacts_to_send = []
     for contact in contact_data:
         email = contact.get('Email')
-        name = contact.get('Name', 'Valued Supporter') # Usar nombre o genérico
-
-        # Validar y normalizar email antes de comparar
         if not email or not isinstance(email, str):
-            print(f"[{campaign_id}] ADVERTENCIA: Contacto sin email válido, saltando: {contact}")
             continue
-        email_lower = email.lower()
+        if email.lower() not in sent_emails_set:
+            contacts_to_send.append(contact)
 
-        # Saltar si ya se envió (usando el conjunto para eficiencia)
-        if email_lower in sent_emails_set:
-            continue
+    total_contacts_to_send = len(contacts_to_send)
+    print(f"[{campaign_id}] Emails pending in this run: {total_contacts_to_send}")
+    
+    if total_contacts_to_send == 0:
+        print(f"[{campaign_id}] No new contacts to send. Finishing.")
+    else:
+        # Check if we have services
+        if not gmail_services:
+             print(f"[{campaign_id}] ERROR: No gmail services available for sending.")
+             # Update status to error?
+             return
 
-        processed_count += 1
-        print(f"[{campaign_id}] Procesando {processed_count}/{total_contacts_to_send}: {email}")
+        # Setup Concurrency
+        contacts_queue = queue.Queue()
+        for contact in contacts_to_send:
+            contacts_queue.put(contact)
+            
+        # Shared state for threads
+        log_lock = threading.Lock()
+        stop_event = threading.Event()
+        
+        # Counters
+        sent_count_this_run = 0
+        sent_count_lock = threading.Lock()
+        failed_contacts = []
+        failed_contacts_lock = threading.Lock()
+        
+        processed_count = 0
+        processed_count_lock = threading.Lock()
 
-        # Dentro del bucle `for contact in contact_data:` en run_campaign_task
+        # Worker Function
+        def email_worker(service: GmailService, worker_id: int):
+            nonlocal sent_count_this_run, processed_count
+            
+            credential_name = os.path.basename(service.credentials_path)
+            print(f"[{campaign_id}] Worker {worker_id} started using {credential_name}")
+            
+            while not contacts_queue.empty() and not stop_event.is_set():
+                try:
+                    # Retrieve contact
+                    try:
+                        contact = contacts_queue.get(timeout=1)
+                    except queue.Empty:
+                        break
+                    
+                    # Status Check (Reading file)
+                    try:
+                         with open(campaign_file_path, 'r') as f_status:
+                            current_config = json.load(f_status)
+                         current_status = current_config.get('status', 'Unknown')
+                         
+                         if current_status == "Paused":
+                             contacts_queue.put(contact)
+                             contacts_queue.task_done()
+                             time.sleep(5) 
+                             continue
+                             
+                         elif current_status == "Cancelled":
+                             print(f"[{campaign_id}] CANCELLED detected by Worker {worker_id}.")
+                             stop_event.set()
+                             contacts_queue.task_done()
+                             break
+                             
+                         elif current_status != "Sending":
+                             print(f"[{campaign_id}] Unexpected status '{current_status}'. Stopping.")
+                             stop_event.set()
+                             contacts_queue.task_done()
+                             break
+                             
+                    except Exception:
+                        pass
 
-        # --- INICIO: NUEVO BLOQUE - Verificar Pausa/Cancelación ---
-        while True: # Bucle para manejar la pausa
-            try:
-                # RE-LEER el estado actual del archivo ANTES de procesar cada contacto
-                with open(campaign_file_path, 'r') as f_status:
-                    current_config = json.load(f_status)
-                current_status = current_config.get('status', 'Unknown')
+                    if stop_event.is_set():
+                        contacts_queue.task_done()
+                        break
 
-                if current_status == "Paused":
-                    print(f"[{campaign_id}] PAUSADO. Esperando 10 segundos para re-verificar...")
-                    time.sleep(10) # Espera 10 segundos antes de volver a verificar
-                    continue # Vuelve al inicio del while True para re-leer estado
+                    # Processing
+                    email = contact.get('Email')
+                    name = contact.get('Name', 'Valued Supporter')
+                    
+                    with processed_count_lock:
+                        processed_count += 1
+                        current_processed = processed_count
 
-                elif current_status == "Cancelled":
-                    print(f"[{campaign_id}] CANCELADO detectado. Deteniendo tarea.")
-                    # No actualizamos el estado aquí, el endpoint /cancel ya lo hizo
-                    return # Termina la ejecución de la tarea
+                    print(f"[{campaign_id}] Worker {worker_id} processing {current_processed}/{total_contacts_to_send}: {email}")
+                    
+                    html_body_personalized = html_body_template.replace("{{name}}", name).replace("*|FNAME|*", name)
+                    
+                    success = False
+                    try:
+                        success = service.send_email(
+                            to_email=email,
+                            subject=subject,
+                            html_body=html_body_personalized
+                        )
+                    except Exception as e_send:
+                         print(f"[{campaign_id}] Worker {worker_id} Exception sending to {email}: {e_send}")
 
-                elif current_status != "Sending":
-                    # Si el estado es cualquier cosa que no sea Sending o Paused/Cancelled
-                    # (ej. Error, Completed, Draft?), detenemos la tarea por seguridad.
-                    print(f"[{campaign_id}] Estado inesperado '{current_status}' detectado. Deteniendo tarea.")
-                    return # Termina la ejecución
-
-                # Si llegamos aquí, el estado es "Sending", salimos del bucle while
-                break # Sale del while True y continúa con el envío del email actual
-
-            except FileNotFoundError:
-                print(f"[{campaign_id}] ERROR CRÍTICO: Archivo de configuración desaparecido durante ejecución. Deteniendo.")
-                return # Termina si el archivo ya no existe
-            except Exception as e_read_status:
-                print(f"[{campaign_id}] ADVERTENCIA: Error al leer estado durante ejecución: {e_read_status}. Reintentando en 10s...")
-                time.sleep(10) # Espera si hay error leyendo y reintenta
-        # --- FIN: NUEVO BLOQUE ---
-
-        # La línea original que procesa el email sigue aquí:
-        print(f"[{campaign_id}] Procesando {processed_count}/{total_contacts_to_send}: {email}")
-        # ... (resto del código para personalizar y enviar el email) ...
-
-# El final de la función run_campaign_task (actualizar a Completed, etc.) permanece igual
-
-        # Personalización simple
-        html_body_personalized = html_body_template.replace("{{name}}", name).replace("*|FNAME|*", name)
-
-        # Seleccionar el servicio actual y avanzar el índice para la próxima vez
-        current_service = gmail_services[service_index]
-        # Obtenemos el nombre base del archivo json para identificar la cuenta
-        current_credential_name = os.path.basename(current_service.credentials_path)
-        service_index = (service_index + 1) % len(gmail_services) # Rotación circular
-
-        print(f"  -> Usando cuenta: {current_credential_name}")
-        success = False
-        try:
-            success = current_service.send_email(
-                to_email=email,
-                subject=subject,
-                html_body=html_body_personalized
-            )
-        except Exception as e_send:
-            print(f"  -> EXCEPCIÓN al enviar a {email} usando {current_credential_name}: {e_send}")
-            # Considerar añadir traceback.print_exc() aquí para más detalle si es necesario
-
-        if success:
-            print(f"  -> ÉXITO enviando a {email}")
-            sent_emails_set.add(email_lower) # Añadir al conjunto de enviados
-            sent_count_this_run += 1
-            # Guardar en log CADA VEZ que se envía uno (más seguro)
-            try:
-                # Escribimos el email original (no el lowercased) al log
-                pd.DataFrame({'Email': [email]}).to_csv(
-                    sent_log_path,
-                    mode='a', # Añadir al archivo
-                    header=not os.path.exists(sent_log_path), # Escribir header solo si no existe
-                    index=False,
-                    encoding='utf-8-sig' # Para compatibilidad con Excel
-                )
-            except Exception as e_log:
-                print(f"[{campaign_id}] ADVERTENCIA: Fallo al escribir en log {sent_log_path}: {e_log}")
-
-            # Pausa aleatoria corta después de éxito
-            time.sleep(random.uniform(0.8, 2.5))
-        else:
-            print(f"  -> FALLO al enviar a {email} usando {current_credential_name}.")
-            failed_contacts.append({"email": email, "reason": "Send failed", "account": current_credential_name})
-            # Pausa aleatoria más larga después de fallo
-            time.sleep(random.uniform(3.0, 6.0))
-
-    # --- FIN: REEMPLAZO del Bucle de Envío ---
+                    if success:
+                        print(f"  -> Worker {worker_id}: SUCCESS {email}")
+                        
+                        with sent_count_lock:
+                            sent_count_this_run += 1
+                        
+                        with log_lock:
+                            sent_emails_set.add(email.lower())
+                            try:
+                                pd.DataFrame({'Email': [email]}).to_csv(
+                                    sent_log_path,
+                                    mode='a',
+                                    header=not os.path.exists(sent_log_path),
+                                    index=False,
+                                    encoding='utf-8-sig'
+                                )
+                            except Exception:
+                                pass
+                        
+                        # Short sleep per account to handle rate limits nicely
+                        # With 18+ accounts, we slow this down significantly to keep global rate safe
+                        # 12-25s sleep per account = ~2.5 - 5 emails/minute per account
+                        # Total system speed with 18 accounts: ~60 emails/minute (approx 1/sec global)
+                        time.sleep(random.uniform(12.0, 25.0)) 
+                    else:
+                        print(f"  -> Worker {worker_id}: FAILED {email}")
+                        with failed_contacts_lock:
+                            failed_contacts.append({"email": email, "reason": "Send failed", "account": credential_name})
+                        time.sleep(random.uniform(30.0, 60.0))
+                    
+                    contacts_queue.task_done()
+                    
+                except Exception as e_worker:
+                    print(f"[{campaign_id}] Worker {worker_id} crashed: {e_worker}")
+                    traceback.print_exc()
+        
+        # Launch Threads
+        threads = []
+        for i, service in enumerate(gmail_services):
+            t = threading.Thread(target=email_worker, args=(service, i+1))
+            t.daemon = True
+            t.start()
+            threads.append(t)
+            
+        print(f"[{campaign_id}] Launched {len(threads)} worker threads.")
+        
+        for t in threads:
+            t.join()
 
     # --- INICIO: REEMPLAZO de Actualización Final de Estado ---
     print(f"[{campaign_id}] Campaña finalizada.")
