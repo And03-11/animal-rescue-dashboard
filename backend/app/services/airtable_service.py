@@ -903,10 +903,11 @@ class AirtableService:
             # --- Excluir Tags Específicos ---
             tag_field = EMAILS_FIELDS.get("utils_tags", "Tag (Mailchimp) (from Donor)")
             # Excluir 'Aol and other accounts', 'Apple_Accounts USA', 'Apple_Accounts EUR'
-            # FIND retorna 0 si no encuentra el string
-            formula_parts.append(f"FIND('Aol and other accounts', {{{tag_field}}}) = 0")
-            formula_parts.append(f"FIND('Apple_Accounts USA', {{{tag_field}}}) = 0")
-            formula_parts.append(f"FIND('Apple_Accounts EUR', {{{tag_field}}}) = 0")
+            # Al ser un campo Lookup, es un array. Usamos ARRAYJOIN para convertirlo a texto antes de buscar.
+            # O concatenamos con string vacío: {Field} & ""
+            formula_parts.append(f"FIND('Aol and other accounts', ARRAYJOIN({{{tag_field}}})) = 0")
+            formula_parts.append(f"FIND('Apple_Accounts USA', ARRAYJOIN({{{tag_field}}})) = 0")
+            formula_parts.append(f"FIND('Apple_Accounts EUR', ARRAYJOIN({{{tag_field}}})) = 0")
             print("Excluyendo tags: Aol, Apple USA, Apple EUR")
             
             # Condición de Bounced Account
