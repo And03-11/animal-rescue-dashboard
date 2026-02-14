@@ -176,37 +176,41 @@ def run_sync():
             upsert_batch(cursor, conn, 'form_titles', ['airtable_id', 'name', 'campaign_id'], pg_data)
         update_last_sync_time(cursor, conn, 'form_titles')
 
-        # 3. Emails (Lookup Map Build) - Still needed FULL or Optimized?
-        # Emails are used to look up by ID *within* the Donors loop.
-        # Since Donors have a list of Email IDs, we can collect them first.
-        
+        # 3. Emails (Incremental Sync to local table)
+        last_sync = get_last_sync_time(cursor, 'emails')
+        updates = fetch_modified_records(TABLE_EMAILS, last_sync)
+        if updates:
+            pg_data = []
+            for rec in updates:
+                fields = rec.get('fields', {})
+                pg_data.append({
+                    'airtable_id': rec['id'],
+                    'email': fields.get('Email'),
+                    'bounced': fields.get('Bounced Account', False)
+                })
+            upsert_batch(cursor, conn, 'emails', ['airtable_id', 'email', 'bounced'], pg_data)
+        update_last_sync_time(cursor, conn, 'emails')
+
         # 4. Donors
         last_sync = get_last_sync_time(cursor, 'donors')
         updates = fetch_modified_records(TABLE_DONORS, last_sync)
         
         if updates:
-            # Pre-fetch referenced emails logic could go here, but Emails table is separate in Airtable 
-            # and seemingly not stored as a separate table in our PG schema, just embedded/extracted.
-            # For simplicity provided usage, we keep fetching emails map or optimize it?
-            # User request specifically targeted "build_id_map_from_db" usage. 
-            # Emails fetching from AT logic takes ~1-2s for 40k records via API? No, that's heavy too if full.
-            # But the user specifically pointed out the DB lookup part. 
-            # Let's keep Emails as is for now (unless it's a bottleneck) or optimize if easy.
-            # Optimization: Collect Email IDs from donor updates -> Fetch only those from Airtable?
-            # pyAirtable doesn't support "WHERE ID IN (...)" easily without formula.
-            # OR(RECORD_ID()='...', RECORD_ID()='...')
-            
-            # Let's stick to optimizing the DB Lookups first as requested.
-            print("📥 Fetching Emails for lookup (Full load for map)...") 
-            # Keeping full load for emails for safety/simplicity as it's an external API fetch, not DB lookup.
-            all_emails = base.table(TABLE_EMAILS).all(fields=["Email", "Bounced Account"])
+            # Collect all referenced email Airtable IDs from updated donors
+            all_email_refs = set()
+            for rec in updates:
+                for eid in rec.get('fields', {}).get('Emails', []):
+                    all_email_refs.add(eid)
+
+            # Pointed lookup: fetch only referenced emails from LOCAL DB (not Airtable!)
             email_lookup = {}
-            for rec in all_emails:
-                fields = rec.get('fields', {})
-                email_lookup[rec['id']] = {
-                    'email': fields.get('Email'),
-                    'bounced': fields.get('Bounced Account', False)
-                }
+            if all_email_refs:
+                cursor.execute(
+                    "SELECT airtable_id, email, bounced FROM emails WHERE airtable_id = ANY(%s)",
+                    (list(all_email_refs),)
+                )
+                for row in cursor.fetchall():
+                    email_lookup[row[0]] = {'email': row[1], 'bounced': row[2]}
 
             pg_data = []
             for rec in updates:
