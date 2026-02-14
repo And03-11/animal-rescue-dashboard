@@ -47,9 +47,9 @@ def fetch_all(table_id, fields=None):
         print(f"⚠️ Error descargando tabla: {e}")
         return []
 
-def upsert_batch(cursor, conn, table_name, columns, data, conflict_col='airtable_id'):
+def upsert_batch(cursor, conn, table_name, columns, data, conflict_col='airtable_id', batch_size=50):
     """
-    Inserta datos masivamente en Postgres (Upsert).
+    Inserta datos masivamente en Postgres (Upsert) por lotes para evitar timeouts.
     """
     if not data:
         return
@@ -66,15 +66,22 @@ def upsert_batch(cursor, conn, table_name, columns, data, conflict_col='airtable
         DO UPDATE SET {update_str};
     """
     
-    values = []
-    for item in data:
-        row = tuple(item[c] for c in columns)
-        values.append(row)
+    total_batches = (len(data) + batch_size - 1) // batch_size
+    print(f"📦 Iniciando upsert de {len(data)} registros en {table_name} ({total_batches} lotes)...")
     
     try:
-        execute_values(cursor, sql, values, page_size=1000)
-        conn.commit()
-        print(f"✅ {table_name}: {len(data)} registros upsertados/actualizados.")
+        for i in range(0, len(data), batch_size):
+            chunk = data[i:i+batch_size]
+            values = []
+            for item in chunk:
+                row = tuple(item[c] for c in columns)
+                values.append(row)
+            
+            execute_values(cursor, sql, values, page_size=batch_size)
+            conn.commit()
+            print(f"   ✅ Lote {i//batch_size + 1}/{total_batches} insertado in {table_name}")
+            
+        print(f"✨ {table_name}: Todos los registros upsertados correctamente.")
     except Exception as e:
         conn.rollback()
         print(f"❌ Error insertando en {table_name}: {e}")
@@ -102,14 +109,17 @@ def delete_obsolete_records(cursor, conn, table_name, valid_ids_set):
     if ids_to_delete:
         print(f"🗑️ Eliminando {len(ids_to_delete)} registros obsoletos de {table_name}...")
         delete_list = list(ids_to_delete)
-        chunk_size = 1000
+        chunk_size = 500
+        total_chunks = (len(delete_list) + chunk_size - 1) // chunk_size
+        
         try:
             for i in range(0, len(delete_list), chunk_size):
                 chunk = delete_list[i:i+chunk_size]
                 # Format properly for SQL IN clause
                 val_str = ",".join(f"'{x}'" for x in chunk)
                 cursor.execute(f"DELETE FROM {table_name} WHERE airtable_id IN ({val_str})")
-            conn.commit()
+                conn.commit()
+                print(f"   Deleted chunk {i//chunk_size + 1}/{total_chunks}")
             print("✅ Eliminación completada.")
         except Exception as e:
             conn.rollback()
@@ -154,6 +164,10 @@ def run_migration():
         conn = psycopg2.connect(SUPABASE_DB_URL)
         cursor = conn.cursor()
         print("✅ Conexión a Supabase exitosa.")
+        # Set statement timeout to 60 seconds (60000ms) to avoid premature termination
+        cursor.execute("SET statement_timeout = '60s'")
+        conn.commit()
+        print("🕒 Timeout configurado a 60s.")
     except Exception as e:
         print(f"❌ Error conectando a Supabase: {e}")
         return

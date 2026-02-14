@@ -1,0 +1,317 @@
+--- TOP 5 EXPENSIVE QUERIES ---
+
+--- QUERY #1 ---
+Calls: 1, Total: 11096.60ms, Mean: 11096.60ms
+Query:
+SELECT
+  e.name,
+  n.nspname AS schema,
+  e.default_version,
+  x.extversion AS installed_version,
+  e.comment
+FROM
+  pg_available_extensions() e(name, default_version, comment)
+  LEFT JOIN pg_extension x ON e.name = x.extname
+  LEFT JOIN pg_namespace n ON x.extnamespace = n.oid
+WHERE
+  $1
+--------------------------------------------------
+
+--- QUERY #2 ---
+Calls: 31, Total: 10482.45ms, Mean: 338.14ms
+Query:
+SELECT * FROM pgbouncer.get_auth($1)
+--------------------------------------------------
+
+--- QUERY #3 ---
+Calls: 5, Total: 8219.51ms, Mean: 1643.90ms
+Query:
+WITH
+-- Recursively get the base types of domains
+base_types AS (
+  WITH RECURSIVE
+  recurse AS (
+    SELECT
+      oid,
+      typbasetype,
+      typnamespace AS base_namespace,
+      COALESCE(NULLIF(typbasetype, $3), oid) AS base_type
+    FROM pg_type
+    UNION
+    SELECT
+      t.oid,
+      b.typbasetype,
+      b.typnamespace AS base_namespace,
+      COALESCE(NULLIF(b.typbasetype, $4), b.oid) AS base_type
+    FROM recurse t
+    JOIN pg_type b ON t.typbasetype = b.oid
+  )
+  SELECT
+    oid,
+    base_namespace,
+    base_type
+  FROM recurse
+  WHERE typbasetype = $5
+),
+arguments AS (
+  SELECT
+    oid,
+    array_agg((
+      COALESCE(name, $6), -- name
+      type::regtype::text, -- type
+      CASE type
+        WHEN $7::regtype THEN $8
+        WHEN $9::regtype THEN $10
+        WHEN $11::regtype THEN $12
+        WHEN $13::regtype THEN $14
+        ELSE type::regtype::text
+      END, -- convert types that ignore the length and accept any value till maximum size
+      idx <= (pronargs - pronargdefaults), -- is_required
+      COALESCE(mode = $15, $16) -- is_variadic
+    ) ORDER BY idx) AS args,
+    CASE COUNT(*) - COUNT(name) -- number of unnamed arguments
+      WHEN $17 THEN $18
+      WHEN $19 THEN (array_agg(type))[$20] IN ($21::regtype, $22::regtype, $23::regtype, $24::regtype, $25::regtype)
+      ELSE $26
+    END AS callable
+  FROM pg_proc,
+       unnest(proargnames, proargtypes, proargmodes)
+         WITH ORDINALITY AS _ (name, type, mode, idx)
+  WHERE type IS NOT NULL -- only input arguments
+  GROUP BY oid
+)
+SELECT
+  pn.nspname AS proc_schema,
+  p.proname AS proc_name,
+  d.description AS proc_description,
+  COALESCE(a.args, $27) AS args,
+  tn.nspname AS schema,
+  COALESCE(comp.relname, t.typname) AS name,
+  p.proretset AS rettype_is_setof,
+  (t.typtype = $28
+   -- if any TABLE, INOUT or OUT arguments present, treat as composite
+   or COALESCE(proargmodes::text[] && $29, $30)
+  ) AS rettype_is_composite,
+  bt.oid <> bt.base_type as rettype_is_composite_alias,
+  p.provolatile,
+  p.provariadic > $31 as hasvariadic,
+  lower((regexp_split_to_array((regexp_split_to_array(iso_config, $32))[$33], $34))[$35]) AS transaction_isolation_level,
+  coalesce(func_settings.kvs, $36) as kvs
+FROM pg_proc p
+LEFT JOIN arguments a ON a.oid = p.oid
+JOIN pg_namespace pn ON pn.oid = p.pronamespace
+JOIN base_types bt ON bt.oid = p.prorettype
+JOIN pg_type t ON t.oid = bt.base_type
+JOIN pg_namespace tn ON tn.oid = t.typnamespace
+LEFT JOIN pg_class comp ON comp.oid = t.typrelid
+LEFT JOIN pg_description as d ON d.objoid = p.oid AND d.classoid = $37::regclass
+LEFT JOIN LATERAL unnest(proconfig) iso_config ON iso_config LIKE $38
+LEFT JOIN LATERAL (
+  SELECT
+    array_agg(row(
+      substr(setting, $39, strpos(setting, $40) - $41),
+      substr(setting, strpos(setting, $42) + $43)
+    )) as kvs
+  FROM unnest(proconfig) setting
+  WHERE setting ~ ANY($2)
+) func_settings ON $44
+WHERE t.oid <> $45::regtype AND COALESCE(a.callable, $46)
+AND prokind = $47
+AND p.pronamespace = ANY($1::regnamespace[])
+--------------------------------------------------
+
+--- QUERY #4 ---
+Calls: 5, Total: 5861.65ms, Mean: 1172.33ms
+Query:
+WITH
+-- Recursively get the base types of domains
+base_types AS (
+  WITH RECURSIVE
+  recurse AS (
+    SELECT
+      oid,
+      typbasetype,
+      typnamespace AS base_namespace,
+      COALESCE(NULLIF(typbasetype, $2), oid) AS base_type
+    FROM pg_type
+    UNION
+    SELECT
+      t.oid,
+      b.typbasetype,
+      b.typnamespace AS base_namespace,
+      COALESCE(NULLIF(b.typbasetype, $3), b.oid) AS base_type
+    FROM recurse t
+    JOIN pg_type b ON t.typbasetype = b.oid
+  )
+  SELECT
+    oid,
+    base_namespace,
+    base_type
+  FROM recurse
+  WHERE typbasetype = $4
+),
+columns AS (
+    SELECT
+        c.oid AS relid,
+        a.attname::name AS column_name,
+        d.description AS description,
+        -- typbasetype and typdefaultbin handles `CREATE DOMAIN .. DEFAULT val`,  attidentity/attgenerated handles generated columns, pg_get_expr gets the default of a column
+        CASE
+          WHEN (t.typbasetype != $5) AND (ad.adbin IS NULL) THEN pg_get_expr(t.typdefaultbin, $6)
+          WHEN a.attidentity  = $7 THEN format($8, seq.objid::regclass)
+          WHEN a.attgenerated = $9 THEN $10
+          ELSE pg_get_expr(ad.adbin, ad.adrelid)::text
+        END AS column_default,
+        not (a.attnotnull OR t.typtype = $11 AND t.typnotnull) AS is_nullable,
+        CASE
+            WHEN t.typtype = $12 THEN
+            CASE
+                WHEN bt.base_namespace = $13::regnamespace THEN format_type(bt.base_type, $14::integer)
+                ELSE format_type(a.atttypid, a.atttypmod)
+            END
+            ELSE
+            CASE
+                WHEN t.typnamespace = $15::regnamespace THEN format_type(a.atttypid, $16::integer)
+                ELSE format_type(a.atttypid, a.atttypmod)
+            END
+        END::text AS data_type,
+        format_type(a.atttypid, a.atttypmod)::text AS nominal_data_type,
+        information_schema._pg_char_max_length(
+            information_schema._pg_truetypid(a.*, t.*),
+            information_schema._pg_truetypmod(a.*, t.*)
+        )::integer AS character_maximum_length,
+        bt.base_type,
+        a.attnum::integer AS position
+    FROM pg_attribute a
+        LEFT JOIN pg_description AS d
+            ON d.objoid = a.attrelid and d.objsubid = a.attnum and d.classoid = $17::regclass
+        LEFT JOIN pg_attrdef ad
+            ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum
+        JOIN pg_class c
+            ON a.attrelid = c.oid
+        JOIN pg_type t
+            ON a.atttypid = t.oid
+        LEFT JOIN base_types bt
+            ON t.oid = bt.oid
+        LEFT JOIN pg_depend seq
+            ON seq.refobjid = a.attrelid and seq.refobjsubid = a.attnum and seq.deptype = $18
+    WHERE
+        NOT pg_is_other_temp_schema(c.relnamespace)
+        AND a.attnum > $19
+        AND NOT a.attisdropped
+        AND c.relkind in ($20, $21, $22, $23, $24)
+        AND c.relnamespace = ANY($1::regnamespace[])
+),
+columns_agg AS (
+  SELECT
+    relid,
+    array_agg(row(
+      column_name,
+      description,
+      is_nullable::boolean,
+      data_type,
+      nominal_data_type,
+      character_maximum_length,
+      column_default,
+      coalesce(
+        (SELECT array_agg(enumlabel ORDER BY enumsortorder) FROM pg_enum WHERE enumtypid = base_type),
+        $25
+      )
+    ) order by position) as columns
+  FROM columns
+  GROUP BY relid
+),
+tbl_pk_cols AS (
+  SELECT
+    r.oid AS relid,
+    array_agg(a.attname ORDER BY a.attname) AS pk_cols
+  FROM pg_class r
+  JOIN pg_constraint c
+    ON r.oid = c.conrelid
+  JOIN pg_attribute a
+    ON a.attrelid = r.oid AND a.attnum = ANY (c.conkey)
+  WHERE
+    c.contype in ($26)
+    AND r.relkind IN ($27, $28)
+    AND r.relnamespace NOT IN ($29::regnamespace, $30::regnamespace)
+    AND NOT pg_is_other_temp_schema(r.relnamespace)
+    AND NOT a.attisdropped
+  GROUP BY r.oid
+)
+SELECT
+  n.nspname AS table_schema,
+  c.relname AS table_name,
+  d.description AS table_description,
+  c.relkind IN ($31,$32) as is_view,
+  (
+    c.relkind IN ($33,$34)
+    OR (
+      c.relkind in ($35,$36)
+      -- The function `pg_relation_is_updateable` returns a bitmask where 8
+      -- corresponds to `1 << CMD_INSERT` in the PostgreSQL source code, i.e.
+      -- it's possible to insert into the relation.
+      AND (pg_relation_is_updatable(c.oid::regclass, $37) & $38) = $39
+    )
+  ) AS insertable,
+  (
+    c.relkind IN ($40,$41)
+    OR (
+      c.relkind in ($42,$43)
+      -- CMD_UPDATE
+      AND (pg_relation_is_updatable(c.oid::regclass, $44) & $45) = $46
+    )
+  ) AS updatable,
+  (
+    c.relkind IN ($47,$48)
+    OR (
+      c.relkind in ($49,$50)
+      -- CMD_DELETE
+      AND (pg_relation_is_updatable(c.oid::regclass, $51) & $52) = $53
+    )
+  ) AS deletable,
+  coalesce(tpks.pk_cols, $54) as pk_cols,
+  coalesce(cols_agg.columns, $55) as columns
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+LEFT JOIN pg_description d on d.objoid = c.oid and d.objsubid = $56 and d.classoid = $57::regclass
+LEFT JOIN tbl_pk_cols tpks ON c.oid = tpks.relid
+LEFT JOIN columns_agg cols_agg ON c.oid = cols_agg.relid
+WHERE c.relkind IN ($58,$59,$60,$61,$62)
+AND c.relnamespace NOT IN ($63::regnamespace, $64::regnamespace)
+AND not c.relispartition
+ORDER BY table_schema, table_name
+--------------------------------------------------
+
+--- QUERY #5 ---
+Calls: 5, Total: 5361.07ms, Mean: 1072.21ms
+Query:
+with
+all_relations as (
+  select reltype
+  from pg_class
+  where relkind in ($1,$2,$3,$4,$5)
+),
+computed_rels as (
+  select
+    (parse_ident(p.pronamespace::regnamespace::text))[$6] as schema,
+    p.proname::text                  as name,
+    arg_schema.nspname::text         as rel_table_schema,
+    arg_name.typname::text           as rel_table_name,
+    ret_schema.nspname::text         as rel_ftable_schema,
+    ret_name.typname::text           as rel_ftable_name,
+    not p.proretset or p.prorows = $7 as single_row
+  from pg_proc p
+    join pg_type      arg_name   on arg_name.oid = p.proargtypes[$8]
+    join pg_namespace arg_schema on arg_schema.oid = arg_name.typnamespace
+    join pg_type      ret_name   on ret_name.oid = p.prorettype
+    join pg_namespace ret_schema on ret_schema.oid = ret_name.typnamespace
+  where
+    p.pronargs = $9
+    and p.proargtypes[$10] in (select reltype from all_relations)
+    and p.prorettype in (select reltype from all_relations)
+)
+select
+  *,
+  row(rel_table_schema, rel_table_name) = row(rel_ftable_schema, rel_ftable_name) as is_self
+from computed_rels
+--------------------------------------------------

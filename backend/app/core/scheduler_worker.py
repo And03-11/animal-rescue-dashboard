@@ -67,10 +67,10 @@ async def run_data_sync():
     """
     print("[Scheduler Worker] 🔄 Starting Data Sync (Airtable -> Supabase)...")
     try:
-        from backend.app.scripts.migrate_to_supabase import run_migration
+        from backend.app.scripts.incremental_sync import run_sync
         
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, run_migration)
+        await loop.run_in_executor(None, run_sync)
         
         print("[Scheduler Worker] ✅ Data Sync finished successfully")
     except Exception as e:
@@ -98,12 +98,12 @@ def init_scheduler():
         max_instances=1
     )
     
-    # 2. Data Sync (Every 10 minutes)
+    # 2. Data Sync (Every 10 minutes) - INCREMENTAL
     _scheduler.add_job(
         run_data_sync,
         trigger=IntervalTrigger(minutes=10),
         id='data_sync_job',
-        name='Sync Airtable to Supabase',
+        name='Sync Airtable to Supabase (Incremental)',
         replace_existing=True,
         max_instances=1
     )
