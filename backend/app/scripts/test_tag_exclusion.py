@@ -18,7 +18,7 @@ def test_exclusion():
     
     # 1. Fetch the record directly to see raw data
     email_field = EMAILS_FIELDS.get("email", "Email")
-    tag_field = EMAILS_FIELDS.get("utils_tags", "Tag (Mailchimp) (from Donor)")
+    tag_field = EMAILS_FIELDS.get("utils_tags", "Tag (Mailchimp)")
     
     formula = f"{{{email_field}}} = '{email_to_test}'"
     print(f"Querying with formula: {formula}")

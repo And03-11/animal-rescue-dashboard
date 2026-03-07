@@ -48,7 +48,7 @@ EMAILS_FIELDS = {
     "exclude_from_campaign": "Exclude From Current Campaign",
     "donor_name": "Name",
     "donor_last_name": "Last Name",
-    "utils_tags": "Tag (Mailchimp) (from Donor)"
+    "utils_tags": "Tag (Mailchimp)"
 }
 DAILY_SUMMARIES_FIELDS = {
     "date": "Date",
@@ -901,13 +901,12 @@ class AirtableService:
             ]
 
             # --- Excluir Tags Específicos ---
-            tag_field = EMAILS_FIELDS.get("utils_tags", "Tag (Mailchimp) (from Donor)")
+            tag_field = EMAILS_FIELDS.get("utils_tags", "Tag (Mailchimp)")
             # Excluir 'Aol and other accounts', 'Apple_Accounts USA', 'Apple_Accounts EUR'
-            # Al ser un campo Lookup, es un array. Usamos ARRAYJOIN para convertirlo a texto antes de buscar.
-            # O concatenamos con string vacío: {Field} & ""
-            formula_parts.append(f"FIND('Aol and other accounts', ARRAYJOIN({{{tag_field}}})) = 0")
-            formula_parts.append(f"FIND('Apple_Accounts USA', ARRAYJOIN({{{tag_field}}})) = 0")
-            formula_parts.append(f"FIND('Apple_Accounts EUR', ARRAYJOIN({{{tag_field}}})) = 0")
+            # Ahora es un campo de fórmula que devuelve texto, usamos concatenación con string vacío por seguridad
+            formula_parts.append(f"FIND('Aol and other accounts', {{{tag_field}}} & '') = 0")
+            formula_parts.append(f"FIND('Apple_Accounts USA', {{{tag_field}}} & '') = 0")
+            formula_parts.append(f"FIND('Apple_Accounts EUR', {{{tag_field}}} & '') = 0")
             print("Excluyendo tags: Aol, Apple USA, Apple EUR")
             
             # Condición de Bounced Account
