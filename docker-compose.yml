@@ -1,12 +1,15 @@
 services:
   backend:
     build: ./backend
-    ports:
-      - "8002:8001"
+    container_name: animal-dashboard-backend
+    hostname: backend
+    # ports:
+    #   - "8002:8001"
     env_file:
       - ./backend/.env
     networks:
       - app-network
+      - proxy_app-network
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
@@ -17,14 +20,19 @@ services:
 
   frontend:
     build: ./frontend
-    ports:
-      - "3000:80"
+    container_name: animal-dashboard-frontend
+    hostname: frontend
+    # ports:
+    #   - "3000:80"
     depends_on:
       - backend
     networks:
       - app-network
+      - proxy_app-network
     restart: unless-stopped
 
 networks:
   app-network:
     driver: bridge
+  proxy_app-network:
+    external: true

@@ -1,10 +1,8 @@
-import React from 'react';
-import { Box, Typography, useTheme } from '@mui/material';
+import { Box, Typography } from '@mui/material';
 import { FunnelStats } from '../components/analytics/FunnelStats';
 import { motion } from 'framer-motion';
 
 const FunnelPage = () => {
-    const theme = useTheme();
 
     return (
         <Box>
