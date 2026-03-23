@@ -44,7 +44,6 @@ import {
   Typography,
   Card,
   CardActionArea,
-  CardContent,
   InputAdornment, // Added for icons in inputs
 } from '@mui/material'; // Agrupadas importaciones de MUI
 import {
@@ -52,8 +51,6 @@ import {
   Flag as FlagIcon,
   Person as PersonIcon,
   Star as StarIcon,
-  CheckCircle as CheckCircleIcon,
-  Cancel as CancelIcon,
   MarkEmailRead as MarkEmailReadIcon,
   MarkEmailUnread as MarkEmailUnreadIcon,
   AllInclusive as AllInclusiveIcon,

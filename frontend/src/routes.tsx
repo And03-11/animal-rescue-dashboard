@@ -8,6 +8,7 @@ import { Layout } from './components/Layout';
 import PrivateRoute from './components/PrivateRoute';
 // import PrivateAdminRoute from './components/PrivateAdminRoute'; // Ya no se usa directamente aquí, o se puede reusar para settings
 import LoginForm from './pages/LoginForm';
+import RegisterForm from './pages/RegisterForm';
 // import UserManagementPage from './pages/UserManagementPage'; // Eliminado
 import CampaignComparisonPage from './pages/CampaignComparisonPage';
 
@@ -58,6 +59,7 @@ export function AppRoutes() {
       <Routes>
         {/* --- Ruta Pública --- */}
         <Route path="/login" element={<LoginForm />} />
+        <Route path="/register" element={<RegisterForm />} />
         <Route path="/shared/:token" element={<SharedAnalyticsPage />} />
 
         {/* --- Standalone Private Routes (No Layout) --- */}

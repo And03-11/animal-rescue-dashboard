@@ -214,7 +214,7 @@ export default function LoginForm() {
               }}
             />
 
-            <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1, mb: 4 }}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', mt: 1, mb: 4 }}>
               <Button
                 size="small"
                 sx={{
@@ -225,6 +225,19 @@ export default function LoginForm() {
                 onClick={() => alert("Please contact your administrator to reset your password.")}
               >
                 Forgot Password?
+              </Button>
+              <Button
+                size="small"
+                variant="text"
+                onClick={() => navigate("/register")}
+                sx={{
+                  textTransform: 'none',
+                  color: theme.palette.primary.main,
+                  fontWeight: 600,
+                  '&:hover': { bgcolor: 'transparent', textDecoration: 'underline' }
+                }}
+              >
+                Don't have an account? Register here
               </Button>
             </Box>
 

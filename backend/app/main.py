@@ -54,14 +54,25 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# --- Configuración CORS (sin cambios) ---
-origins = [
-    "http://localhost:3000",
-    "http://localhost:5173",
-    "https://a2a4b1a71477.ngrok-free.app",
-    "https://mongrel-valued-gar.ngrok-free.app",
-    #"https://tu-dominio.com"
-]
+import os
+from dotenv import load_dotenv
+from pathlib import Path
+
+# Cargar variables de entorno (al principio)
+BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
+
+# --- Configuración CORS ---
+origins_env = os.getenv("CORS_ORIGINS", "")
+if origins_env:
+    origins = [origin.strip() for origin in origins_env.split(",")]
+else:
+    origins = [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "https://a2a4b1a71477.ngrok-free.app",
+        "https://mongrel-valued-gar.ngrok-free.app",
+    ]
 
 app.add_middleware(
     CORSMiddleware,
