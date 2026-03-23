@@ -1,4 +1,4 @@
 Email: dmeider@peoplepc.com
-Tags: ['Tag #4 BC, Apple_Accounts USA']
+Tags: Tag #4 BC
 
-RESULT: This contact WOULD BE EXCLUDED from the campaign.
+RESULT: This contact WOULD BE INCLUDED in the campaign.

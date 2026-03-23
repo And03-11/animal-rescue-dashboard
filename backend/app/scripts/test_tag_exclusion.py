@@ -39,7 +39,7 @@ def test_exclusion():
     print(f"Tags (raw): {tags}")
     
     # 2. Check exclusion logic
-    excluded_tags = ['Aol and other accounts', 'Apple_Accounts USA', 'Apple_Accounts EUR']
+    excluded_tags = ['Aol and other accounts', 'Apple_Accounts USA', 'Apple_Accounts EUR', 'Tag #4 New ones', 'Tag #3 New ones']
     
     # Convert tags to string for search (in case it's a list)
     tags_str = str(tags) if tags else ""
