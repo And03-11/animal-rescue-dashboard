@@ -1,0 +1,51 @@
+==== RECENT CAMPAIGNS ====
+ID: Campaign | Name: Brook and friends #8 // USA B | Status: Sending | Sched: 2026-03-24 07:00:00+00:00 | Targets: 19 | Sent: 0
+ID: Campaign | Name: Brook and friends #8 // USA V | Status: Sending | Sched: 2026-03-24 07:00:00+00:00 | Targets: 1177 | Sent: 0
+ID: Campaign | Name: Brook and friends #8 // EUR V | Status: Sending | Sched: 2026-03-24 07:00:00+00:00 | Targets: 1358 | Sent: 0
+ID: Campaign | Name: Brook and friends #8 // EUR B | Status: Sending | Sched: 2026-03-24 07:00:00+00:00 | Targets: 58 | Sent: 0
+ID: Campaign | Name: Existential threat #23 // EUR Valid | Status: Sending | Sched: 2026-03-15 10:00:00+00:00 | Targets: 1145 | Sent: 0
+ID: Campaign | Name: Existential threat #23 // EUR Bounced | Status: Sending | Sched: 2026-03-15 10:00:00+00:00 | Targets: 47 | Sent: 0
+ID: Campaign | Name: Existential threat #23 // USA Valid | Status: Sending | Sched: 2026-03-15 10:00:00+00:00 | Targets: 973 | Sent: 0
+ID: Campaign | Name: Existential threat #23 // USA Bounced | Status: Sending | Sched: 2026-03-15 10:00:00+00:00 | Targets: 18 | Sent: 0
+ID: Campaign | Name: Existential threat #13 // EUR Valid | Status: Sending | Sched: 2026-03-11 11:30:00+00:00 | Targets: 1213 | Sent: 0
+ID: Campaign | Name: Existential threat #13 // USA Valid | Status: Sending | Sched: 2026-03-11 11:30:00+00:00 | Targets: 1055 | Sent: 0
+ID: Campaign | Name: Existential threat #13 // USA Bounced | Status: Sending | Sched: 2026-03-11 11:30:00+00:00 | Targets: 18 | Sent: 0
+ID: Campaign | Name: Existential threat #13 // EUR Bounced | Status: Sending | Sched: 2026-03-11 11:30:00+00:00 | Targets: 50 | Sent: 0
+ID: Campaign | Name: Existential threat #6 // USA Valid | Status: Sending | Sched: 2026-03-08 05:50:00+00:00 | Targets: 1121 | Sent: 0
+ID: Campaign | Name: Existential threat #6 // EUR Valid | Status: Sending | Sched: 2026-03-08 05:50:00+00:00 | Targets: 1296 | Sent: 0
+ID: Campaign | Name: Existential threat #6 // USA Bounced | Status: Sending | Sched: 2026-03-08 05:50:00+00:00 | Targets: 19 | Sent: 0
+ID: Campaign | Name: Existential threat #6 // EUR Bounced  | Status: Sending | Sched: 2026-03-08 05:50:00+00:00 | Targets: 54 | Sent: 0
+ID: Campaign | Name: Jane #17 // USA Valid | Status: Sending | Sched: 2026-02-28 21:45:00+00:00 | Targets: 1160 | Sent: 0
+ID: Campaign | Name: Jane #17 // USA Bounced | Status: Sending | Sched: 2026-02-28 21:45:00+00:00 | Targets: 20 | Sent: 0
+ID: Campaign | Name: Jane #10 // EUR Valids | Status: Sending | Sched: 2026-02-24 22:15:00+00:00 | Targets: 1329 | Sent: 0
+ID: Campaign | Name: Jane #10 // EUR Bounced | Status: Sending | Sched: 2026-02-24 22:15:00+00:00 | Targets: 94 | Sent: 0
+ID: Campaign | Name: Jane #10 // USA Bounced | Status: Sending | Sched: 2026-02-24 22:15:00+00:00 | Targets: 20 | Sent: 0
+ID: Campaign | Name: Jane #10 // USA Valid | Status: Sending | Sched: 2026-02-24 22:15:00+00:00 | Targets: 1123 | Sent: 0
+ID: Campaign | Name: Jane #8 // EUR Valid | Status: Sending | Sched: 2026-02-23 22:00:00+00:00 | Targets: 1355 | Sent: 0
+ID: Campaign | Name: Jane #8 // USA Valid | Status: Sending | Sched: 2026-02-23 22:00:00+00:00 | Targets: 1145 | Sent: 0
+ID: Campaign | Name: Jane #8 // EUR Bounced | Status: Sending | Sched: 2026-02-23 22:00:00+00:00 | Targets: 96 | Sent: 0
+ID: Campaign | Name: Jane #8 // USA Bounced | Status: Sending | Sched: 2026-02-23 22:00:00+00:00 | Targets: 20 | Sent: 0
+ID: Campaign | Name: 44.7% less #23 / USA | Status: Sending | Sched: 2026-02-13 21:00:00+00:00 | Targets: 1053 | Sent: 0
+ID: Campaign | Name: 44.7% less #23 / USA BP | Status: Sending | Sched: 2026-02-13 21:00:00+00:00 | Targets: 17 | Sent: 0
+ID: Campaign | Name: 44.7% less #23 / EUR BP | Status: Sending | Sched: 2026-02-13 19:25:00+00:00 | Targets: 87 | Sent: 0
+ID: Campaign | Name: 44.7% less #23 / EUR | Status: Sending | Sched: 2026-02-13 19:25:00+00:00 | Targets: 1234 | Sent: 0
+ID: Campaign | Name: 44.7% less #22 / USA | Status: Sending | Sched: 2026-02-13 18:30:00+00:00 | Targets: 1053 | Sent: 0
+ID: Campaign | Name: 44.7% less #22 / USA BP | Status: Sending | Sched: 2026-02-13 18:30:00+00:00 | Targets: 17 | Sent: 0
+ID: Campaign | Name: 44.7% less #22 / EUR BP | Status: Sending | Sched: 2026-02-13 17:15:00+00:00 | Targets: 87 | Sent: 0
+ID: Campaign | Name: 44.7% less #22 / EUR | Status: Sending | Sched: 2026-02-13 17:15:00+00:00 | Targets: 1236 | Sent: 0
+ID: Campaign | Name: 44.7% less #18 EUR BP | Status: Sending | Sched: 2026-02-12 20:00:00+00:00 | Targets: 89 | Sent: 0
+ID: Campaign | Name: 44.7% less #18 USA BP | Status: Sending | Sched: 2026-02-12 20:00:00+00:00 | Targets: 17 | Sent: 0
+ID: Campaign | Name: 44.7% less #18 EUR | Status: Sending | Sched: 2026-02-12 19:55:00+00:00 | Targets: 1249 | Sent: 0
+ID: Campaign | Name: 44.7% less #18 USA | Status: Sending | Sched: 2026-02-12 19:55:00+00:00 | Targets: 1060 | Sent: 0
+ID: Campaign | Name: 44.7% less #14 USA | Status: Sending | Sched: 2026-02-07 21:00:00+00:00 | Targets: 17 | Sent: 0
+ID: Campaign | Name: 44.7% less 14 USA | Status: Sending | Sched: 2026-02-07 21:00:00+00:00 | Targets: 1723 | Sent: 0
+ID: Campaign | Name: 44.7% less 13 // BP USA | Status: Sending | Sched: 2026-02-07 18:00:00+00:00 | Targets: 59 | Sent: 0
+ID: Campaign | Name: 44.7% less #13 USA | Status: Sending | Sched: 2026-02-07 18:00:00+00:00 | Targets: 1725 | Sent: 0
+ID: Campaign | Name: 44.7% less #13 USA | Status: Sending | Sched: 2026-02-07 18:00:00+00:00 | Targets: 1725 | Sent: 0
+ID: Campaign | Name: 44.7% less 14 EUR | Status: Sending | Sched: 2026-02-07 17:30:00+00:00 | Targets: 1302 | Sent: 0
+ID: Campaign | Name: 44.7% less 14 EUR BP | Status: Sending | Sched: 2026-02-07 17:30:00+00:00 | Targets: 91 | Sent: 0
+ID: Campaign | Name: 44.7% less 13 EUR BP | Status: Sending | Sched: 2026-02-07 14:30:00+00:00 | Targets: 148 | Sent: 0
+ID: Campaign | Name: 44.7% less #13 EUR | Status: Sending | Sched: 2026-02-07 14:30:00+00:00 | Targets: 1561 | Sent: 0
+ID: Campaign | Name: 44.7% less #7 USA | Status: Sending | Sched: 2026-02-04 21:30:00+00:00 | Targets: 1200 | Sent: 0
+ID: Campaign | Name: Menik and friends #11 | Status: Sending | Sched: 2026-01-24 22:15:00+00:00 | Targets: 2705 | Sent: 0
+ID: Campaign | Name: Menik and friends #8 | Status: Sending | Sched: 2026-01-24 00:00:00+00:00 | Targets: 2733 | Sent: 0

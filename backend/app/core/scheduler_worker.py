@@ -39,6 +39,15 @@ async def check_and_launch_scheduled_campaigns():
         for campaign in pending:
             campaign_id = campaign['id']
             try:
+                # Check if the config file exists locally BEFORE marking it as launching.
+                # This prevents a local instance from stealing campaigns created on the production server.
+                import os
+                campaign_file_path = os.path.join("campaign_data", f"{campaign_id}.json")
+                if not os.path.exists(campaign_file_path):
+                    # Do not print an error to avoid spam, just skip it.
+                    # Another server instance will pick it up.
+                    continue
+                
                 print(f"[Scheduler Worker] Launching campaign: {campaign_id}")
                 
                 # Mark as launching first (prevents duplicate launches)
@@ -95,7 +104,8 @@ def init_scheduler():
         id='email_scheduler_check',
         name='Check for scheduled email campaigns',
         replace_existing=True,
-        max_instances=1
+        max_instances=1,
+        misfire_grace_time=60
     )
     
     # 2. Data Sync (Every 10 minutes) - INCREMENTAL
@@ -105,7 +115,8 @@ def init_scheduler():
         id='data_sync_job',
         name='Sync Airtable to Supabase (Incremental)',
         replace_existing=True,
-        max_instances=1
+        max_instances=1,
+        misfire_grace_time=60
     )
     
     print("[Scheduler Worker] ✅ Scheduler initialized (Emails: 1min, Sync: 10min)")

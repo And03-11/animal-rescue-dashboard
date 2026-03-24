@@ -1,0 +1,10 @@
+ID: Campaign_2026-03-24_05-55-55, Name: Brook and friends #8 // EUR V, Status: Draft, Scheduled: None
+ID: Campaign_2026-03-24_05-55-11, Name: Brook and friends #8 // USA V, Status: Draft, Scheduled: None
+ID: Campaign_2026-03-24_05-52-06, Name: Brook and friends #8 // EUR B, Status: Draft, Scheduled: None
+ID: Campaign_2026-03-23_15-40-45, Name: Brook and friends #8 // USA B, Status: Sending, Scheduled: 2026-03-24 07:00:00+00:00
+ID: Campaign_2026-03-23_15-40-14, Name: Brook and friends #8 // USA V, Status: Sending, Scheduled: 2026-03-24 07:00:00+00:00
+ID: Campaign_2026-03-23_15-39-10, Name: Brook and friends #8 // EUR B, Status: Sending, Scheduled: 2026-03-24 07:00:00+00:00
+ID: Campaign_2026-03-23_15-38-40, Name: Brook and friends #8 // EUR V, Status: Sending, Scheduled: 2026-03-24 07:00:00+00:00
+ID: Campaign_2026-03-22_08-34-08, Name: Brook and friends #4 // USA B, Status: Draft, Scheduled: None
+ID: Campaign_2026-03-22_08-33-43, Name: Brook and friends #4 // USA V, Status: Draft, Scheduled: None
+ID: Campaign_2026-03-22_08-33-13, Name: Brook and friends #4 // EUR B, Status: Draft, Scheduled: None

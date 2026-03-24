@@ -110,9 +110,20 @@ def run_campaign_task(campaign_id: str):
         print(f"[{campaign_id}] Loaded config: {config.get('subject')}, Source: {config.get('source_type')}")
     except FileNotFoundError:
         print(f"[{campaign_id}] ERROR: Campaign config file not found.")
+        # Update Supabase to reflect the error
+        try:
+            service = get_email_sender_service()
+            service.update_campaign(campaign_id, {'status': 'Error - Config Missing'})
+        except Exception:
+            pass
         return
     except Exception as e:
         print(f"[{campaign_id}] ERROR: Could not read campaign config: {e}")
+        try:
+            service = get_email_sender_service()
+            service.update_campaign(campaign_id, {'status': 'Error - Config Invalid'})
+        except Exception:
+            pass
         return
 
     # --- Actualizar Estado a 'Sending' ---
@@ -150,6 +161,8 @@ def run_campaign_task(campaign_id: str):
         # Guardar estado de error...
         try:
             with open(campaign_file_path, 'w') as f: json.dump(config, f, indent=4)
+            service = get_email_sender_service()
+            service.update_campaign(campaign_id, {'status': config['status']})
         except Exception as e_save: print(f"[{campaign_id}] WARNING: Could not save error status: {e_save}")
         return # Detiene la tarea
 
@@ -195,7 +208,11 @@ def run_campaign_task(campaign_id: str):
         except Exception as e:
             print(f"[{campaign_id}] ERROR: Failed to get contacts from Airtable: {e}")
             config['status'] = 'Error - Airtable Fetch Failed' # Actualiza estado a error
-            # (Guardar estado de error - Opcional aquí, o manejar al final)
+            try:
+                with open(campaign_file_path, 'w') as f: json.dump(config, f, indent=4)
+                service = get_email_sender_service()
+                service.update_campaign(campaign_id, {'status': config['status']})
+            except Exception: pass
             return # Detiene la tarea
 
     elif source_type == 'csv':
@@ -204,13 +221,21 @@ def run_campaign_task(campaign_id: str):
         if not mapping or not mapping.get('email') or not mapping.get('name'):
             print(f"[{campaign_id}] ERROR: CSV mapping is missing or incomplete in config.")
             config['status'] = 'Error - Mapping Missing'
-            # (Guardar estado de error)
+            try:
+                with open(campaign_file_path, 'w') as f: json.dump(config, f, indent=4)
+                service = get_email_sender_service()
+                service.update_campaign(campaign_id, {'status': config['status']})
+            except Exception: pass
             return
 
         if not os.path.exists(target_csv_path):
              print(f"[{campaign_id}] ERROR: Target CSV file not found: {target_csv_path}")
              config['status'] = 'Error - CSV File Missing'
-             # (Guardar estado de error)
+             try:
+                 with open(campaign_file_path, 'w') as f: json.dump(config, f, indent=4)
+                 service = get_email_sender_service()
+                 service.update_campaign(campaign_id, {'status': config['status']})
+             except Exception: pass
              return
 
         try:
@@ -284,20 +309,32 @@ def run_campaign_task(campaign_id: str):
             print(f"[{campaign_id}] ERROR: Failed to process CSV file: {e}")
             traceback.print_exc()
             config['status'] = f'Error - CSV Processing Failed'
-            # (Guardar estado de error)
+            try:
+                with open(campaign_file_path, 'w') as f: json.dump(config, f, indent=4)
+                service = get_email_sender_service()
+                service.update_campaign(campaign_id, {'status': config['status']})
+            except Exception: pass
             return
 
     else:
         print(f"[{campaign_id}] ERROR: Unknown source_type '{source_type}'.")
         config['status'] = f'Error - Unknown Source'
-        # (Guardar estado de error)
+        try:
+            with open(campaign_file_path, 'w') as f: json.dump(config, f, indent=4)
+            service = get_email_sender_service()
+            service.update_campaign(campaign_id, {'status': config['status']})
+        except Exception: pass
         return
 
     # --- 3. Preparar Envío ---
     if not contact_data:
         print(f"[{campaign_id}] No contacts found or processed. Campaign finished.")
         config['status'] = 'Completed - No Contacts'
-        # (Guardar estado final)
+        try:
+            with open(campaign_file_path, 'w') as f: json.dump(config, f, indent=4)
+            service = get_email_sender_service()
+            service.update_campaign(campaign_id, {'status': config['status']})
+        except Exception: pass
         return
 
     subject = config.get('subject', '(No Subject)')
@@ -520,7 +557,16 @@ def run_campaign_task(campaign_id: str):
     try:
         with open(campaign_file_path, 'w') as f:
             json.dump(config, f, indent=4)
-        print(f"[{campaign_id}] Estado final guardado como: {final_status}")
+        print(f"[{campaign_id}] Estado final guardado en local como: {final_status}")
+        
+        # Sincronizar con Supabase DB
+        service = get_email_sender_service()
+        service.update_campaign(campaign_id, {
+            'status': final_status,
+            'completed_at': config['completedAt'],
+            'sent_count_final': final_sent_count
+        })
+        print(f"[{campaign_id}] Estado final guardado en Supabase como: {final_status}")
     except Exception as e:
         print(f"[{campaign_id}] ADVERTENCIA: No se pudo guardar el estado final '{final_status}': {e}")
     # --- FIN: REEMPLAZO de Actualización Final de Estado ---
