@@ -902,14 +902,17 @@ class AirtableService:
 
             # --- Excluir Tags Específicos ---
             tag_field = EMAILS_FIELDS.get("utils_tags", "Tag (Mailchimp)")
-            # Excluir 'Aol and other accounts', 'Apple_Accounts USA', 'Apple_Accounts EUR', 'Tag #4 New ones', 'Tag #3 New ones'
-            # Ahora es un campo de fórmula que devuelve texto, usamos concatenación con string vacío por seguridad
+            donor_tag_field = "Tag (from Donor)"
+            
+            # Excluir 'Aol and other accounts', 'Apple_Accounts USA', 'Apple_Accounts EUR' de Mailchimp Tags
             formula_parts.append(f"FIND('Aol and other accounts', {{{tag_field}}} & '') = 0")
             formula_parts.append(f"FIND('Apple_Accounts USA', {{{tag_field}}} & '') = 0")
             formula_parts.append(f"FIND('Apple_Accounts EUR', {{{tag_field}}} & '') = 0")
-            formula_parts.append(f"FIND('Tag #4 New ones', {{{tag_field}}} & '') = 0")
-            formula_parts.append(f"FIND('Tag #3 New ones', {{{tag_field}}} & '') = 0")
-            print("Excluyendo tags: Aol, Apple USA, Apple EUR, Tag #3, Tag #4")
+            
+            # Excluir 'Tag #4 New ones', 'Tag #3 New ones' (que provienen del donante)
+            formula_parts.append(f"FIND('Tag #4 New ones', {{{donor_tag_field}}} & '') = 0")
+            formula_parts.append(f"FIND('Tag #3 New ones', {{{donor_tag_field}}} & '') = 0")
+            print("Excluyendo tags: Aol, Apple USA, Apple EUR, Tag #3 New ones, Tag #4 New ones")
             
             # Condición de Bounced Account
             if is_bounced:
