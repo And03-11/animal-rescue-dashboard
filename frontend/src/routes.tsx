@@ -23,6 +23,7 @@ const CampaignSchedulerPage = lazy(() => import('./pages/CampaignSchedulerPage')
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const SharedAnalyticsPage = lazy(() => import('./pages/SharedAnalyticsPage'));
 const TemplatesPage = lazy(() => import('./pages/TemplatesPage'));
+const TemplateSearchPage = lazy(() => import('./pages/TemplateSearchPage'));
 const FunnelPage = lazy(() => import('./pages/FunnelPage'));
 
 const SpinnerFallback = () => (
@@ -110,6 +111,10 @@ export function AppRoutes() {
           <Route
             path="templates"
             element={<PageTransition><TemplatesPage /></PageTransition>}
+          />
+          <Route
+            path="template-search"
+            element={<PageTransition><TemplateSearchPage /></PageTransition>}
           />
 
           {/* ✅ NUEVA RUTA DE SETTINGS (Accesible a todos, el tab interno controla permisos si es necesario) */}

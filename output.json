@@ -1,0 +1,1 @@
+{"tables": ["sync_state", "emails", "analytics_shared_views", "campaign_emails", "daily_metrics", "donors", "email_sender_campaigns", "email_templates", "form_titles", "scheduled_campaigns", "scheduled_sends", "users", "campaigns", "donations"]}

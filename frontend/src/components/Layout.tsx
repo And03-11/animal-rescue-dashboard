@@ -16,6 +16,7 @@ import PersonSearchRoundedIcon from '@mui/icons-material/PersonSearchRounded';
 import EventNoteRoundedIcon from '@mui/icons-material/EventNoteRounded';
 import EmailRoundedIcon from '@mui/icons-material/EmailRounded';
 import ArticleRoundedIcon from '@mui/icons-material/ArticleRounded'; // For Templates
+import ManageSearchRoundedIcon from '@mui/icons-material/ManageSearchRounded'; // For Template Search
 import FilterAltRoundedIcon from '@mui/icons-material/FilterAltRounded'; // For Funnel
 import SettingsRoundedIcon from '@mui/icons-material/SettingsRounded'; // ✅ Nuevo icono
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded';
@@ -83,6 +84,7 @@ export const Layout: React.FC = () => {
         { text: 'Scheduler', icon: <EventNoteRoundedIcon />, path: '/scheduler' },
         { text: 'Email', icon: <EmailRoundedIcon />, path: '/email-sender' },
         { text: 'Templates', icon: <ArticleRoundedIcon />, path: '/templates' },
+        { text: 'Template Search', icon: <ManageSearchRoundedIcon />, path: '/template-search' },
       ]
     }
   ];
