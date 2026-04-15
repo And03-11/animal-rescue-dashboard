@@ -34,9 +34,6 @@ htmlcov
 db.sqlite3
 
 # Credentials (should be passed via env vars)
-token_credentials*.json
-gmail_credentials
-*.json.json
 
 # Misc
 .DS_Store

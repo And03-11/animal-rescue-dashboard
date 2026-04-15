@@ -11,6 +11,8 @@ services:
       - app-network
       - proxy_app-network
     restart: unless-stopped
+    volumes:
+      - ./backend/gmail_credentials:/app/backend/gmail_credentials
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 30s

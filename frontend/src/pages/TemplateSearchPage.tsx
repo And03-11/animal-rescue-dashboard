@@ -325,7 +325,6 @@ export default function TemplateSearchPage() {
                 }}
                 sx={{ maxWidth: 300 }}
               />
-            )}
           </Box>
         </Fade>
       )}

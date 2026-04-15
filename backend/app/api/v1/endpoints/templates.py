@@ -119,7 +119,13 @@ def send_test_email(template_id: int, request: SendTestRequest, db: Session = De
     
     # Use the full path to credentials file, not just the account ID
     credentials_path = all_accounts[0]['path']
-    gmail_service = GmailService(credentials_path)
+    try:
+        gmail_service = GmailService(credentials_path)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to initialize Gmail service for account {all_accounts[0]['id']}: {str(e)}"
+        )
     
     sent_count = 0
     errors = []

@@ -14,7 +14,11 @@ SCOPES = ['https://www.googleapis.com/auth/gmail.send']
 class GmailService:
     def __init__(self, credentials_path: str):
         self.credentials_path = credentials_path
-        self.token_path = f"token_{os.path.basename(credentials_path)}.json"
+        # Look for token in the same directory as the credentials
+        self.token_path = os.path.join(
+            os.path.dirname(credentials_path), 
+            f"token_{os.path.basename(credentials_path)}"
+        )
         self.service = self._authenticate()
 
     def _authenticate(self):
