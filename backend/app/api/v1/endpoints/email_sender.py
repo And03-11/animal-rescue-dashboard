@@ -92,6 +92,17 @@ class CampaignRequest(BaseModel):
     # ✅ Nuevo campo para Segmento (Standard vs DNR)
     segment: Optional[str] = Field(default="standard", description="Segmento de la campaña: 'standard' o 'dnr'.")
 
+class CampaignUpdateRequest(BaseModel):
+    campaign_name: Optional[str] = None
+    subject: Optional[str] = None
+    html_body: Optional[str] = None
+    sender_config: Optional[Union[str, List[str]]] = None
+    scheduled_at: Optional[datetime] = None
+    region: Optional[str] = None
+    is_bounced: Optional[bool] = None
+    segment: Optional[str] = None
+
+
 
 # --- REEMPLAZA esta función completa ---
 def run_campaign_task(campaign_id: str):
@@ -720,6 +731,56 @@ def get_campaign_details(
         for email in target_contacts
     ]
     return {"details": campaign_details, "contacts": contact_list_with_status}
+
+@router.put("/sender/campaigns/{campaign_id}", response_model=Dict[str, Any])
+def update_campaign(
+    campaign_id: str,
+    req: CampaignUpdateRequest,
+    current_user: str = Depends(get_current_user)
+):
+    """
+    Actualiza la configuración de una campaña existente.
+    """
+    campaign_file_path = os.path.join(CAMPAIGN_DATA_DIR, f"{campaign_id}.json")
+    if not os.path.exists(campaign_file_path):
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    try:
+        with open(campaign_file_path, 'r') as f:
+            config = json.load(f)
+            
+        update_data = req.model_dump(exclude_unset=True)
+        for key, value in update_data.items():
+            if value is not None or key == 'scheduled_at':
+                if key == 'scheduled_at':
+                    config[key] = value.isoformat() if value else None
+                else:
+                    config[key] = value
+                    
+        config['last_updated'] = datetime.now().isoformat()
+        
+        # update status based on scheduled_at if status was Draft or Scheduled or Ready
+        if config.get('status') in ['Draft', 'Scheduled', 'Ready']:
+            if config.get('mapping') and config.get('source_type') == 'csv':
+                 config['status'] = 'Scheduled' if config.get('scheduled_at') else 'Ready'
+            elif config.get('source_type') == 'airtable':
+                 config['status'] = 'Scheduled' if config.get('scheduled_at') else 'Ready'
+                 
+        with open(campaign_file_path, 'w') as f:
+            json.dump(config, f, indent=4, default=str)
+            
+        # Intentar actualizar supabase
+        try:
+            service = get_email_sender_service()
+            supabase_update = {k: v for k, v in config.items() if k in ['campaign_name', 'subject', 'html_body', 'sender_config', 'scheduled_at', 'status', 'region', 'is_bounced', 'segment']}
+            service.update_campaign(campaign_id, supabase_update)
+        except Exception as e:
+            print(f"Supabase update error: {e}")
+            
+        return config
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error updating campaign: {e}")
+
 
 @router.post("/sender/campaigns/{campaign_id}/launch")
 def launch_campaign(

@@ -58,7 +58,8 @@ import {
   TouchApp as TouchAppIcon,
   Label as LabelIcon, // Added for Campaign Name
   Subject as SubjectIcon, // Added for Email Subject
-  Article as ArticleIcon // Added for Content Editor
+  Article as ArticleIcon, // Added for Content Editor
+  Edit as EditIcon // Added for Edit Campaign
 } from '@mui/icons-material';
 import { Link as RouterLink } from 'react-router-dom';
 import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
@@ -280,6 +281,27 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
     if (initialCampaignId && initialCampaignId !== campaignId) {
       console.log("   useEffect: Prop initialCampaignId recibida/actualizada:", initialCampaignId);
       setCampaignId(initialCampaignId);
+
+      apiClient.get(`/sender/campaigns/${initialCampaignId}/details`).then(res => {
+         const details = res.data.details;
+         if (details.campaign_name) setCampaignName(details.campaign_name);
+         if (details.subject) setSubject(details.subject);
+         if (details.html_body) setHtmlBody(details.html_body);
+         if (details.source_type) setSourceType(details.source_type);
+         if (details.region) setRegion(details.region);
+         if (details.is_bounced !== undefined) setIsBounced(details.is_bounced);
+         if (details.segment) setSegment(details.segment);
+         setScheduledAt(details.scheduled_at ? dayjs(details.scheduled_at) : null);
+         if (details.sender_config === 'all') setSenderSelectionMode('all');
+         else if (Array.isArray(details.sender_config)) {
+             setSenderSelectionMode('manual');
+             setSelectedAccounts(details.sender_config.map((id:string)=>({id, group:'Unknown'})));
+         } else if (details.sender_config) {
+             setSenderSelectionMode('group');
+             setSelectedGroup(details.sender_config);
+         }
+      }).catch(e => console.error("Error fetching details", e));
+
       setCsvPreview(null);
       setShowMapping(false);
       setColumnMapping({ email: '', name: '' });
@@ -1197,7 +1219,7 @@ export const EmailSenderPage = () => {
         }
       }
 
-      // --- ETAPA 1: Crear Campaña y/o Subir Archivo ---
+      // --- ETAPA 1: Crear o Actualizar Campaña y/o Subir Archivo ---
       let campaignId = editingCampaignId;
       if (!campaignId) {
         console.log("Etapa 1: Creando configuración de campaña...");
@@ -1209,7 +1231,10 @@ export const EmailSenderPage = () => {
         console.log(`Etapa 1: Configuración guardada (ID: ${campaignId})`);
         setSnackbarMessage(`Configuration saved (ID: ${campaignId})...`);
       } else {
-        console.log(`Etapa 1: Usando campaignId existente: ${campaignId}`);
+        console.log(`Etapa 1: Actualizando campaignId existente: ${campaignId}`);
+        setSnackbarMessage(`Updating campaign configuration...`);
+        await apiClient.put(`/sender/campaigns/${campaignId}`, campaignBaseData);
+        setSnackbarMessage(`Configuration updated (ID: ${campaignId})...`);
       }
 
       // Subir CSV si aplica
@@ -1507,6 +1532,22 @@ export const EmailSenderPage = () => {
                       >
                         {campaign.status === 'Sending' ? 'Sending...' : (campaign.status === 'Completed with Errors' ? 'Retry Failed' : 'Launch')}
                       </Button>
+                      {/* --- INICIO: BOTÓN EDITAR --- */}
+                      <Tooltip title="Edit Campaign">
+                        <span>
+                          <IconButton
+                            aria-label="edit campaign"
+                            onClick={() => { setEditingCampaignId(campaign.id); setError(null); setIsModalOpen(true); }}
+                            color="primary"
+                            size="small"
+                            disabled={campaign.status === 'Sending' || deleting}
+                            sx={{ ml: 1 }}
+                          >
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                      {/* --- FIN: BOTÓN EDITAR --- */}
                       {/* --- INICIO: NUEVO BOTÓN ELIMINAR --- */}
                       <Tooltip title="Delete Campaign">
                         {/* Span necesario para Tooltip en botón deshabilitado */}
