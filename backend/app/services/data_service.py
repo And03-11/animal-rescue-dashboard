@@ -48,7 +48,9 @@ class DataService:
             
             all_donations = self.airtable.get_donations_with_donor_info()
             from collections import defaultdict
-            donor_stats = defaultdict(lambda: {"totalAmount": 0, "donationsCount": 0, "name": ""})
+            from datetime import datetime
+            
+            donor_stats = defaultdict(lambda: {"totalAmount": 0, "donationsCount": 0, "name": "", "firstDonationDate": None})
 
             for donation in all_donations:
                 email = donation.get("email")
@@ -59,6 +61,12 @@ class DataService:
                 donor_stats[email]["donationsCount"] += 1
                 if not donor_stats[email]["name"] or donor_stats[email]["name"] == "Anonymous":
                      donor_stats[email]["name"] = donation.get("name", "Anonymous")
+                     
+                donation_date = donation.get("date")
+                if donation_date:
+                    # donation_date is typically a string "YYYY-MM-DD"
+                    if not donor_stats[email]["firstDonationDate"] or donation_date < donor_stats[email]["firstDonationDate"]:
+                        donor_stats[email]["firstDonationDate"] = donation_date
 
             top_donors_list = [
                 {"email": email, **stats} for email, stats in donor_stats.items()

@@ -21,6 +21,7 @@ export interface Donor {
   name: string;
   totalAmount: number;
   donationsCount: number;
+  firstDonationDate: string | null;
 }
 
 interface TopDonorsTableProps {
@@ -52,6 +53,7 @@ export const TopDonorsTable: React.FC<TopDonorsTableProps> = ({ donors }) => {
           <TableRow>
             <TableCell align="center" sx={{ width: '10%', bgcolor: alpha(theme.palette.background.paper, 0.8) }}>Rank</TableCell>
             <TableCell sx={{ bgcolor: alpha(theme.palette.background.paper, 0.8) }}>Name</TableCell>
+            <TableCell sx={{ bgcolor: alpha(theme.palette.background.paper, 0.8) }}>First Donation</TableCell>
             <TableCell sx={{ bgcolor: alpha(theme.palette.background.paper, 0.8) }}>Total Donated</TableCell>
             <TableCell align="center" sx={{ bgcolor: alpha(theme.palette.background.paper, 0.8) }}># Donations</TableCell>
           </TableRow>
@@ -89,6 +91,13 @@ export const TopDonorsTable: React.FC<TopDonorsTableProps> = ({ donors }) => {
                     <Typography variant="caption" color="text.secondary">{donor.email}</Typography>
                   </Box>
                 </Box>
+              </TableCell>
+              <TableCell>
+                <Typography variant="body2" color="text.secondary">
+                  {donor.firstDonationDate 
+                    ? new Date(donor.firstDonationDate).toLocaleDateString()
+                    : 'N/A'}
+                </Typography>
               </TableCell>
               <TableCell>
                 <Typography variant="body2" fontWeight="700" color="success.main">

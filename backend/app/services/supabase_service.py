@@ -473,7 +473,8 @@ class SupabaseService:
                 d.emails[1] as email,
                 d.name,
                 SUM(don.amount) as "totalAmount",
-                COUNT(don.id) as "donationsCount"
+                COUNT(don.id) as "donationsCount",
+                MIN(don.donation_date) as "firstDonationDate"
             FROM donors d
             JOIN donations don ON don.donor_id = d.id
             WHERE d.emails IS NOT NULL AND array_length(d.emails, 1) > 0
@@ -489,7 +490,8 @@ class SupabaseService:
                 "email": row['email'],
                 "name": row['name'],
                 "totalAmount": float(row['totalAmount']),
-                "donationsCount": int(row['donationsCount'])
+                "donationsCount": int(row['donationsCount']),
+                "firstDonationDate": row['firstDonationDate'].isoformat() if row['firstDonationDate'] else None
             }
             for row in results
         ]
