@@ -148,7 +148,7 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
   const [columnMapping, setColumnMapping] = useState<{ email: string, name: string }>({ email: '', name: '' });
   const [isPreviewLoading, setIsPreviewLoading] = useState<boolean>(false);
   const [formError, setFormError] = useState<string>('');
-  const [campaignId, setCampaignId] = useState<string | null>(initialCampaignId);
+  const [campaignId, setCampaignId] = useState<string | null>(null);
   const [showMapping, setShowMapping] = useState<boolean>(false);
 
 
@@ -227,6 +227,20 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
     fetchSenderOptions();
   }, []); // Se ejecuta solo una vez
 
+  // Sincroniza selectedAccounts con los objetos reales de senderOptions para que el Autocomplete los muestre correctamente
+  useEffect(() => {
+    if (senderSelectionMode === 'manual' && senderOptions.accounts.length > 0 && selectedAccounts.length > 0) {
+        // Solo actualizamos si a alguno le falta el grupo real (ej: viene de cargar los detalles con grupo vacío/Unknown)
+        const needsSync = selectedAccounts.some(acc => !acc.group || acc.group === 'Unknown' || acc.group === '');
+        if (needsSync) {
+            setSelectedAccounts(prev => prev.map(acc => {
+                const found = senderOptions.accounts.find(opt => opt.id === acc.id);
+                return found ? found : acc;
+            }));
+        }
+    }
+  }, [senderOptions.accounts, senderSelectionMode, selectedAccounts]);
+
   // --- useEffect para cargar templates ---
   useEffect(() => {
     const fetchTemplates = async () => {
@@ -292,11 +306,12 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
          if (details.is_bounced !== undefined) setIsBounced(details.is_bounced);
          if (details.segment) setSegment(details.segment);
          setScheduledAt(details.scheduled_at ? dayjs(details.scheduled_at) : null);
-         if (details.sender_config === 'all') setSenderSelectionMode('all');
-         else if (Array.isArray(details.sender_config)) {
+         if (details.sender_config === 'all' || !details.sender_config) {
+             setSenderSelectionMode('all');
+         } else if (Array.isArray(details.sender_config)) {
              setSenderSelectionMode('manual');
-             setSelectedAccounts(details.sender_config.map((id:string)=>({id, group:'Unknown'})));
-         } else if (details.sender_config) {
+             setSelectedAccounts(details.sender_config.map((id:string)=>({id, group:''})));
+         } else if (typeof details.sender_config === 'string') {
              setSenderSelectionMode('group');
              setSelectedGroup(details.sender_config);
          }
@@ -876,7 +891,7 @@ const CampaignForm: React.FC<CampaignFormProps> = ({ onSave, onCancel, initialCa
               setSelectedAccounts(newValue); // Actualiza con los objetos seleccionados
               setFormError(''); // Limpia error al seleccionar/deseleccionar
             }}
-            isOptionEqualToValue={(option, value) => option.id === value.id && option.group === value.group}
+            isOptionEqualToValue={(option, value) => option.id === value.id}
             renderInput={(params) => (
               <TextField
                 {...params} variant="outlined" label="Select Specific Accounts"
@@ -1577,11 +1592,14 @@ export const EmailSenderPage = () => {
       {/* Modal para Crear/Editar Campaña */}
       <Dialog open={isModalOpen} onClose={() => { setIsModalOpen(false); setEditingCampaignId(null); setError(null); }} fullWidth maxWidth="md">
         {/* Pasamos el ID y el callback para limpiar errores */}
-        <CampaignForm
-          onSave={handleSaveCampaign}
-          onCancel={() => { setIsModalOpen(false); setEditingCampaignId(null); setError(null); }}
-          initialCampaignId={editingCampaignId}
-        />
+        {isModalOpen && (
+          <CampaignForm
+            key={editingCampaignId || 'new'}
+            onSave={handleSaveCampaign}
+            onCancel={() => { setIsModalOpen(false); setEditingCampaignId(null); setError(null); }}
+            initialCampaignId={editingCampaignId}
+          />
+        )}
       </Dialog>
 
       <Dialog

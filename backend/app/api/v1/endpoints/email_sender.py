@@ -712,23 +712,30 @@ def get_campaign_details(
         raise HTTPException(status_code=404, detail="Campaign not found")
     with open(campaign_file_path, 'r') as f:
         campaign_details = json.load(f)
+    
     target_list_path = os.path.join(TARGETS_DIR, f"target_{campaign_id}.csv")
-    if not os.path.exists(target_list_path):
-        return {"details": campaign_details, "contacts": []}
-    target_df = pd.read_csv(target_list_path)
-    target_contacts = target_df['Email'].tolist()
+    target_contacts = []
+    if os.path.exists(target_list_path):
+        try:
+            target_df = pd.read_csv(target_list_path)
+            if 'Email' in target_df.columns:
+                target_contacts = target_df['Email'].dropna().astype(str).tolist()
+        except Exception as e:
+            print(f"Error reading target csv for {campaign_id}: {e}")
+
     sent_log_path = os.path.join(SENT_LOGS_DIR, f"sent_{campaign_id}.csv")
     sent_emails = set()
     if os.path.exists(sent_log_path):
         try:
             sent_df = pd.read_csv(sent_log_path)
             if 'Email' in sent_df.columns:
-                sent_emails = set(sent_df['Email'].str.lower())
-        except pd.errors.EmptyDataError:
-            sent_emails = set()
+                sent_emails = set(sent_df['Email'].dropna().astype(str).str.lower())
+        except Exception as e:
+            print(f"Error reading sent log for {campaign_id}: {e}")
+
     contact_list_with_status = [
         {"email": email, "status": "Sent" if email.lower() in sent_emails else "Pending"}
-        for email in target_contacts
+        for email in target_contacts if isinstance(email, str) and email.strip()
     ]
     return {"details": campaign_details, "contacts": contact_list_with_status}
 
