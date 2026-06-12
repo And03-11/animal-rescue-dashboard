@@ -20,15 +20,20 @@ class SupabaseService:
             raise ValueError("SUPABASE_DATABASE_URL not found in environment variables")
         
         # Create connection pool instead of single connection
+        # keepalives prevent Supabase from closing idle connections silently
         try:
             self._pool = psycopg2.pool.SimpleConnectionPool(
-                1,  # minconn
+                1,   # minconn
                 10,  # maxconn
-                self.db_url
+                self.db_url,
+                keepalives=1,
+                keepalives_idle=30,
+                keepalives_interval=10,
+                keepalives_count=5,
             )
-            print("✅ Supabase connection pool created successfully")
+            print("Supabase connection pool created successfully")
         except Exception as e:
-            print(f"❌ Failed to create connection pool: {e}")
+            print(f"Failed to create connection pool: {e}")
             raise
     
     def _get_connection(self):
@@ -40,31 +45,68 @@ class SupabaseService:
             print(f"❌ Error getting connection from pool: {e}")
             raise
     
-    def _return_connection(self, conn):
-        """Return connection to pool"""
+    def _return_connection(self, conn, close_it: bool = False):
+        """Return connection to pool, or close it if it's stale/broken."""
         if conn:
-            self._pool.putconn(conn)
-    
+            if close_it:
+                # Don't return stale/broken connections to the pool — discard them
+                try:
+                    self._pool.putconn(conn, close=True)
+                except Exception:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+            else:
+                self._pool.putconn(conn)
+
+    def _is_connection_error(self, e: Exception) -> bool:
+        """Check if an exception is a stale/broken connection error."""
+        stale_keywords = [
+            "connection timed out",
+            "could not send data",
+            "could not receive data",
+            "connection reset",
+            "broken pipe",
+            "server closed the connection",
+            "ssl connection has been closed",
+            "terminating connection",
+        ]
+        msg = str(e).lower()
+        return any(kw in msg for kw in stale_keywords)
+
     def _execute_query(self, query: str, params: tuple = None) -> List[Dict]:
-        """Execute query and return results as list of dicts"""
-        conn = None
-        try:
-            conn = self._get_connection()
-            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute(query, params or ())
-                results = cursor.fetchall()
-            conn.commit()
-            return results
-        except Exception as e:
-            if conn:
-                conn.rollback()
-            print(f"❌ ERROR executing query: {e}")
-            print(f"Query: {query}")
-            print(f"Params: {params}")
-            raise
-        finally:
-            self._return_connection(conn)
-    
+        """Execute query and return results as list of dicts.
+        Retries once with a fresh connection if a stale connection is detected.
+        """
+        for attempt in range(2):  # attempt 0 = normal, attempt 1 = retry with fresh conn
+            conn = None
+            stale = False
+            try:
+                conn = self._get_connection()
+                with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                    cursor.execute(query, params or ())
+                    results = cursor.fetchall()
+                conn.commit()
+                return results
+            except Exception as e:
+                stale = self._is_connection_error(e)
+                if conn:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        stale = True  # rollback failed too — definitely stale
+                if attempt == 0 and stale:
+                    print(f"[DB] Stale connection detected, retrying with fresh connection. Error: {e}")
+                else:
+                    print(f"[DB] ERROR executing query (attempt {attempt + 1}): {e}")
+                    print(f"Query: {query}")
+                    raise
+            finally:
+                self._return_connection(conn, close_it=stale)
+        # Should never reach here
+        raise RuntimeError("_execute_query exhausted retries")
+
     def _execute_one(self, query: str, params: tuple = None) -> Optional[Dict]:
         """Execute query and return single result"""
         results = self._execute_query(query, params)
