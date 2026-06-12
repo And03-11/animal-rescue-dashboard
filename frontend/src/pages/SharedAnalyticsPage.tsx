@@ -406,7 +406,7 @@ const SharedAnalyticsPage: React.FC = () => {
                         tableContainerRef={tableContainerRef}
                         loadMoreRef={loadMoreRef}
                         maxHeight="100%"
-                        hideEmail={true}
+                        hideEmail={false}
                         sx={{
                             height: '100%',
                             borderRadius: 0,

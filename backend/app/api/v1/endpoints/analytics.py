@@ -152,7 +152,7 @@ async def get_shared_view_stats(
             )
         else:
             return data_service.get_source_stats(
-                source=source_id,
+                source_name=source_id,
                 start_date=start_date,
                 end_date=end_date
             )
@@ -171,7 +171,6 @@ async def get_shared_view_donations(
 ):
     """
     Get donations for a shared view. Public endpoint (no auth required).
-    Email addresses are redacted for privacy.
     """
     # First validate the token and get config
     config = service.get_shared_view(token)
@@ -211,14 +210,6 @@ async def get_shared_view_donations(
                 page_size=page_size,
                 offset=offset
             )
-        
-        # Redact email addresses for privacy in shared views
-        if 'donations' in result:
-            for donation in result['donations']:
-                if 'donorEmail' in donation:
-                    donation['donorEmail'] = '***@***.***'
-                if 'email' in donation:
-                    donation['email'] = '***@***.***'
         
         return result
         
