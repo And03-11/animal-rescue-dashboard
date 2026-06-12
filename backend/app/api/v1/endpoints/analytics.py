@@ -52,6 +52,50 @@ async def create_shared_view(
         raise HTTPException(status_code=500, detail=error_detail)
 
 
+@router.get("/debug/share-link-test")
+async def debug_share_link(service: SupabaseService = Depends(get_supabase_service)):
+    """
+    Temporary diagnostic endpoint - tests the DB connection and share-link insert.
+    NO AUTH REQUIRED. Remove after debugging.
+    """
+    import psycopg2.extras
+    results = {}
+    try:
+        # Step 1: Test DB connection
+        conn = service._get_connection()
+        results["db_connection"] = "OK"
+        service._return_connection(conn)
+    except Exception as e:
+        results["db_connection"] = f"FAILED: {type(e).__name__}: {e}"
+        return results
+
+    try:
+        # Step 2: Check table columns
+        rows = service._execute_query("""
+            SELECT column_name, data_type
+            FROM information_schema.columns 
+            WHERE table_name = 'analytics_shared_views'
+            ORDER BY ordinal_position
+        """)
+        results["table_columns"] = [dict(r) for r in rows]
+    except Exception as e:
+        results["table_columns"] = f"FAILED: {type(e).__name__}: {e}"
+
+    try:
+        # Step 3: Try actual INSERT
+        test_config = {"source_id": "debug-test", "source_name": "Debug"}
+        token = service.create_shared_view(test_config, created_by="debug")
+        # Cleanup
+        service._execute_query("DELETE FROM analytics_shared_views WHERE token = %s", (token,))
+        results["insert_test"] = f"OK - token: {token}"
+    except Exception as e:
+        full_tb = traceback.format_exc()
+        results["insert_test"] = f"FAILED: {type(e).__name__}: {e}"
+        results["insert_traceback"] = full_tb
+
+    return results
+
+
 @router.get("/share/{token}", response_model=Dict[str, Any])
 async def get_shared_view(
     token: str,
