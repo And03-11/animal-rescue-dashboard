@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from backend.app.services.supabase_service import get_supabase_service, SupabaseService
 from backend.app.services.data_service import DataService, get_data_service
 from backend.app.core.security import get_current_user
+import traceback
 
 router = APIRouter()
 
@@ -44,8 +45,12 @@ async def create_shared_view(
         
         return {"share_id": token, "url": url}
     except Exception as e:
-        print(f"Error creating shared link: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        error_detail = f"Error creating shared link: {type(e).__name__}: {e}"
+        full_traceback = traceback.format_exc()
+        print(f"[SHARE-LINK ERROR] {error_detail}")
+        print(f"[SHARE-LINK TRACEBACK]\n{full_traceback}")
+        raise HTTPException(status_code=500, detail=error_detail)
+
 
 @router.get("/share/{token}", response_model=Dict[str, Any])
 async def get_shared_view(
