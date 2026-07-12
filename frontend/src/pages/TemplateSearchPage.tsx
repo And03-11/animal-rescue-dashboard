@@ -1,9 +1,10 @@
 // --- File: src/pages/TemplateSearchPage.tsx ---
 import { useState, useCallback } from "react";
+import axios from "axios";
 import {
   Box, Typography, Paper, TextField, Button, CircularProgress,
-  Alert, Container, Chip, IconButton, Tooltip, InputAdornment,
-  Collapse, Snackbar, Fade, Skeleton, alpha, useTheme
+  Alert, Chip, IconButton, Tooltip, InputAdornment,
+  Collapse, Snackbar, Fade, Skeleton, Stack, alpha, useTheme
 } from "@mui/material";
 import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
 import OpenInNewRoundedIcon from "@mui/icons-material/OpenInNewRounded";
@@ -17,7 +18,10 @@ import CheckCircleOutlineRoundedIcon from "@mui/icons-material/CheckCircleOutlin
 import ErrorOutlineRoundedIcon from "@mui/icons-material/ErrorOutlineRounded";
 import HelpOutlineRoundedIcon from "@mui/icons-material/HelpOutlineRounded";
 import KeyboardReturnRoundedIcon from "@mui/icons-material/KeyboardReturnRounded";
+import ArticleOutlinedIcon from "@mui/icons-material/ArticleOutlined";
 import apiClient from "../api/axiosConfig";
+import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
+import { WorkspaceStatePanel } from "../components/WorkspaceStatePanel";
 
 // --- Types ---
 interface TemplateResult {
@@ -42,6 +46,13 @@ interface SearchResponse {
   count: number;
   results: TemplateResult[];
 }
+
+const getSearchErrorMessage = (error: unknown) => {
+  if (!axios.isAxiosError<{ detail?: string }>(error)) {
+    return "Error searching templates. Please try again.";
+  }
+  return error.response?.data?.detail || "Error searching templates. Please try again.";
+};
 
 // --- Helpers ---
 const getUrgencyColor = (urgency: string | null): "error" | "warning" | "info" | "default" => {
@@ -73,12 +84,11 @@ const getStatusColor = (status: string | null): "error" | "warning" | "success" 
 
 const getSimilarityPercent = (similarity: number) => Math.round(similarity * 100);
 
-const getSimilarityGradient = (similarity: number) => {
+const getSimilarityTone = (similarity: number) => {
   const pct = getSimilarityPercent(similarity);
-  if (pct >= 40) return "linear-gradient(135deg, #10b981, #059669)";
-  if (pct >= 30) return "linear-gradient(135deg, #6366f1, #818cf8)";
-  if (pct >= 20) return "linear-gradient(135deg, #f59e0b, #d97706)";
-  return "linear-gradient(135deg, #94a3b8, #64748b)";
+  if (pct >= 40) return "success" as const;
+  if (pct >= 25) return "primary" as const;
+  return "warning" as const;
 };
 
 // --- Component ---
@@ -107,9 +117,8 @@ export default function TemplateSearchPage() {
       const res = await apiClient.post<SearchResponse>("/template-search", { query: trimmed });
       setResults(res.data.results);
       setResultCount(res.data.count);
-    } catch (err: any) {
-      const detail = err.response?.data?.detail;
-      setError(detail || "Error searching templates. Please try again.");
+    } catch (err: unknown) {
+      setError(getSearchErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -128,70 +137,23 @@ export default function TemplateSearchPage() {
   };
 
   return (
-    <Container maxWidth="lg" sx={{ mt: 2, mb: 4 }}>
-      {/* --- Hero Search Section --- */}
-      <Paper
-        id="template-search-hero"
-        elevation={0}
-        sx={{
-          position: "relative",
-          overflow: "hidden",
-          borderRadius: 4,
-          p: { xs: 3, md: 5 },
-          mb: 4,
-          background: isDark
-            ? "linear-gradient(135deg, rgba(99,102,241,0.15) 0%, rgba(236,72,153,0.10) 100%)"
-            : "linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(236,72,153,0.06) 100%)",
-          border: `1px solid ${alpha(theme.palette.primary.main, 0.15)}`,
-          "&::before": {
-            content: '""',
-            position: "absolute",
-            top: -80,
-            right: -80,
-            width: 200,
-            height: 200,
-            borderRadius: "50%",
-            background: `radial-gradient(circle, ${alpha(theme.palette.primary.main, 0.12)} 0%, transparent 70%)`,
-          },
-          "&::after": {
-            content: '""',
-            position: "absolute",
-            bottom: -60,
-            left: -60,
-            width: 160,
-            height: 160,
-            borderRadius: "50%",
-            background: `radial-gradient(circle, ${alpha(theme.palette.secondary.main, 0.10)} 0%, transparent 70%)`,
-          },
-        }}
-      >
-        <Box sx={{ position: "relative", zIndex: 1 }}>
-          <Typography
-            variant="h4"
-            component="h1"
-            sx={{
-              fontWeight: 800,
-              mb: 1,
-              background: isDark
-                ? "linear-gradient(135deg, #818cf8, #f472b6)"
-                : "linear-gradient(135deg, #6366f1, #ec4899)",
-              backgroundClip: "text",
-              WebkitBackgroundClip: "text",
-              WebkitTextFillColor: "transparent",
-            }}
-          >
-            🔍 Smart Template Search
-          </Typography>
-          <Typography
-            variant="body1"
-            color="text.secondary"
-            sx={{ mb: 3, maxWidth: 600 }}
-          >
-            Search across all email templates using AI. Describe what you're looking for
-            and get the most relevant templates instantly.
-          </Typography>
+    <Box sx={{ width: "100%", display: "flex", flexDirection: "column", gap: 3.5 }}>
+      <WorkspacePageHeader
+        eyebrow="Template library"
+        title="Find the right message"
+        description="Describe an animal, medical need or donor goal. Semantic search will surface the closest reusable messages."
+        icon={<SearchRoundedIcon />}
+      />
 
-          <Box sx={{ display: "flex", gap: 1.5, alignItems: "stretch" }}>
+      <Paper id="template-search-hero" variant="outlined" sx={{ p: { xs: 2.25, sm: 3 } }}>
+        <Stack spacing={1.75}>
+          <Box>
+            <Typography variant="subtitle1" fontWeight={600}>Search templates</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Use natural language, or leave the field empty to review the complete library.
+            </Typography>
+          </Box>
+          <Stack direction={{ xs: "column", sm: "row" }} gap={1.5} alignItems="stretch">
             <TextField
               id="template-search-input"
               fullWidth
@@ -220,10 +182,8 @@ export default function TemplateSearchPage() {
               }}
               sx={{
                 "& .MuiOutlinedInput-root": {
-                  backgroundColor: isDark ? alpha("#0f172a", 0.6) : alpha("#fff", 0.8),
-                  backdropFilter: "blur(10px)",
+                  backgroundColor: "background.default",
                   fontSize: "1.05rem",
-                  borderRadius: 3,
                 },
               }}
             />
@@ -233,28 +193,14 @@ export default function TemplateSearchPage() {
               onClick={handleSearch}
               disabled={loading}
               sx={{
-                minWidth: 130,
-                borderRadius: 3,
-                fontWeight: 700,
-                fontSize: "0.95rem",
-                textTransform: "none",
-                background: "linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)",
-                boxShadow: "0 4px 15px rgba(99,102,241,0.3)",
-                "&:hover": {
-                  background: "linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)",
-                  boxShadow: "0 6px 20px rgba(99,102,241,0.4)",
-                  transform: "translateY(-1px)",
-                },
-                "&:disabled": {
-                  background: isDark ? alpha("#334155", 0.5) : alpha("#e2e8f0", 0.8),
-                },
-                transition: "all 0.2s ease",
+                minWidth: { sm: 132 },
+                minHeight: 48,
               }}
             >
               {loading ? <CircularProgress size={24} color="inherit" /> : "Search"}
             </Button>
-          </Box>
-        </Box>
+          </Stack>
+        </Stack>
       </Paper>
 
       {/* --- Error Alert --- */}
@@ -303,9 +249,10 @@ export default function TemplateSearchPage() {
           <Box
             sx={{
               display: "flex",
+              flexDirection: { xs: "column", sm: "row" },
               justifyContent: "space-between",
-              alignItems: "center",
-              mb: 2.5,
+              alignItems: { xs: "flex-start", sm: "center" },
+              gap: 1.25,
             }}
           >
             <Typography variant="h6" sx={{ fontWeight: 700 }}>
@@ -331,88 +278,57 @@ export default function TemplateSearchPage() {
 
       {!loading && hasSearched && results.length === 0 && (
         <Fade in>
-          <Paper
-            sx={{
-              p: 6,
-              textAlign: "center",
-              borderRadius: 3,
-            }}
-          >
-            <SearchRoundedIcon
-              sx={{
-                fontSize: 64,
-                color: "text.disabled",
-                mb: 2,
-              }}
+          <Box>
+            <WorkspaceStatePanel
+              icon={<SearchRoundedIcon />}
+              title="No close matches"
+              description={query.trim()
+                ? "Try a broader need, species or campaign goal. Shorter descriptions often produce better matches."
+                : "The template library is currently empty."}
+              action={query.trim() ? (
+                <Button variant="outlined" onClick={() => setQuery("")}>
+                  Clear search
+                </Button>
+              ) : undefined}
             />
-            <Typography variant="h6" color="text.secondary" gutterBottom>
-              No templates found
-            </Typography>
-            <Typography variant="body2" color="text.disabled">
-              {query.trim() ? "Try different keywords or a broader search term." : "There are no templates in the database yet."}
-            </Typography>
-          </Paper>
+          </Box>
         </Fade>
       )}
 
       {/* --- Initial State --- */}
       {!loading && !hasSearched && (
         <Fade in>
-          <Paper
-            sx={{
-              p: 6,
-              textAlign: "center",
-              borderRadius: 3,
-              border: `2px dashed ${alpha(theme.palette.divider, 0.5)}`,
-              backgroundColor: "transparent",
-            }}
-          >
-            <Box
-              sx={{
-                fontSize: 56,
-                mb: 2,
-                filter: "grayscale(0.3)",
-              }}
-            >
-              📧
-            </Box>
-            <Typography variant="h6" color="text.secondary" gutterBottom>
-              Search for email templates or load them all
-            </Typography>
-            <Typography variant="body2" color="text.disabled" sx={{ maxWidth: 460, mx: "auto" }}>
-              Type a description of what you need — for example, "dogs with cancer",
-              "urgent surgery funding" — or simply hit Search to load all templates from the database.
-            </Typography>
-            
-            <Button 
-              variant="outlined" 
-              sx={{ mt: 3, borderRadius: 2 }}
-              onClick={() => handleSearch()}
-              startIcon={<SearchRoundedIcon />}
-            >
-              Load All Templates
-            </Button>
-          </Paper>
+          <Box>
+            <WorkspaceStatePanel
+              dashed
+              icon={<ArticleOutlinedIcon />}
+              title="Explore the message library"
+              description="Search by animal, diagnosis, urgency or donor action. You can also load every template to browse the full collection."
+              action={(
+                <Button variant="outlined" onClick={() => handleSearch()} startIcon={<SearchRoundedIcon />}>
+                  Browse all templates
+                </Button>
+              )}
+            />
+          </Box>
         </Fade>
       )}
 
       {/* --- Results List --- */}
       {!loading && results.length > 0 && (
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          {results.map((template, index) => (
-            <Fade in key={template.id} timeout={300 + index * 80}>
+          {results.map((template) => (
+            <Fade in key={template.id} timeout={200}>
               <Paper
                 id={`template-result-${template.id}`}
+                variant="outlined"
                 sx={{
                   p: 0,
-                  borderRadius: 3,
                   overflow: "hidden",
-                  transition: "all 0.25s ease",
+                  transition: "transform 180ms ease, box-shadow 180ms ease",
                   "&:hover": {
                     transform: "translateY(-2px)",
-                    boxShadow: isDark
-                      ? "0 12px 40px rgba(0,0,0,0.4)"
-                      : "0 12px 40px rgba(0,0,0,0.1)",
+                    boxShadow: theme.shadows[2],
                   },
                 }}
               >
@@ -422,13 +338,22 @@ export default function TemplateSearchPage() {
                     sx={{
                       width: 6,
                       minHeight: "100%",
-                      background: getSimilarityGradient(template.similarity),
+                      backgroundColor: theme.palette[getSimilarityTone(template.similarity)].main,
                       flexShrink: 0,
                     }}
                   />
 
                   {/* Content */}
-                  <Box sx={{ flex: 1, p: 2.5, display: "flex", gap: 2 }}>
+                  <Box
+                    sx={{
+                      flex: 1,
+                      p: { xs: 2, sm: 2.5 },
+                      display: "flex",
+                      flexDirection: { xs: "column", sm: "row" },
+                      gap: 2,
+                      minWidth: 0,
+                    }}
+                  >
                     {/* Left: Main Info */}
                     <Box sx={{ flex: 1, minWidth: 0 }}>
                       {/* Title Row */}
@@ -440,7 +365,6 @@ export default function TemplateSearchPage() {
                             fontSize: "1.05rem",
                             lineHeight: 1.3,
                           }}
-                          noWrap
                         >
                           {template.title}
                         </Typography>
@@ -451,8 +375,10 @@ export default function TemplateSearchPage() {
                             fontWeight: 700,
                             fontSize: "0.7rem",
                             height: 22,
-                            background: getSimilarityGradient(template.similarity),
-                            color: "#fff",
+                            backgroundColor: alpha(theme.palette[getSimilarityTone(template.similarity)].main, 0.12),
+                            color: theme.palette[getSimilarityTone(template.similarity)].main,
+                            border: "1px solid",
+                            borderColor: alpha(theme.palette[getSimilarityTone(template.similarity)].main, 0.28),
                             flexShrink: 0,
                           }}
                         />
@@ -588,14 +514,16 @@ export default function TemplateSearchPage() {
                     <Box
                       sx={{
                         display: "flex",
-                        flexDirection: "column",
+                        flexDirection: { xs: "row", sm: "column" },
                         alignItems: "center",
-                        justifyContent: "center",
+                        justifyContent: { xs: "flex-end", sm: "center" },
                         gap: 0.75,
                         flexShrink: 0,
-                        pl: 1,
-                        borderLeft: `1px solid ${alpha(theme.palette.divider, 0.3)}`,
-                        minWidth: 56,
+                        pl: { sm: 1 },
+                        pt: { xs: 1, sm: 0 },
+                        borderLeft: { sm: `1px solid ${theme.palette.divider}` },
+                        borderTop: { xs: `1px solid ${theme.palette.divider}`, sm: "none" },
+                        minWidth: { sm: 56 },
                       }}
                     >
                       <Tooltip title="Open in Google Docs" arrow>
@@ -662,6 +590,6 @@ export default function TemplateSearchPage() {
           {snackbar}
         </Alert>
       </Snackbar>
-    </Container>
+    </Box>
   );
 }
