@@ -1,87 +1,126 @@
-// frontend/src/context/WebSocketProvider.tsx
-import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 
-// Define la forma de nuestro contexto
+type WebSocketPayload = unknown;
+type WebSocketListener = (data: WebSocketPayload) => void;
+
 interface WebSocketContextType {
   isConnected: boolean;
-  subscribe: (eventType: string, callback: (data: any) => void) => () => void;
+  subscribe: (eventType: string, callback: WebSocketListener) => () => void;
 }
 
-// Creamos el contexto con un valor por defecto
+interface WebSocketMessage {
+  type?: unknown;
+  data?: unknown;
+}
+
+const RECONNECT_BASE_DELAY_MS = 1_000;
+const RECONNECT_MAX_DELAY_MS = 30_000;
+
 const WebSocketContext = createContext<WebSocketContextType | null>(null);
 
-// El proveedor que envolverá nuestra aplicación
-export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const WebSocketProvider = ({ children }: { children: ReactNode }) => {
   const [isConnected, setIsConnected] = useState(false);
-  const ws = useRef<WebSocket | null>(null);
-  // Usamos un ref para almacenar los listeners y evitar re-renders innecesarios
-  const listeners = useRef<Map<string, Set<(data: any) => void>>>(new Map());
+  const socketRef = useRef<WebSocket | null>(null);
+  const listenersRef = useRef<Map<string, Set<WebSocketListener>>>(new Map());
 
-  const connect = useCallback(() => {
-    // Evita múltiples conexiones
-    if (ws.current && ws.current.readyState === WebSocket.OPEN) return;
+  useEffect(() => {
+    let disposed = false;
+    let reconnectAttempt = 0;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-    // Obtiene la URL de la API de las variables de entorno de Vite
-    const isSecure = window.location.protocol === 'https:';
-    const wsProtocol = isSecure ? 'wss' : 'ws';
-    const wsHost = window.location.host;
-    const wsUrl = `${wsProtocol}://${wsHost}/api/v1/ws/updates`;
-    // Construye la URL del WebSocket, reemplazando http con ws
-
-    console.log('Connecting to WebSocket:', wsUrl);
-    ws.current = new WebSocket(wsUrl);
-
-    ws.current.onopen = () => {
-      console.log('WebSocket Connected');
-      setIsConnected(true);
+    const clearReconnectTimer = () => {
+      if (reconnectTimer === null) return;
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
     };
 
-    ws.current.onclose = () => {
-      console.log('WebSocket Disconnected. Attempting to reconnect...');
-      setIsConnected(false);
-      // Intenta reconectar después de 3 segundos
-      setTimeout(connect, 3000);
-    };
+    const connect = () => {
+      if (disposed) return;
 
-    ws.current.onerror = (error) => {
-      console.error('WebSocket Error:', error);
-      ws.current?.close(); // Dispara el onclose para la lógica de reconexión
-    };
+      const currentSocket = socketRef.current;
+      if (
+        currentSocket
+        && (currentSocket.readyState === WebSocket.OPEN || currentSocket.readyState === WebSocket.CONNECTING)
+      ) {
+        return;
+      }
 
-    ws.current.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        const { type, data } = message;
+      clearReconnectTimer();
 
-        // Si hay listeners para este tipo de evento, ejecútalos
-        if (listeners.current.has(type)) {
-          listeners.current.get(type)?.forEach(callback => callback(data));
+      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+      const socket = new WebSocket(`${protocol}://${window.location.host}/api/v1/ws/updates`);
+      socketRef.current = socket;
+
+      socket.onopen = () => {
+        if (disposed || socketRef.current !== socket) return;
+        reconnectAttempt = 0;
+        setIsConnected(true);
+      };
+
+      socket.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data) as WebSocketMessage;
+          if (typeof message.type !== 'string') return;
+          listenersRef.current.get(message.type)?.forEach((callback) => callback(message.data));
+        } catch {
+          // Ignore malformed messages without interrupting the live connection.
         }
-      } catch (error) {
-        console.error('Error parsing WebSocket message:', error);
+      };
+
+      socket.onerror = () => {
+        socket.close();
+      };
+
+      socket.onclose = () => {
+        if (socketRef.current === socket) socketRef.current = null;
+        if (disposed) return;
+
+        setIsConnected(false);
+        const delay = Math.min(
+          RECONNECT_BASE_DELAY_MS * (2 ** reconnectAttempt),
+          RECONNECT_MAX_DELAY_MS,
+        );
+        reconnectAttempt += 1;
+        clearReconnectTimer();
+        reconnectTimer = setTimeout(connect, delay);
+      };
+    };
+
+    connect();
+
+    return () => {
+      disposed = true;
+      clearReconnectTimer();
+
+      const socket = socketRef.current;
+      socketRef.current = null;
+      if (socket) {
+        socket.onopen = null;
+        socket.onmessage = null;
+        socket.onerror = null;
+        socket.onclose = null;
+        socket.close();
       }
     };
   }, []);
 
-  useEffect(() => {
-    connect();
+  const subscribe = useCallback((eventType: string, callback: WebSocketListener) => {
+    const eventListeners = listenersRef.current.get(eventType) ?? new Set<WebSocketListener>();
+    eventListeners.add(callback);
+    listenersRef.current.set(eventType, eventListeners);
 
     return () => {
-      // Limpia la conexión cuando el componente se desmonta
-      ws.current?.close();
-    };
-  }, [connect]);
-
-  // Función para que los componentes se suscriban a eventos
-  const subscribe = useCallback((eventType: string, callback: (data: any) => void) => {
-    if (!listeners.current.has(eventType)) {
-      listeners.current.set(eventType, new Set());
-    }
-    listeners.current.get(eventType)?.add(callback);
-
-    // Devuelve una función para desuscribirse y limpiar
-    return () => {
-      listeners.current.get(eventType)?.delete(callback);
+      const currentListeners = listenersRef.current.get(eventType);
+      currentListeners?.delete(callback);
+      if (currentListeners?.size === 0) listenersRef.current.delete(eventType);
     };
   }, []);
 
@@ -92,7 +131,6 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   );
 };
 
-// Hook personalizado para usar el contexto fácilmente
 export const useWebSocket = () => {
   const context = useContext(WebSocketContext);
   if (!context) {

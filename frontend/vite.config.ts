@@ -33,7 +33,9 @@ export default defineConfig({
     // Mantenemos la configuración del proxy que ya tenías.
     proxy: {
       '/api': {
-        target: 'http://localhost:8001',
+        // Use IPv4 explicitly. On Windows, localhost may resolve to the
+        // unhealthy Docker/WSL listener on ::1 instead of the local backend.
+        target: 'http://127.0.0.1:8001',
         changeOrigin: true,
         // ✅ Añade esta línea para habilitar el proxy para WebSockets
         ws: true,
