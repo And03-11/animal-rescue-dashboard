@@ -515,14 +515,23 @@ class SupabaseService:
         """) or {}
 
         timing = self._execute_one("""
+            WITH calendar_days AS (
+                SELECT GENERATE_SERIES(
+                    CURRENT_DATE - INTERVAL '89 days',
+                    CURRENT_DATE,
+                    INTERVAL '1 day'
+                )::date AS date
+            )
             SELECT
-                TRIM(TO_CHAR(date, 'Day')) AS weekday,
-                COALESCE(AVG(total_amount), 0) AS average_daily_amount,
-                COALESCE(AVG(donation_count), 0) AS average_daily_donations
-            FROM daily_metrics
-            WHERE date >= CURRENT_DATE - INTERVAL '89 days'
-            GROUP BY EXTRACT(DOW FROM date), TO_CHAR(date, 'Day')
-            ORDER BY AVG(total_amount) DESC
+                TRIM(TO_CHAR(calendar_days.date, 'Day')) AS weekday,
+                AVG(COALESCE(daily_metrics.total_amount, 0)) AS average_daily_amount,
+                AVG(COALESCE(daily_metrics.donation_count, 0)) AS average_daily_donations
+            FROM calendar_days
+            LEFT JOIN daily_metrics ON daily_metrics.date = calendar_days.date
+            GROUP BY
+                EXTRACT(DOW FROM calendar_days.date),
+                TO_CHAR(calendar_days.date, 'Day')
+            ORDER BY AVG(COALESCE(daily_metrics.total_amount, 0)) DESC
             LIMIT 1
         """) or {}
 
@@ -581,6 +590,7 @@ class SupabaseService:
                 "reactivationPool": max(known_donors - donors_with_gifts, 0),
             },
             "timing": {
+                "periodDays": 90,
                 "bestWeekday": timing.get('weekday') or '—',
                 "averageDailyAmount": round(float(timing.get('average_daily_amount') or 0), 2),
                 "averageDailyDonations": round(float(timing.get('average_daily_donations') or 0), 1),

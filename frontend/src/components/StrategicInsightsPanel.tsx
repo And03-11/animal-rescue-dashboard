@@ -31,6 +31,7 @@ export interface StrategicInsights {
     reactivationPool: number;
   };
   timing: {
+    periodDays: number;
     bestWeekday: string;
     averageDailyAmount: number;
     averageDailyDonations: number;
@@ -150,7 +151,7 @@ export const StrategicInsightsPanel = ({ data, loading, error }: Props) => {
           icon={<CalendarMonthRoundedIcon fontSize="small" />}
           label="Strongest weekday"
           value={data.timing.bestWeekday}
-          detail={`${currencyFormat.format(data.timing.averageDailyAmount)} average daily revenue`}
+          detail={`${currencyFormat.format(data.timing.averageDailyAmount)} average per ${data.timing.bestWeekday} · zero-revenue days included`}
           tone="info"
         />
       </Box>
