@@ -2,15 +2,27 @@ import os
 import ast
 import sys
 import importlib.util
+import re
+from pathlib import Path
 
-REQUIREMENTS_FILE = "requirements.txt"
-PROJECT_DIR = "app"
+BASE_DIR = Path(__file__).resolve().parent
+REQUIREMENTS_FILE = BASE_DIR / "requirements.txt"
+PROJECT_DIR = BASE_DIR / "app"
 
 def read_requirements():
-    with open(REQUIREMENTS_FILE, "r") as f:
+    # requirements.txt is UTF-16 in this legacy project. Resolve it relative to
+    # this script so the check behaves identically locally and in CI.
+    with open(REQUIREMENTS_FILE, "r", encoding="utf-16") as f:
         lines = f.read().splitlines()
-    pkgs = [line.strip().split("[")[0].split("==")[0].lower() for line in lines if line.strip() and not line.startswith("#")]
-    return set(pkgs)
+    packages = set()
+    for line in lines:
+        requirement = line.strip()
+        if not requirement or requirement.startswith(("#", "-r")):
+            continue
+        name = re.split(r"[<>=!~;\s]", requirement, maxsplit=1)[0]
+        name = name.split("[")[0]
+        packages.add(name.lower().replace("_", "-"))
+    return packages
 
 def find_imports(directory):
     imports = set()
@@ -45,15 +57,24 @@ def main():
     declared = read_requirements()
     used = find_imports(PROJECT_DIR)
 
-    known_safe = {
-    "app",
-    "dotenv",
-    "google_auth_oauthlib",
-    "googleapiclient",
-    "jose"
-}
-    third_party = {pkg for pkg in used if not is_builtin_or_std(pkg) and pkg not in known_safe}
-    missing = sorted([pkg for pkg in third_party if pkg.lower() not in declared])
+    local_or_optional = {"app", "backend", "database", "truststore"}
+    import_to_distribution = {
+        "dotenv": "python-dotenv",
+        "fastapi_cache": "fastapi-cache2",
+        "google_auth_oauthlib": "google-auth-oauthlib",
+        "googleapiclient": "google-api-python-client",
+        "jose": "python-jose",
+        "psycopg2": "psycopg2-binary",
+    }
+    third_party = {
+        pkg for pkg in used
+        if not is_builtin_or_std(pkg) and pkg not in local_or_optional
+    }
+    missing = sorted([
+        pkg for pkg in third_party
+        if import_to_distribution.get(pkg, pkg).lower().replace("_", "-")
+        not in declared
+    ])
 
     if missing:
         print("❌ Missing dependencies in requirements.txt:")

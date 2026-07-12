@@ -16,6 +16,7 @@ import { useWebSocket } from '../context/WebSocketProvider';
 import { CombinedStatCard } from '../components/CombinedStatCard';
 import { TopDonorsTable, type Donor } from '../components/TopDonorsTable';
 import { DonationSourceChart } from '../components/DonationSourceChart';
+import { StrategicInsightsPanel, type StrategicInsights } from '../components/StrategicInsightsPanel';
 
 
 // Interfaces de datos
@@ -72,10 +73,11 @@ export const DashboardHomePage = () => {
   const [glanceData, setGlanceData] = useState<GlanceData | null>(null);
   const [filteredData, setFilteredData] = useState<FilteredData | null>(null);
   const [sourceData, setSourceData] = useState<SourceData[]>([]);
+  const [strategicInsights, setStrategicInsights] = useState<StrategicInsights | null>(null);
   const [startDate, setStartDate] = useState<Dayjs | null>(null);
   const [endDate, setEndDate] = useState<Dayjs | null>(null);
-  const [loading, setLoading] = useState({ glance: true, filter: false, topDonors: true, sources: true });
-  const [error, setError] = useState({ glance: '', filter: '', topDonors: '', sources: '' });
+  const [loading, setLoading] = useState({ glance: true, filter: false, topDonors: true, sources: true, insights: true });
+  const [error, setError] = useState({ glance: '', filter: '', topDonors: '', sources: '', insights: '' });
   const { subscribe } = useWebSocket();
   const [topDonors, setTopDonors] = useState<Donor[]>([]);
 
@@ -86,7 +88,7 @@ export const DashboardHomePage = () => {
     try {
       const response = await apiClient.get<{ glance: GlanceData }>('/dashboard/metrics');
       setGlanceData(response.data.glance);
-    } catch (err) {
+    } catch {
       setError(prev => ({ ...prev, glance: 'Failed to load initial metrics.' }));
     } finally {
       if (!isRefresh) {
@@ -100,7 +102,7 @@ export const DashboardHomePage = () => {
     try {
       const response = await apiClient.get<Donor[]>('/dashboard/top-donors');
       setTopDonors(response.data);
-    } catch (err) {
+    } catch {
       setError(prev => ({ ...prev, topDonors: 'Failed to load top donors.' }));
     } finally {
       setLoading(prev => ({ ...prev, topDonors: false }));
@@ -112,10 +114,23 @@ export const DashboardHomePage = () => {
     try {
       const response = await apiClient.get<SourceResponse>('/dashboard/sources');
       setSourceData(response.data.breakdown);
-    } catch (err) {
+    } catch {
       setError(prev => ({ ...prev, sources: 'Failed to load donation sources.' }));
     } finally {
       setLoading(prev => ({ ...prev, sources: false }));
+    }
+  }, []);
+
+  const fetchStrategicInsights = useCallback(async (isRefresh: boolean = false) => {
+    if (!isRefresh) setLoading(prev => ({ ...prev, insights: true }));
+    setError(prev => ({ ...prev, insights: '' }));
+    try {
+      const response = await apiClient.get<StrategicInsights>('/dashboard/insights');
+      setStrategicInsights(response.data);
+    } catch {
+      setError(prev => ({ ...prev, insights: 'Strategic insights could not be refreshed.' }));
+    } finally {
+      if (!isRefresh) setLoading(prev => ({ ...prev, insights: false }));
     }
   }, []);
 
@@ -123,7 +138,8 @@ export const DashboardHomePage = () => {
     fetchGlanceMetrics();
     fetchTopDonors();
     fetchSources();
-  }, [fetchGlanceMetrics, fetchTopDonors, fetchSources]);
+    fetchStrategicInsights();
+  }, [fetchGlanceMetrics, fetchTopDonors, fetchSources, fetchStrategicInsights]);
 
   const handleSearchByRange = useCallback(async (isRefresh: boolean = false) => {
     if (!startDate || !endDate || startDate.isAfter(endDate)) {
@@ -141,7 +157,7 @@ export const DashboardHomePage = () => {
       };
       const response = await apiClient.get<{ filtered: FilteredData }>('/dashboard/metrics', { params });
       setFilteredData(response.data.filtered);
-    } catch (err) {
+    } catch {
       setError(prev => ({ ...prev, filter: 'Failed to load filtered metrics.' }));
     } finally {
       if (!isRefresh) {
@@ -156,6 +172,7 @@ export const DashboardHomePage = () => {
       console.log('Notification received! Refreshing dashboard data silently...');
       fetchGlanceMetrics(true);
       fetchSources(); // Refresh sources too
+      fetchStrategicInsights(true);
       if (startDate && endDate) {
         handleSearchByRange(true);
       }
@@ -164,7 +181,7 @@ export const DashboardHomePage = () => {
       console.log("Unsubscribing from 'new_donation' event.");
       unsubscribe();
     };
-  }, [subscribe, fetchGlanceMetrics, fetchSources, handleSearchByRange, startDate, endDate]);
+  }, [subscribe, fetchGlanceMetrics, fetchSources, fetchStrategicInsights, handleSearchByRange, startDate, endDate]);
 
   const formatXAxis = (tickItem: string) => {
     if (tickItem.includes(':')) return tickItem;
@@ -280,12 +297,13 @@ export const DashboardHomePage = () => {
 
             <Grid size={{ xs: 12, md: 8 }}>
               <motion.div variants={itemVariants}>
-                <Paper sx={{ p: 3, height: '400px' }}>
+                <Paper sx={{ p: 3, height: { xs: 380, sm: 420 }, display: 'flex', flexDirection: 'column' }}>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                     <Typography variant="h6" fontWeight="700">Donation Trend (Last 30 Days)</Typography>
                   </Box>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={glanceData.glanceTrend} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                  <Box sx={{ flex: 1, minHeight: 0, width: '100%' }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={glanceData.glanceTrend} margin={{ top: 18, right: 12, left: 4, bottom: 12 }}>
                       <defs>
                         <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor={theme.palette.primary.main} stopOpacity={0.3} />
@@ -307,6 +325,7 @@ export const DashboardHomePage = () => {
                       />
                       <YAxis
                         yAxisId="left"
+                        domain={[0, (dataMax: number) => Math.ceil(dataMax * 1.08)]}
                         tickFormatter={(tick) => `$${tick}`}
                         axisLine={false}
                         tickLine={false}
@@ -314,6 +333,7 @@ export const DashboardHomePage = () => {
                       />
                       <YAxis
                         yAxisId="right"
+                        domain={[0, (dataMax: number) => Math.ceil(dataMax * 1.08)]}
                         orientation="right"
                         axisLine={false}
                         tickLine={false}
@@ -338,7 +358,7 @@ export const DashboardHomePage = () => {
                         }}
                         itemStyle={{ color: theme.palette.text.primary }}
                       />
-                      <Legend iconType="circle" />
+                      <Legend iconType="circle" verticalAlign="bottom" height={32} wrapperStyle={{ paddingTop: 12 }} />
                       <Area
                         yAxisId="left"
                         type="monotone"
@@ -360,7 +380,8 @@ export const DashboardHomePage = () => {
                         strokeWidth={3}
                       />
                     </AreaChart>
-                  </ResponsiveContainer>
+                    </ResponsiveContainer>
+                  </Box>
                 </Paper>
               </motion.div>
             </Grid>
@@ -381,6 +402,14 @@ export const DashboardHomePage = () => {
       </Grid>
 
       {/* --- SECCIÓN 2: BÚSQUEDA POR RANGO --- */}
+      <motion.div variants={itemVariants}>
+        <StrategicInsightsPanel
+          data={strategicInsights}
+          loading={loading.insights}
+          error={error.insights}
+        />
+      </motion.div>
+
       <motion.div variants={itemVariants}>
         <Paper sx={{ p: 3 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>

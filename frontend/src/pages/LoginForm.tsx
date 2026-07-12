@@ -1,281 +1,139 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  Box, Button, TextField, Typography, Alert, CircularProgress,
-  useTheme, alpha, InputAdornment, IconButton, GlobalStyles, useMediaQuery
-} from "@mui/material";
-import { motion } from "framer-motion";
+  Alert, Box, Button, CircularProgress, Container, IconButton, InputAdornment,
+  Paper, Stack, TextField, Typography, alpha,
+} from '@mui/material';
+import { motion } from 'framer-motion';
+import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded';
+import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
+import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
 import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
-import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
-import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
-import apiClient from "../api/axiosConfig";
+import apiClient from '../api/axiosConfig';
 import logo from '../assets/Logo.png';
 
-export default function LoginForm() {
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const navigate = useNavigate();
+const getRequestMessage = (error: unknown, fallback: string) => {
+  if (typeof error !== 'object' || error === null || !('response' in error)) return fallback;
+  const response = (error as { response?: { data?: { detail?: unknown } } }).response;
+  return typeof response?.data?.detail === 'string' ? response.data.detail : fallback;
+};
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
+export default function LoginForm() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const successMessage = (location.state as { message?: string } | null)?.message;
+
+  const handleLogin = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError('');
     setLoading(true);
     try {
       const form = new URLSearchParams();
-      form.append("username", username);
-      form.append("password", password);
-
-      const response = await apiClient.post("/login", form, {
-        headers: { "Content-Type": "application/x-www-form-urlencoded" }
+      form.append('username', username);
+      form.append('password', password);
+      const response = await apiClient.post('/login', form, {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       });
-
-      const { access_token } = response.data;
-      localStorage.setItem("token", access_token);
-      navigate("/dashboard");
-    } catch (err: any) {
-      setError(err.response?.data?.detail || "Invalid credentials");
+      localStorage.setItem('token', response.data.access_token);
+      navigate('/dashboard');
+    } catch (requestError: unknown) {
+      setError(getRequestMessage(requestError, 'We could not sign you in. Check your credentials and try again.'));
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <Box sx={{ minHeight: '100vh', display: 'flex' }}>
-      <GlobalStyles styles={{
-        'input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:focus, input:-webkit-autofill:active': {
-          transition: 'background-color 5000s ease-in-out 0s',
-          WebkitTextFillColor: '#fff !important',
-          caretColor: '#fff',
-          WebkitBoxShadow: '0 0 0 1000px transparent inset !important',
-        }
-      }} />
-
-      {/* Left Side - Branding (Hidden on mobile) */}
-      {!isMobile && (
-        <Box
-          sx={{
-            flex: 1,
-            background: '#0a0b1e',
-            backgroundImage: `
-              radial-gradient(circle at 10% 20%, ${alpha(theme.palette.primary.main, 0.2)} 0%, transparent 40%),
-              radial-gradient(circle at 90% 80%, ${alpha(theme.palette.secondary.main, 0.2)} 0%, transparent 40%),
-              linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0) 100%)
-            `,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            p: 4,
-            position: 'relative',
-            overflow: 'hidden'
-          }}
-        >
-          {/* Decorative Circles */}
-          <Box sx={{
-            position: 'absolute',
-            top: '20%',
-            left: '10%',
-            width: '300px',
-            height: '300px',
-            borderRadius: '50%',
-            background: alpha(theme.palette.primary.main, 0.1),
-            filter: 'blur(60px)',
-            zIndex: 0
-          }} />
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.2 }}
-            style={{ zIndex: 1, textAlign: 'center' }}
-          >
-            <img src={logo} alt="Logo" style={{ height: '120px', marginBottom: '40px' }} />
-            <Typography variant="h3" fontWeight={800} sx={{ color: '#fff', mb: 2, letterSpacing: '-1px' }}>
-              Animal love
-            </Typography>
-            <Typography variant="h4" fontWeight={600} sx={{ color: alpha('#fff', 0.85), mb: 1 }}>
-              No-Kill Rescue Center
-            </Typography>
-            <Typography variant="h6" sx={{ color: alpha('#fff', 0.6), fontWeight: 400, fontStyle: 'italic' }}>
-              Dashboard, Analytics & More
-            </Typography>
-          </motion.div>
-        </Box>
-      )}
-
-      {/* Right Side - Login Form */}
+    <Box sx={{ minHeight: '100vh', display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'minmax(420px, 0.95fr) minmax(520px, 1.05fr)' }, bgcolor: 'background.default' }}>
       <Box
+        component="section"
         sx={{
-          flex: isMobile ? 1 : '0 0 550px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: '#121422',
-          p: 4,
-          position: 'relative'
+          display: { xs: 'none', lg: 'flex' }, flexDirection: 'column', justifyContent: 'space-between',
+          p: { lg: 6, xl: 8 }, color: '#F4FBF8', overflow: 'hidden', position: 'relative',
+          background: `linear-gradient(145deg, #0B3D38 0%, #102923 62%, #17231F 100%)`,
+          '&::after': { content: '""', position: 'absolute', width: 520, height: 520, right: -180, bottom: -220, borderRadius: '50%', border: `1px solid ${alpha('#FFFFFF', 0.1)}`, boxShadow: `0 0 0 72px ${alpha('#FFFFFF', 0.025)}, 0 0 0 144px ${alpha('#FFFFFF', 0.018)}` },
         }}
       >
-        <motion.div
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.6 }}
-          style={{ width: '100%', maxWidth: '400px' }}
-        >
-          <Box sx={{ mb: 5 }}>
-            {isMobile && <img src={logo} alt="Logo" style={{ height: '40px', marginBottom: '20px' }} />}
-            <Typography variant="h4" fontWeight={700} sx={{ color: '#fff', mb: 1 }}>
-              Sign In
-            </Typography>
-            <Typography variant="body1" sx={{ color: alpha('#fff', 0.6) }}>
-              Enter your credentials to access the admin panel.
-            </Typography>
+        <Stack direction="row" spacing={1.5} alignItems="center" sx={{ position: 'relative', zIndex: 1 }}>
+          <Box component="img" src={logo} alt="Animal Love" sx={{ width: 46, height: 46, objectFit: 'contain' }} />
+          <Box>
+            <Typography variant="h6" sx={{ color: 'inherit' }}>Animal Love</Typography>
+            <Typography variant="caption" sx={{ color: alpha('#FFFFFF', 0.68) }}>No-kill rescue center</Typography>
           </Box>
+        </Stack>
 
-          <form onSubmit={handleLogin}>
-            <TextField
-              label="Username"
-              fullWidth
-              margin="normal"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              type="text"
-              required
-              autoFocus
-              variant="outlined"
-              InputLabelProps={{ sx: { color: alpha('#fff', 0.7) } }}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <PersonOutlineIcon sx={{ color: alpha('#fff', 0.7) }} />
-                  </InputAdornment>
-                ),
-                sx: {
-                  color: '#fff',
-                  borderRadius: '12px',
-                  bgcolor: alpha('#000', 0.2),
-                  '& .MuiOutlinedInput-notchedOutline': { borderColor: alpha('#fff', 0.1) },
-                  '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: alpha('#fff', 0.3) },
-                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: theme.palette.primary.main },
-                  '& input:-webkit-autofill': {
-                    WebkitBoxShadow: `0 0 0 100px ${alpha('#000', 0.2)} inset !important`,
-                    WebkitTextFillColor: '#fff !important',
-                    borderRadius: '12px',
-                  }
-                }
-              }}
-            />
-            <TextField
-              label="Password"
-              fullWidth
-              margin="normal"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              type={showPassword ? "text" : "password"}
-              required
-              variant="outlined"
-              InputLabelProps={{ sx: { color: alpha('#fff', 0.7) } }}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <LockOutlinedIcon sx={{ color: alpha('#fff', 0.7) }} />
-                  </InputAdornment>
-                ),
-                endAdornment: (
-                  <InputAdornment position="end">
-                    <IconButton
-                      aria-label="toggle password visibility"
-                      onClick={() => setShowPassword(!showPassword)}
-                      edge="end"
-                      sx={{ color: alpha('#fff', 0.7) }}
-                    >
-                      {showPassword ? <VisibilityOff /> : <Visibility />}
-                    </IconButton>
-                  </InputAdornment>
-                ),
-                sx: {
-                  color: '#fff',
-                  borderRadius: '12px',
-                  bgcolor: alpha('#000', 0.2),
-                  '& .MuiOutlinedInput-notchedOutline': { borderColor: alpha('#fff', 0.1) },
-                  '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: alpha('#fff', 0.3) },
-                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: theme.palette.primary.main },
-                  '& input:-webkit-autofill': {
-                    WebkitBoxShadow: `0 0 0 100px ${alpha('#000', 0.2)} inset !important`,
-                    WebkitTextFillColor: '#fff !important',
-                    borderRadius: '12px',
-                  }
-                }
-              }}
-            />
+        <Box sx={{ maxWidth: 560, position: 'relative', zIndex: 1 }}>
+          <Typography variant="overline" sx={{ color: '#81E6D9' }}>Rescue operations</Typography>
+          <Typography variant="h1" sx={{ color: 'inherit', mt: 1.5, mb: 2.5, fontSize: { lg: '2.6rem', xl: '3.25rem' } }}>
+            Every action helps an animal find safety.
+          </Typography>
+          <Typography sx={{ color: alpha('#FFFFFF', 0.7), fontSize: '1.05rem', lineHeight: 1.7, maxWidth: 500 }}>
+            Campaigns, donor insights and outreach tools in one focused workspace for the team.
+          </Typography>
+          <Stack spacing={1.5} sx={{ mt: 4 }}>
+            {['Track rescue campaign performance', 'Coordinate donor communications', 'Keep the team aligned'].map((item) => (
+              <Stack key={item} direction="row" spacing={1.25} alignItems="center">
+                <CheckCircleRoundedIcon sx={{ color: '#81E6D9', fontSize: 20 }} />
+                <Typography variant="body2" sx={{ color: alpha('#FFFFFF', 0.82) }}>{item}</Typography>
+              </Stack>
+            ))}
+          </Stack>
+        </Box>
 
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', mt: 1, mb: 4 }}>
-              <Button
-                size="small"
-                sx={{
-                  textTransform: 'none',
-                  color: alpha('#fff', 0.5),
-                  '&:hover': { color: '#fff', bgcolor: 'transparent' }
-                }}
-                onClick={() => alert("Please contact your administrator to reset your password.")}
-              >
-                Forgot Password?
-              </Button>
-              <Button
-                size="small"
-                variant="text"
-                onClick={() => navigate("/register")}
-                sx={{
-                  textTransform: 'none',
-                  color: theme.palette.primary.main,
-                  fontWeight: 600,
-                  '&:hover': { bgcolor: 'transparent', textDecoration: 'underline' }
-                }}
-              >
-                Don't have an account? Register here
-              </Button>
+        <Typography variant="caption" sx={{ color: alpha('#FFFFFF', 0.5), position: 'relative', zIndex: 1 }}>
+          Animal welfare, supported by better information.
+        </Typography>
+      </Box>
+
+      <Container component="main" maxWidth="sm" sx={{ display: 'flex', alignItems: 'center', py: { xs: 4, sm: 7 }, px: { xs: 2, sm: 4 } }}>
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.28 }} style={{ width: '100%' }}>
+          <Paper elevation={0} sx={{ p: { xs: 3, sm: 5 }, maxWidth: 500, mx: 'auto', bgcolor: 'background.paper' }}>
+            <Stack direction="row" spacing={1.25} alignItems="center" sx={{ display: { lg: 'none' }, mb: 4 }}>
+              <Box component="img" src={logo} alt="Animal Love" sx={{ width: 40, height: 40, objectFit: 'contain' }} />
+              <Typography variant="h6">Animal Love</Typography>
+            </Stack>
+
+            <Typography variant="overline" color="primary.main">Secure workspace</Typography>
+            <Typography variant="h2" sx={{ mt: 1, mb: 1 }}>Welcome back</Typography>
+            <Typography color="text.secondary" sx={{ mb: 4 }}>Sign in to continue to rescue operations.</Typography>
+
+            {successMessage && <Alert severity="success" sx={{ mb: 2.5 }}>{successMessage}</Alert>}
+            {error && <Alert severity="error" sx={{ mb: 2.5 }}>{error}</Alert>}
+
+            <Box component="form" onSubmit={handleLogin} noValidate>
+              <Stack spacing={2.25}>
+                <TextField
+                  label="Email or username" value={username} onChange={(event) => setUsername(event.target.value)}
+                  autoComplete="username" autoFocus required fullWidth
+                  InputProps={{ startAdornment: <InputAdornment position="start"><PersonOutlineIcon color="action" /></InputAdornment> }}
+                />
+                <TextField
+                  label="Password" value={password} onChange={(event) => setPassword(event.target.value)}
+                  type={showPassword ? 'text' : 'password'} autoComplete="current-password" required fullWidth
+                  InputProps={{
+                    startAdornment: <InputAdornment position="start"><LockOutlinedIcon color="action" /></InputAdornment>,
+                    endAdornment: <InputAdornment position="end"><IconButton aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={() => setShowPassword((value) => !value)} edge="end">{showPassword ? <VisibilityOff /> : <Visibility />}</IconButton></InputAdornment>,
+                  }}
+                />
+                <Button type="submit" variant="contained" size="large" fullWidth disabled={loading} sx={{ minHeight: 50 }}>
+                  {loading ? <CircularProgress size={22} color="inherit" aria-label="Signing in" /> : 'Sign in'}
+                </Button>
+              </Stack>
             </Box>
 
-            {error && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-              >
-                <Alert severity="error" variant="filled" sx={{ mb: 3, borderRadius: '10px' }}>{error}</Alert>
-              </motion.div>
-            )}
-
-            <Button
-              type="submit"
-              variant="contained"
-              disabled={loading}
-              fullWidth
-              size="large"
-              sx={{
-                height: 56,
-                borderRadius: '16px',
-                fontSize: '1.1rem',
-                fontWeight: 700,
-                textTransform: 'none',
-                boxShadow: '0 4px 14px 0 rgba(0,118,255,0.39)',
-                background: `linear-gradient(45deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.light} 100%)`,
-                transition: 'all 0.2s ease-in-out',
-                '&:hover': {
-                  transform: 'translateY(-2px)',
-                  boxShadow: '0 6px 20px rgba(0,118,255,0.23)'
-                }
-              }}
-            >
-              {loading ? <CircularProgress size={24} color="inherit" /> : "Sign In"}
-            </Button>
-          </form>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1, mt: 3, flexWrap: 'wrap' }}>
+              <Button size="small" color="inherit" onClick={() => window.alert('Please contact your administrator to reset your password.')}>Forgot password?</Button>
+              <Button size="small" onClick={() => navigate('/register')}>Request an account</Button>
+            </Box>
+          </Paper>
         </motion.div>
-      </Box>
+      </Container>
     </Box>
   );
 }

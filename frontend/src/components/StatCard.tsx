@@ -18,8 +18,8 @@ export function StatCard({ title, value, icon, trend }: StatCardProps) {
   return (
     <Card
       component={motion.div}
-      whileHover={{ y: -4, boxShadow: theme.shadows[4] }}
-      transition={{ type: "spring", stiffness: 300 }}
+      whileHover={{ y: -2, boxShadow: theme.shadows[2] }}
+      transition={{ duration: 0.18 }}
       sx={{
         display: 'flex',
         alignItems: 'center',
@@ -37,7 +37,7 @@ export function StatCard({ title, value, icon, trend }: StatCardProps) {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.1)} 0%, ${alpha(theme.palette.primary.main, 0.2)} 100%)`,
+          backgroundColor: alpha(theme.palette.primary.main, 0.1),
           color: 'primary.main',
         }}
       >
@@ -57,20 +57,6 @@ export function StatCard({ title, value, icon, trend }: StatCardProps) {
         )}
       </Box>
 
-      {/* Decorative background element */}
-      <Box
-        sx={{
-          position: 'absolute',
-          right: -20,
-          bottom: -20,
-          opacity: 0.05,
-          transform: 'scale(2.5)',
-          color: 'primary.main',
-          pointerEvents: 'none',
-        }}
-      >
-        {icon}
-      </Box>
     </Card>
   );
 };

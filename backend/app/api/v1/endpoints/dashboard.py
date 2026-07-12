@@ -121,6 +121,18 @@ def get_top_donors(
     except Exception as e:
         return {"error": "Could not process top donors", "details": str(e)}
 
+@router.get("/insights")
+@cache(expire=900)
+def get_strategic_insights(
+    data_service: DataService = Depends(get_data_service),
+    current_user: str = Depends(get_current_user)
+):
+    try:
+        return data_service.get_strategic_insights()
+    except Exception:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Could not process strategic insights")
+
 @router.get("/sources")
 @cache(expire=300)
 def get_donation_sources(
@@ -147,3 +159,16 @@ def get_funnel_stats(data_service: DataService = Depends(get_data_service)):
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Could not process funnel stats")
+
+@router.get("/funnel-email-insights")
+@cache(expire=600)
+def get_funnel_email_insights(
+    days: int = 30,
+    data_service: DataService = Depends(get_data_service),
+    current_user: str = Depends(get_current_user)
+):
+    try:
+        return data_service.get_funnel_email_insights(days)
+    except Exception:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Could not process funnel email insights")
