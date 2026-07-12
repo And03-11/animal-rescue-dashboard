@@ -13,6 +13,7 @@ jobs:
     env:
       AIRTABLE_API_KEY: test
       AIRTABLE_BASE_ID: test
+      BREVO_API_KEY: test
       MAILCHIMP_API_KEY: test
       MAILCHIMP_LIST_ID: test
       MAILCHIMP_DC: us1
