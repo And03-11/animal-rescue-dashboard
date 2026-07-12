@@ -13,6 +13,9 @@ jobs:
     env:
       AIRTABLE_API_KEY: test
       AIRTABLE_BASE_ID: test
+      MAILCHIMP_API_KEY: test
+      MAILCHIMP_LIST_ID: test
+      MAILCHIMP_DC: us1
     runs-on: ubuntu-latest
     strategy:
       matrix:
