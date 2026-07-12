@@ -21,6 +21,14 @@ class DataService:
             print("Falling back to Airtable...")
             return self.airtable.get_daily_summaries(start_date, end_date)
 
+    def get_strategic_insights(self) -> Dict[str, Any]:
+        """Get derived strategic metrics from the Airtable-synced warehouse."""
+        return self.supabase.get_strategic_insights()
+
+    def get_funnel_email_insights(self, days: int = 30) -> Dict[str, Any]:
+        """Get email engagement scoped to the New Comer Funnel."""
+        return self.supabase.get_funnel_email_insights(days)
+
     def get_top_donors(self, limit: int = 10) -> List[Dict[str, Any]]:
         """
         Fetches top donors from Supabase, falling back to Airtable on error.

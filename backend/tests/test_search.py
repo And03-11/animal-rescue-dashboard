@@ -6,14 +6,14 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
-import app.schemas as schemas
-from app.api.v1.endpoints.search import (
+from backend.app.main import app
+import backend.app.schemas as schemas
+from backend.app.api.v1.endpoints.search import (
     get_data_service,
     get_mailchimp_service,
     get_brevo_service
 )
-from app.core.security import get_current_user  # 🔐 para override auth
+from backend.app.core.security import get_current_user  # 🔐 para override auth
 
 # 🔐 Override de autenticación en todos los tests
 app.dependency_overrides[get_current_user] = lambda: "test@example.com"

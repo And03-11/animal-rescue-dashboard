@@ -1,7 +1,7 @@
 // --- Archivo: src/routes.tsx ---
 import { lazy, Suspense } from 'react';
-import { Route, Routes, useLocation } from 'react-router-dom';
-import { Box, CircularProgress } from '@mui/material';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { Box, Skeleton, Stack } from '@mui/material';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import { Layout } from './components/Layout';
@@ -27,8 +27,15 @@ const TemplateSearchPage = lazy(() => import('./pages/TemplateSearchPage'));
 const FunnelPage = lazy(() => import('./pages/FunnelPage'));
 
 const SpinnerFallback = () => (
-  <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
-    <CircularProgress color="primary" size={48} thickness={4} />
+  <Box aria-label="Loading page" sx={{ py: { xs: 2, md: 4 } }}>
+    <Stack spacing={2.5}>
+      <Skeleton variant="text" width="38%" height={52} />
+      <Skeleton variant="text" width="62%" />
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(3, 1fr)' }, gap: 2 }}>
+        {[0, 1, 2].map((item) => <Skeleton key={item} variant="rounded" height={132} />)}
+      </Box>
+      <Skeleton variant="rounded" height={320} />
+    </Stack>
   </Box>
 );
 
@@ -41,7 +48,7 @@ const PageTransition = ({ children }: { children: React.ReactNode }) => {
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -12 }}
-        transition={{ duration: 0.3 }}
+        transition={{ duration: 0.2, ease: 'easeOut' }}
         style={{ width: '100%' }}
       >
         <Box sx={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
@@ -75,6 +82,8 @@ export function AppRoutes() {
 
         {/* --- Rutas Protegidas con Layout --- */}
         <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
+
+          <Route index element={<Navigate to="/dashboard" replace />} />
 
           <Route
             path="dashboard"

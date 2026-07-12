@@ -1,0 +1,2 @@
+-r requirements.txt
+truststore>=0.10.4

@@ -3,6 +3,7 @@ Email Scheduler Worker
 Uses APScheduler to check for pending scheduled campaigns and launch them automatically.
 """
 import asyncio
+import os
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from datetime import datetime
@@ -87,6 +88,22 @@ async def run_data_sync():
         traceback.print_exc()
 
 
+async def run_brevo_stats_sync():
+    """Refresh compact New Comer Funnel delivery totals from Brevo."""
+    print("[Scheduler Worker] Starting Brevo funnel stats sync...")
+    try:
+        from backend.app.scripts.sync_brevo_funnel_stats import (
+            run_brevo_funnel_stats_sync,
+        )
+
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, run_brevo_funnel_stats_sync)
+        print("[Scheduler Worker] Brevo funnel stats sync finished")
+    except Exception as e:
+        print(f"[Scheduler Worker] Error in Brevo stats sync: {e}")
+        traceback.print_exc()
+
+
 def init_scheduler():
     """Initialize the APScheduler"""
     global _scheduler
@@ -108,18 +125,39 @@ def init_scheduler():
         misfire_grace_time=60
     )
     
-    # 2. Data Sync (Every 10 minutes) - INCREMENTAL
+    # 2. Airtable data sync. Keep the cadence conservative because Supabase is
+    # shared with other automations.
+    data_sync_minutes = max(10, int(os.getenv("DATA_SYNC_INTERVAL_MINUTES", "15")))
     _scheduler.add_job(
         run_data_sync,
-        trigger=IntervalTrigger(minutes=10),
+        trigger=IntervalTrigger(minutes=data_sync_minutes, jitter=60),
         id='data_sync_job',
         name='Sync Airtable to Supabase (Incremental)',
         replace_existing=True,
         max_instances=1,
-        misfire_grace_time=60
+        misfire_grace_time=120,
+        coalesce=True,
+    )
+
+    # 3. Brevo aggregate stats. One hourly batch is enough for dashboard data
+    # and avoids a write for every sent/delivered event.
+    brevo_sync_minutes = max(30, int(os.getenv("BREVO_STATS_SYNC_MINUTES", "60")))
+    _scheduler.add_job(
+        run_brevo_stats_sync,
+        trigger=IntervalTrigger(minutes=brevo_sync_minutes, jitter=300),
+        id='brevo_funnel_stats_sync_job',
+        name='Sync Brevo funnel aggregate statistics',
+        replace_existing=True,
+        max_instances=1,
+        misfire_grace_time=300,
+        coalesce=True,
     )
     
-    print("[Scheduler Worker] ✅ Scheduler initialized (Emails: 1min, Sync: 10min)")
+    print(
+        "[Scheduler Worker] Scheduler initialized "
+        f"(Emails: 1min, Airtable: {data_sync_minutes}min, "
+        f"Brevo stats: {brevo_sync_minutes}min)"
+    )
     return _scheduler
 
 

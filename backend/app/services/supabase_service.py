@@ -10,6 +10,7 @@ from psycopg2.extras import RealDictCursor
 from typing import Optional, List, Dict, Any
 from datetime import datetime, date
 from dotenv import load_dotenv
+from backend.app.core.funnel_email_config import get_verified_new_comer_tags
 
 load_dotenv()
 
@@ -22,9 +23,13 @@ class SupabaseService:
         # Create connection pool instead of single connection
         # keepalives prevent Supabase from closing idle connections silently
         try:
+            pool_max_connections = max(
+                2,
+                min(int(os.getenv("SUPABASE_POOL_MAX", "4")), 6),
+            )
             self._pool = psycopg2.pool.SimpleConnectionPool(
                 1,   # minconn
-                10,  # maxconn
+                pool_max_connections,
                 self.db_url,
                 keepalives=1,
                 keepalives_idle=30,
@@ -462,6 +467,135 @@ class SupabaseService:
             for row in results
         ]
 
+    def get_strategic_insights(self) -> Dict[str, Any]:
+        """Return compact, decision-oriented fundraising insights.
+
+        All values are derived from Airtable-synced tables. Keeping these as
+        queries avoids persisting duplicated metrics that can become stale.
+        """
+        performance = self._execute_one("""
+            SELECT
+                COALESCE(SUM(total_amount) FILTER (
+                    WHERE date >= CURRENT_DATE - INTERVAL '29 days'
+                ), 0) AS current_amount,
+                COALESCE(SUM(donation_count) FILTER (
+                    WHERE date >= CURRENT_DATE - INTERVAL '29 days'
+                ), 0) AS current_count,
+                COALESCE(SUM(total_amount) FILTER (
+                    WHERE date BETWEEN CURRENT_DATE - INTERVAL '59 days'
+                                   AND CURRENT_DATE - INTERVAL '30 days'
+                ), 0) AS previous_amount,
+                COALESCE(SUM(donation_count) FILTER (
+                    WHERE date BETWEEN CURRENT_DATE - INTERVAL '59 days'
+                                   AND CURRENT_DATE - INTERVAL '30 days'
+                ), 0) AS previous_count
+            FROM daily_metrics
+            WHERE date >= CURRENT_DATE - INTERVAL '59 days'
+        """) or {}
+
+        audience = self._execute_one("""
+            WITH donor_totals AS (
+                SELECT
+                    donor_id,
+                    COUNT(*) AS gift_count,
+                    COALESCE(SUM(amount), 0) AS lifetime_amount
+                FROM donations
+                WHERE donor_id IS NOT NULL
+                GROUP BY donor_id
+            )
+            SELECT
+                (SELECT COUNT(*) FROM donors) AS known_donors,
+                COUNT(*) AS donors_with_gifts,
+                COUNT(*) FILTER (WHERE gift_count = 1) AS one_time_donors,
+                COUNT(*) FILTER (WHERE gift_count >= 2) AS repeat_donors,
+                COUNT(*) FILTER (WHERE gift_count >= 3) AS three_plus_donors,
+                COUNT(*) FILTER (WHERE lifetime_amount >= 1000) AS high_value_donors,
+                COUNT(*) FILTER (WHERE lifetime_amount >= 5000) AS major_donors
+            FROM donor_totals
+        """) or {}
+
+        timing = self._execute_one("""
+            SELECT
+                TRIM(TO_CHAR(date, 'Day')) AS weekday,
+                COALESCE(AVG(total_amount), 0) AS average_daily_amount,
+                COALESCE(AVG(donation_count), 0) AS average_daily_donations
+            FROM daily_metrics
+            WHERE date >= CURRENT_DATE - INTERVAL '89 days'
+            GROUP BY EXTRACT(DOW FROM date), TO_CHAR(date, 'Day')
+            ORDER BY AVG(total_amount) DESC
+            LIMIT 1
+        """) or {}
+
+        channel = self._execute_one("""
+            SELECT
+                COALESCE(c.source, 'Unknown') AS source,
+                COALESCE(SUM(d.amount), 0) AS total_amount,
+                COUNT(d.id) AS donation_count,
+                COUNT(DISTINCT c.id) AS campaign_count
+            FROM campaigns c
+            JOIN form_titles ft ON ft.campaign_id = c.id
+            JOIN donations d ON d.form_title_id = ft.id
+            WHERE d.donation_date >= CURRENT_DATE - INTERVAL '89 days'
+            GROUP BY COALESCE(c.source, 'Unknown')
+            ORDER BY SUM(d.amount) DESC
+            LIMIT 1
+        """) or {}
+
+        current_amount = float(performance.get('current_amount') or 0)
+        previous_amount = float(performance.get('previous_amount') or 0)
+        current_count = int(performance.get('current_count') or 0)
+        previous_count = int(performance.get('previous_count') or 0)
+        current_average = current_amount / current_count if current_count else 0
+        previous_average = previous_amount / previous_count if previous_count else 0
+
+        def percent_change(current: float, previous: float) -> float:
+            if previous == 0:
+                return 100.0 if current > 0 else 0.0
+            return round(((current - previous) / previous) * 100, 1)
+
+        known_donors = int(audience.get('known_donors') or 0)
+        donors_with_gifts = int(audience.get('donors_with_gifts') or 0)
+        repeat_donors = int(audience.get('repeat_donors') or 0)
+        channel_amount = float(channel.get('total_amount') or 0)
+        channel_count = int(channel.get('donation_count') or 0)
+
+        return {
+            "period": {
+                "days": 30,
+                "amount": round(current_amount, 2),
+                "donations": current_count,
+                "averageGift": round(current_average, 2),
+                "amountChangePct": percent_change(current_amount, previous_amount),
+                "donationChangePct": percent_change(current_count, previous_count),
+                "averageGiftChangePct": percent_change(current_average, previous_average),
+            },
+            "audience": {
+                "knownDonors": known_donors,
+                "donorsWithGifts": donors_with_gifts,
+                "oneTimeDonors": int(audience.get('one_time_donors') or 0),
+                "repeatDonors": repeat_donors,
+                "threePlusDonors": int(audience.get('three_plus_donors') or 0),
+                "highValueDonors": int(audience.get('high_value_donors') or 0),
+                "majorDonors": int(audience.get('major_donors') or 0),
+                "repeatRatePct": round((repeat_donors / donors_with_gifts) * 100, 1) if donors_with_gifts else 0,
+                "reactivationPool": max(known_donors - donors_with_gifts, 0),
+            },
+            "timing": {
+                "bestWeekday": timing.get('weekday') or '—',
+                "averageDailyAmount": round(float(timing.get('average_daily_amount') or 0), 2),
+                "averageDailyDonations": round(float(timing.get('average_daily_donations') or 0), 1),
+            },
+            "channel": {
+                "periodDays": 90,
+                "topSource": channel.get('source') or '—',
+                "amount": round(channel_amount, 2),
+                "donations": channel_count,
+                "campaigns": int(channel.get('campaign_count') or 0),
+                "averageGift": round(channel_amount / channel_count, 2) if channel_count else 0,
+            },
+            "generatedAt": datetime.now().isoformat(),
+        }
+
     def get_hourly_trend(self, target_date: date) -> List[Dict[str, Any]]:
         """
         Get hourly trend for a specific date.
@@ -819,6 +953,268 @@ class SupabaseService:
                 "total_unsubscribed": 0,
                 "stage_breakdown": {}
             }
+
+    def _get_brevo_funnel_email_insights(self, days: int) -> Optional[Dict[str, Any]]:
+        """Return rate-ready Brevo aggregates when the hourly sync has data."""
+        configured_tags = get_verified_new_comer_tags()
+
+        table_check = self._execute_one(
+            "SELECT to_regclass('public.brevo_funnel_daily_stats') AS table_name"
+        ) or {}
+        if not table_check.get("table_name"):
+            return None
+
+        summary = self._execute_one("""
+            SELECT
+                SUM(sent) AS sent,
+                SUM(delivered) AS delivered,
+                SUM(unique_opens) AS unique_opens,
+                SUM(unique_clicks) AS unique_clicks,
+                SUM(soft_bounces) AS soft_bounces,
+                SUM(hard_bounces) AS hard_bounces,
+                SUM(blocked) AS blocked,
+                SUM(invalid) AS invalid_emails,
+                SUM(spam_reports) AS spam_reports,
+                SUM(unsubscribed) AS unsubscribes,
+                MAX(synced_at) AS last_synced_at
+            FROM brevo_funnel_daily_stats
+            WHERE stat_date >= CURRENT_DATE - (%s - 1)
+              AND campaign_tag = ANY(%s)
+        """, (days, configured_tags)) or {}
+        if not summary.get("last_synced_at"):
+            return None
+
+        coverage = self._execute_one("""
+            SELECT
+                %s AS total_tags,
+                COUNT(state.last_success_at) AS synced_tags
+            FROM brevo_funnel_tag_sync_state state
+            WHERE state.campaign_tag = ANY(%s)
+        """, (len(configured_tags), configured_tags)) or {}
+
+        trend_rows = self._execute_query("""
+            WITH calendar AS (
+                SELECT generate_series(
+                    CURRENT_DATE - (%s - 1),
+                    CURRENT_DATE,
+                    INTERVAL '1 day'
+                )::date AS date
+            ), daily AS (
+                SELECT
+                    stat_date,
+                    SUM(sent) AS sent,
+                    SUM(delivered) AS delivered,
+                    SUM(unique_opens) AS opens,
+                    SUM(unique_clicks) AS clicks,
+                    SUM(soft_bounces + hard_bounces + blocked + invalid) AS issues
+                FROM brevo_funnel_daily_stats
+                WHERE stat_date >= CURRENT_DATE - (%s - 1)
+                  AND campaign_tag = ANY(%s)
+                GROUP BY stat_date
+            )
+            SELECT
+                calendar.date::text AS date,
+                COALESCE(daily.sent, 0) AS sent,
+                COALESCE(daily.delivered, 0) AS delivered,
+                COALESCE(daily.opens, 0) AS opens,
+                COALESCE(daily.clicks, 0) AS clicks,
+                COALESCE(daily.issues, 0) AS issues
+            FROM calendar
+            LEFT JOIN daily ON daily.stat_date = calendar.date
+            ORDER BY calendar.date
+        """, (days, days, configured_tags))
+
+        device_rows = self._execute_query("""
+            SELECT COALESCE(device, 'UNKNOWN') AS device, COUNT(*) AS count
+            FROM email_engagement
+            WHERE event_timestamp >= NOW() - (%s * INTERVAL '1 day')
+              AND event_type IN ('unique_opened', 'click')
+            GROUP BY COALESCE(device, 'UNKNOWN')
+            ORDER BY COUNT(*) DESC
+        """, (days,))
+
+        sent = int(summary.get("sent") or 0)
+        delivered = int(summary.get("delivered") or 0)
+        unique_opens = int(summary.get("unique_opens") or 0)
+        unique_clicks = int(summary.get("unique_clicks") or 0)
+        soft_bounces = int(summary.get("soft_bounces") or 0)
+        hard_bounces = int(summary.get("hard_bounces") or 0)
+        blocked = int(summary.get("blocked") or 0)
+        invalid_emails = int(summary.get("invalid_emails") or 0)
+        spam_reports = int(summary.get("spam_reports") or 0)
+        delivery_issues = soft_bounces + hard_bounces + blocked + invalid_emails
+        device_total = sum(int(row["count"]) for row in device_rows)
+        last_synced_at = summary["last_synced_at"]
+        total_tags = int(coverage.get("total_tags") or 0)
+        synced_tags = int(coverage.get("synced_tags") or 0)
+        backfill_complete = total_tags > 0 and synced_tags >= total_tags
+
+        return {
+            "scope": "new_comer_funnel",
+            "scopeLabel": "New Comer Funnel only",
+            "source": "Brevo",
+            "periodDays": days,
+            "totalTags": total_tags,
+            "syncedTags": synced_tags,
+            "backfillComplete": backfill_complete,
+            "sent": sent,
+            "delivered": delivered,
+            "uniqueOpens": unique_opens,
+            "uniqueClicks": unique_clicks,
+            "clickEvents": unique_clicks,
+            "deliveryRatePct": round((delivered / sent) * 100, 1) if sent else 0,
+            "openRatePct": round((unique_opens / delivered) * 100, 1) if delivered else 0,
+            "clickRatePct": round((unique_clicks / delivered) * 100, 1) if delivered else 0,
+            "clickToOpenActivityPct": round((unique_clicks / unique_opens) * 100, 1) if unique_opens else 0,
+            "bounceRatePct": round((delivery_issues / sent) * 100, 1) if sent else 0,
+            "deliveryIssues": delivery_issues,
+            "softBounces": soft_bounces,
+            "hardBounces": hard_bounces,
+            "blocked": blocked,
+            "invalidEmails": invalid_emails,
+            "spamReports": spam_reports,
+            "unsubscribes": int(summary.get("unsubscribes") or 0),
+            "deviceMix": [
+                {
+                    "device": row["device"],
+                    "count": int(row["count"]),
+                    "percentage": round((int(row["count"]) / device_total) * 100, 1) if device_total else 0,
+                }
+                for row in device_rows
+            ],
+            "trend": [
+                {
+                    "date": row["date"],
+                    "sent": int(row["sent"] or 0),
+                    "delivered": int(row["delivered"] or 0),
+                    "opens": int(row["opens"] or 0),
+                    "clicks": int(row["clicks"] or 0),
+                    "issues": int(row["issues"] or 0),
+                }
+                for row in trend_rows
+            ],
+            "rateBasis": "brevo_aggregated",
+            "rateNotice": (
+                "Delivery and engagement rates use Brevo transactional totals for this funnel only."
+                if backfill_complete
+                else f"Brevo backfill is in progress ({synced_tags} of {total_tags} tags); rates currently reflect synced tags only."
+            ),
+            "lastSyncedAt": last_synced_at.isoformat(),
+        }
+
+    def get_funnel_email_insights(self, days: int = 30) -> Dict[str, Any]:
+        """Email engagement metrics scoped exclusively to the New Comer Funnel."""
+        days = max(7, min(days, 90))
+        brevo_metrics = self._get_brevo_funnel_email_insights(days)
+        if brevo_metrics:
+            return brevo_metrics
+
+        summary = self._execute_one("""
+            SELECT
+                COUNT(*) FILTER (WHERE event_type = 'unique_opened') AS unique_opens,
+                COUNT(*) FILTER (WHERE event_type = 'click') AS click_events,
+                COUNT(*) FILTER (WHERE event_type = 'soft_bounce') AS soft_bounces,
+                COUNT(*) FILTER (WHERE event_type = 'hard_bounce') AS hard_bounces,
+                COUNT(*) FILTER (WHERE event_type = 'blocked') AS blocked,
+                COUNT(*) FILTER (WHERE event_type = 'invalid_email') AS invalid_emails,
+                COUNT(*) FILTER (WHERE event_type = 'spam') AS spam_reports,
+                COUNT(*) FILTER (WHERE event_type = 'unsubscribed') AS unsubscribes
+            FROM email_engagement
+            WHERE event_timestamp >= NOW() - (%s * INTERVAL '1 day')
+        """, (days,)) or {}
+
+        device_rows = self._execute_query("""
+            SELECT COALESCE(device, 'UNKNOWN') AS device, COUNT(*) AS count
+            FROM email_engagement
+            WHERE event_timestamp >= NOW() - (%s * INTERVAL '1 day')
+              AND event_type IN ('unique_opened', 'click')
+            GROUP BY COALESCE(device, 'UNKNOWN')
+            ORDER BY COUNT(*) DESC
+        """, (days,))
+
+        trend_rows = self._execute_query("""
+            WITH calendar AS (
+                SELECT generate_series(
+                    CURRENT_DATE - (%s - 1),
+                    CURRENT_DATE,
+                    INTERVAL '1 day'
+                )::date AS date
+            )
+            SELECT
+                calendar.date::text AS date,
+                COUNT(e.id) FILTER (WHERE e.event_type = 'unique_opened') AS opens,
+                COUNT(e.id) FILTER (WHERE e.event_type = 'click') AS clicks,
+                COUNT(e.id) FILTER (
+                    WHERE e.event_type IN (
+                        'soft_bounce', 'hard_bounce', 'blocked',
+                        'invalid_email', 'spam'
+                    )
+                ) AS issues
+            FROM calendar
+            LEFT JOIN email_engagement e
+              ON (e.event_timestamp AT TIME ZONE 'America/Guatemala')::date = calendar.date
+            GROUP BY calendar.date
+            ORDER BY calendar.date
+        """, (days,))
+
+        unique_opens = int(summary.get('unique_opens') or 0)
+        click_events = int(summary.get('click_events') or 0)
+        soft_bounces = int(summary.get('soft_bounces') or 0)
+        hard_bounces = int(summary.get('hard_bounces') or 0)
+        blocked = int(summary.get('blocked') or 0)
+        invalid_emails = int(summary.get('invalid_emails') or 0)
+        spam_reports = int(summary.get('spam_reports') or 0)
+        issues = soft_bounces + hard_bounces + blocked + invalid_emails + spam_reports
+        device_total = sum(int(row['count']) for row in device_rows)
+
+        return {
+            "scope": "new_comer_funnel",
+            "scopeLabel": "New Comer Funnel only",
+            "source": "Airtable events",
+            "periodDays": days,
+            "totalTags": 0,
+            "syncedTags": 0,
+            "backfillComplete": False,
+            "sent": 0,
+            "delivered": 0,
+            "uniqueOpens": unique_opens,
+            "uniqueClicks": click_events,
+            "clickEvents": click_events,
+            "deliveryRatePct": 0,
+            "openRatePct": 0,
+            "clickRatePct": 0,
+            "clickToOpenActivityPct": round((click_events / unique_opens) * 100, 1) if unique_opens else 0,
+            "bounceRatePct": 0,
+            "deliveryIssues": issues,
+            "softBounces": soft_bounces,
+            "hardBounces": hard_bounces,
+            "blocked": blocked,
+            "invalidEmails": invalid_emails,
+            "spamReports": spam_reports,
+            "unsubscribes": int(summary.get('unsubscribes') or 0),
+            "deviceMix": [
+                {
+                    "device": row['device'],
+                    "count": int(row['count']),
+                    "percentage": round((int(row['count']) / device_total) * 100, 1) if device_total else 0,
+                }
+                for row in device_rows
+            ],
+            "trend": [
+                {
+                    "date": row['date'],
+                    "sent": 0,
+                    "delivered": 0,
+                    "opens": int(row['opens'] or 0),
+                    "clicks": int(row['clicks'] or 0),
+                    "issues": int(row['issues'] or 0),
+                }
+                for row in trend_rows
+            ],
+            "rateBasis": "event_counts",
+            "rateNotice": "Sent and delivered totals are not available yet; no delivery or open rate is shown.",
+            "lastSyncedAt": None,
+        }
 
     # ==========================================
     # SHARED VIEWS

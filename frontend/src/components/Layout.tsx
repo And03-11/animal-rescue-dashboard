@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import {
   Box, Drawer, List, ListItem, ListItemButton,
   ListItemIcon, ListItemText, Toolbar,
-  useMediaQuery, Zoom, AppBar, IconButton, Typography,
+  useMediaQuery, AppBar, IconButton, Typography,
   Avatar, Tooltip, useTheme, Divider, Menu, MenuItem
 } from '@mui/material';
 import { Link as RouterLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
@@ -26,11 +26,22 @@ import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 
 import logo from '../assets/Logo.png';
 import { DarkModeToggleButton } from './DarkModeToggleButton';
-import { FloatingThemeFab } from './FloatingThemeFab';
 import { logout } from '../auth';
 
 const DRAWER_WIDTH = 260;
 const COLLAPSED_DRAWER_WIDTH = 72;
+
+const routeLabels: Record<string, { title: string; eyebrow: string }> = {
+  '/dashboard': { title: 'Dashboard', eyebrow: 'Overview' },
+  '/funnel': { title: 'New Comer Funnel', eyebrow: 'CRM' },
+  '/analytics': { title: 'Campaign Analytics', eyebrow: 'Insights' },
+  '/comparison': { title: 'Campaign Comparison', eyebrow: 'Insights' },
+  '/contact-search': { title: 'Contact Search', eyebrow: 'CRM' },
+  '/email-sender': { title: 'Email Campaigns', eyebrow: 'Email Marketing' },
+  '/templates': { title: 'Templates', eyebrow: 'Email Marketing' },
+  '/template-search': { title: 'Template Search', eyebrow: 'Email Marketing' },
+  '/settings': { title: 'Settings', eyebrow: 'Workspace' },
+};
 
 export const Layout: React.FC = () => {
   const theme = useTheme();
@@ -39,6 +50,11 @@ export const Layout: React.FC = () => {
   const [collapsed, setCollapsed] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
+  const currentRoute = routeLabels[location.pathname] ?? (
+    location.pathname.startsWith('/campaign/')
+      ? { title: 'Campaign Details', eyebrow: 'Insights' }
+      : { title: 'Animal Love', eyebrow: 'Operations' }
+  );
 
   // Profile Menu State
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
@@ -94,7 +110,7 @@ export const Layout: React.FC = () => {
       height: '100%',
       display: 'flex',
       flexDirection: 'column',
-      background: 'transparent' // Theme handles the glass effect
+      background: 'background.paper'
     }}>
       <Toolbar sx={{
         display: 'flex',
@@ -112,10 +128,16 @@ export const Layout: React.FC = () => {
             animate={{ opacity: 1 }}
             transition={{ duration: 0.5 }}
           >
-            <img src={logo} alt="Logo" style={{ height: '40px' }} />
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
+              <Box component="img" src={logo} alt="Animal Love" sx={{ width: 36, height: 36, objectFit: 'contain' }} />
+              <Box>
+                <Typography sx={{ fontWeight: 700, lineHeight: 1.1, letterSpacing: '-0.02em' }}>Animal Love</Typography>
+                <Typography variant="caption" color="text.secondary">Rescue operations</Typography>
+              </Box>
+            </Box>
           </motion.div>
         )}
-        {collapsed && <img src={logo} alt="Logo" style={{ height: '32px' }} />}
+        {collapsed && <Box component="img" src={logo} alt="Animal Love" sx={{ width: 32, height: 32, objectFit: 'contain' }} />}
 
         {!isMobile && (
           <IconButton onClick={() => setCollapsed(!collapsed)} size="small">
@@ -153,10 +175,15 @@ export const Layout: React.FC = () => {
                           justifyContent: collapsed ? 'center' : 'initial',
                           px: 2,
                           borderRadius: '10px',
-                          backgroundColor: isActive ? 'primary.main' : 'transparent',
-                          color: isActive ? 'primary.contrastText' : 'text.primary',
+                          backgroundColor: isActive ? 'action.selected' : 'transparent',
+                          color: isActive ? 'primary.main' : 'text.primary',
+                          position: 'relative',
+                          '&::before': isActive ? {
+                            content: '""', position: 'absolute', left: 5, width: 3, height: 20,
+                            borderRadius: 3, bgcolor: 'primary.main',
+                          } : undefined,
                           '&:hover': {
-                            backgroundColor: isActive ? 'primary.dark' : 'rgba(0,0,0,0.04)',
+                            backgroundColor: 'action.hover',
                           },
                           transition: 'all 0.2s ease-in-out',
                         }}
@@ -199,7 +226,7 @@ export const Layout: React.FC = () => {
             borderRadius: '12px',
             justifyContent: collapsed ? 'center' : 'initial',
             color: 'error.main',
-            '&:hover': { backgroundColor: 'error.light', color: 'error.contrastText' }
+            '&:hover': { backgroundColor: 'rgba(200,71,71,0.09)' }
           }}
         >
           <ListItemIcon sx={{ minWidth: 0, mr: collapsed ? 0 : 2, color: 'inherit' }}>
@@ -216,11 +243,11 @@ export const Layout: React.FC = () => {
       {/* Mobile Header */}
       <AppBar
         position="fixed"
+        color="transparent"
         sx={{
           width: { md: `calc(100% - ${collapsed ? COLLAPSED_DRAWER_WIDTH : DRAWER_WIDTH}px)` },
           ml: { md: `${collapsed ? COLLAPSED_DRAWER_WIDTH : DRAWER_WIDTH}px` },
-          bgcolor: 'transparent',
-          backdropFilter: 'blur(10px)',
+          bgcolor: 'background.default',
           boxShadow: 'none',
           borderBottom: '1px solid',
           borderColor: 'divider',
@@ -230,7 +257,7 @@ export const Layout: React.FC = () => {
           }),
         }}
       >
-        <Toolbar>
+        <Toolbar sx={{ minHeight: { xs: 64, md: 72 }, px: { xs: 2, md: 3 } }}>
           <IconButton
             color="inherit"
             aria-label="open drawer"
@@ -241,9 +268,16 @@ export const Layout: React.FC = () => {
             <MenuIcon />
           </IconButton>
 
-          <Box sx={{ flexGrow: 1 }} />
+          <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+            <Typography variant="overline" color="text.secondary" sx={{ display: { xs: 'none', sm: 'block' } }}>
+              {currentRoute.eyebrow}
+            </Typography>
+            <Typography variant="h6" color="text.primary" noWrap sx={{ lineHeight: 1.2 }}>
+              {currentRoute.title}
+            </Typography>
+          </Box>
 
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, color: 'text.primary' }}>
             <DarkModeToggleButton />
 
             {/* ✅ Profile Menu Trigger */}
@@ -251,12 +285,12 @@ export const Layout: React.FC = () => {
               <IconButton
                 onClick={handleMenuOpen}
                 size="small"
-                sx={{ ml: 2 }}
+                sx={{ ml: { xs: 0, sm: 1 } }}
                 aria-controls={openMenu ? 'account-menu' : undefined}
                 aria-haspopup="true"
                 aria-expanded={openMenu ? 'true' : undefined}
               >
-                <Avatar sx={{ bgcolor: 'secondary.main', width: 32, height: 32 }}>A</Avatar>
+                <Avatar sx={{ bgcolor: 'primary.main', color: 'primary.contrastText', width: 34, height: 34, fontSize: 14, fontWeight: 700 }}>AL</Avatar>
               </IconButton>
             </Tooltip>
           </Box>
@@ -366,21 +400,19 @@ export const Layout: React.FC = () => {
         component="main"
         sx={{
           flexGrow: 1,
-          p: 3,
+          px: { xs: 2, sm: 3, xl: 4 },
+          py: { xs: 2.5, md: 3.5 },
           width: { md: `calc(100% - ${collapsed ? COLLAPSED_DRAWER_WIDTH : DRAWER_WIDTH}px)` },
-          mt: 8, // AppBar height
+          mt: { xs: 8, md: 9 },
           transition: theme.transitions.create('width', {
             easing: theme.transitions.easing.sharp,
             duration: theme.transitions.duration.enteringScreen,
           }),
         }}
       >
-        <Outlet />
-        <Zoom in={!isMobile} timeout={400}>
-          <Box sx={{ position: 'fixed', bottom: 32, right: 32, zIndex: 1000 }}>
-            <FloatingThemeFab />
-          </Box>
-        </Zoom>
+        <Box sx={{ mx: 'auto', width: '100%', maxWidth: 1440 }}>
+          <Outlet />
+        </Box>
       </Box>
     </Box>
   );

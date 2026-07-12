@@ -6,10 +6,10 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
-from app.schemas import Contact
-from app.services.airtable_service import AirtableService
-from app.core.security import get_current_user  # 🔐 importante para override
+from backend.app.main import app
+from backend.app.schemas import Contact
+from backend.app.services.airtable_service import get_airtable_service
+from backend.app.core.security import get_current_user  # 🔐 importante para override
 
 # 🚀 Simula autenticación para todos los tests
 app.dependency_overrides[get_current_user] = lambda: "test@example.com"
@@ -17,23 +17,26 @@ app.dependency_overrides[get_current_user] = lambda: "test@example.com"
 client = TestClient(app)
 
 @pytest.fixture(autouse=True)
-def override_airtable(monkeypatch):
-    """Stubear métodos de AirtableService para contactos."""
+def override_airtable():
+    """Provide a local Airtable double; tests must never call the live base."""
     class FakeTable:
         def all(self):
             return [
                 {"id": "rec1", "fields": {"Name": "Test User", "Email": "test@example.com", "Phone": "12345"}}
             ]
-        def create(self, data):
+
+    class FakeAirtableService:
+        donors_table = FakeTable()
+
+        def create_record(self, table_name, data):
             return {"id": "recNew", "fields": data}
 
-    orig_init = AirtableService.__init__
-    def fake_init(self):
-        orig_init(self)
-        self.donors_table = FakeTable()
-    monkeypatch.setattr(AirtableService, "__init__", fake_init)
+        def get_emails_from_ids(self, _email_ids):
+            return []
+
+    app.dependency_overrides[get_airtable_service] = lambda: FakeAirtableService()
     yield
-    monkeypatch.setattr(AirtableService, "__init__", orig_init)
+    app.dependency_overrides.pop(get_airtable_service, None)
 
 
 def test_list_contacts_returns_array_and_cors():

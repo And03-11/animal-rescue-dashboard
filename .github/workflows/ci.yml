@@ -13,41 +13,40 @@ jobs:
     env:
       AIRTABLE_API_KEY: test
       AIRTABLE_BASE_ID: test
+      BREVO_API_KEY: test
+      MAILCHIMP_API_KEY: test
+      MAILCHIMP_LIST_ID: test
+      MAILCHIMP_DC: us1
     runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ['3.11']
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
       - name: Cache pip
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('backend/requirements.txt') }}
 
       - name: Install backend dependencies
         run: |
-          cd backend
           pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r backend/requirements-dev.txt
           
       - name: Check for missing dependencies
-        run: |
-          cd backend
-          python check_missing_deps.py
+        run: python backend/check_missing_deps.py
 
 
       - name: Run backend tests
-        run: |
-          cd backend
-          pytest -q
+        run: pytest -q backend/tests
 
   frontend:
     name: Frontend Build
@@ -55,15 +54,15 @@ jobs:
     needs: backend
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
 
       - name: Cache node modules
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: frontend/node_modules
           key: ${{ runner.os }}-node-${{ hashFiles('frontend/package-lock.json') }}
@@ -71,5 +70,5 @@ jobs:
       - name: Install and build frontend
         run: |
           cd frontend
-          npm install
+          npm ci
           npm run build
