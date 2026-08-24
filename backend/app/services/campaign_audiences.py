@@ -36,7 +36,7 @@ class AudienceCount:
 class AudienceResolution:
     """Resolved contacts and their per-branch counts."""
 
-    contacts: tuple[dict[str, Any], ...]
+    contacts: tuple[dict[str, str], ...]
     branches: tuple[AudienceCount, ...]
 
     @property
@@ -94,7 +94,7 @@ def serialize_audiences(branches: Iterable[AudienceBranch]) -> list[dict[str, An
 
 def deduplicate_contacts(
     contacts: Iterable[Mapping[str, Any]],
-) -> tuple[dict[str, Any], ...]:
+) -> tuple[dict[str, str], ...]:
     """Drop blank emails and duplicate addresses while keeping first contacts.
 
     Address comparison trims outer whitespace and is case-insensitive.  The
@@ -103,7 +103,7 @@ def deduplicate_contacts(
     """
 
     seen: set[str] = set()
-    unique: list[dict[str, Any]] = []
+    unique: list[dict[str, str]] = []
     for contact in contacts:
         email = contact.get("Email")
         if not isinstance(email, str):
@@ -117,7 +117,7 @@ def deduplicate_contacts(
             continue
         seen.add(normalized_email)
 
-        retained = dict(contact)
+        retained = {key: str(value) for key, value in contact.items()}
         retained["Email"] = trimmed_email
         unique.append(retained)
 

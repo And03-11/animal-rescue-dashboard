@@ -76,10 +76,10 @@ def test_deduplicates_email_case_and_outer_whitespace():
 
 
 @pytest.mark.skipif(_IMPORT_ERROR is not None, reason="campaign audience module is missing")
-def test_deduplication_preserves_non_string_contact_metadata():
+def test_deduplication_stringifies_non_string_contact_metadata():
     contacts = deduplicate_contacts(
         [{"Email": "one@example.org", "AirtableId": 42, "Subscribed": True}]
     )
     assert contacts == (
-        {"Email": "one@example.org", "AirtableId": 42, "Subscribed": True},
+        {"Email": "one@example.org", "AirtableId": "42", "Subscribed": "True"},
     )
