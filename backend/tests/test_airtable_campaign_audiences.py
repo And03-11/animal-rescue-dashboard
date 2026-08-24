@@ -111,6 +111,34 @@ def test_deduplicates_contacts_globally_after_counting_each_branch():
 
 
 @pytest.mark.skipif(_IMPORT_ERROR is not None, reason="campaign audience resolver is missing")
+def test_normalizes_list_and_dict_bounced_values_without_aborting_resolution():
+    table = CapturingTable([
+        {"fields": {"Email": "usa-list-false@example.org", "Name": ["Una"], "Region": "USA", "Bounced Account": [False]}},
+        {"fields": {"Email": "usa-list-true@example.org", "Name": ["Uma"], "Region": "USA", "Bounced Account": [1]}},
+        {"fields": {"Email": "usa-list-empty@example.org", "Name": ["Uli"], "Region": "USA", "Bounced Account": []}},
+        {"fields": {"Email": "eur-dict-false@example.org", "Name": ["Eva"], "Region": "EUR", "Bounced Account": {"checked": False}}},
+        {"fields": {"Email": "eur-dict-true@example.org", "Name": ["Ema"], "Region": "EUR", "Bounced Account": {"checked": True}}},
+        {"fields": {"Email": "eur-dict-empty@example.org", "Name": ["Eli"], "Region": "EUR", "Bounced Account": {}}},
+    ])
+    service = AirtableService.__new__(AirtableService)
+    service.emails_table = table
+
+    result = service.resolve_campaign_audiences(
+        normalize_audiences([
+            {"region": "USA", "is_bounced": False},
+            {"region": "USA", "is_bounced": True},
+            {"region": "EUR", "is_bounced": False},
+            {"region": "EUR", "is_bounced": True},
+        ]),
+        "standard",
+    )
+
+    assert len(table.calls) == 1
+    assert [branch.count for branch in result.branches] == [2, 1, 2, 1]
+    assert result.total_unique == 6
+
+
+@pytest.mark.skipif(_IMPORT_ERROR is not None, reason="campaign audience resolver is missing")
 def test_wraps_airtable_access_errors_without_treating_them_as_empty():
     class FailingTable:
         def all(self, **_kwargs):

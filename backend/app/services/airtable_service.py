@@ -79,6 +79,28 @@ def _branch_formula(region_field: str, bounced_field: str, branch: AudienceBranc
     return f"AND({{{region_field}}} = '{branch.region}', {bounced_clause})"
 
 
+def _is_bounced_value(value: Any, seen: Optional[set[int]] = None) -> bool:
+    """Recognize only explicit Airtable checkbox values, including nested ones."""
+    if value is True:
+        return True
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return value == 1
+
+    if not isinstance(value, (list, tuple, dict)):
+        return False
+
+    seen = seen or set()
+    value_id = id(value)
+    if value_id in seen:
+        return False
+    seen.add(value_id)
+
+    children = value.values() if isinstance(value, dict) else value
+    return any(_is_bounced_value(child, seen) for child in children)
+
+
 class AirtableService:
     def __init__(self):
         if not AIRTABLE_API_KEY or not AIRTABLE_BASE_ID:
@@ -947,7 +969,7 @@ class AirtableService:
             region = fields.get(region_field)
             if isinstance(region, list):
                 region = region[0] if region else None
-            is_bounced = fields.get(bounced_field) in {True, 1}
+            is_bounced = _is_bounced_value(fields.get(bounced_field))
             branch = (
                 AudienceBranch(region=region, is_bounced=is_bounced)
                 if region in {"USA", "EUR"}
