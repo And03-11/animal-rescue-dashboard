@@ -8,6 +8,15 @@ from zoneinfo import ZoneInfo
 from collections import defaultdict
 import traceback
 
+from backend.app.services.campaign_audiences import (
+    AudienceBranch,
+    AudienceCount,
+    AudienceResolution,
+    AudienceSegment,
+    deduplicate_contacts,
+    normalize_audiences,
+)
+
 dotenv_path = os.path.join(os.path.dirname(__file__), "..", "..", ".env")
 load_dotenv(dotenv_path=os.path.abspath(dotenv_path))
 
@@ -55,6 +64,19 @@ DAILY_SUMMARIES_FIELDS = {
     "total_amount": "Total Amount Today",
     "count": "Donations Count Today"
 }
+
+
+class AirtableCampaignQueryError(RuntimeError):
+    """Raised when a campaign audience lookup cannot reach Airtable."""
+
+
+def _branch_formula(region_field: str, bounced_field: str, branch: AudienceBranch) -> str:
+    bounced_clause = (
+        f"{{{bounced_field}}} = 1"
+        if branch.is_bounced
+        else f"NOT({{{bounced_field}}} = 1)"
+    )
+    return f"AND({{{region_field}}} = '{branch.region}', {bounced_clause})"
 
 
 class AirtableService:
@@ -868,111 +890,108 @@ class AirtableService:
             return [] # fallback seguro
         
 
-    def get_campaign_contacts(self, region: str, is_bounced: bool, segment: str = "standard") -> List[Dict[str, Any]]:
-        """
-        Obtiene contactos directamente de la tabla Emails, usando los campos de lookup.
-        Optimizado para usar 'Name' y 'Last Name' (Lookups) directamente.
-        
-        Args:
-            region: Región del donante (ej. 'USA', 'EUR').
-            is_bounced: Si True, busca emails rebotados. Si False, no rebotados.
-            segment: 'standard' (excluye marcados) o 'dnr' (solo marcados).
-            
-        Devuelve una lista de diccionarios con 'Email' y 'Name' del donante.
-        """
-        # Nombres de campos en la tabla Emails
+    def resolve_campaign_audiences(
+        self,
+        audiences: tuple[AudienceBranch, ...],
+        segment: AudienceSegment = "standard",
+    ) -> AudienceResolution:
+        """Resolve all selected Airtable audiences in one query."""
+        if segment not in {"standard", "dnr"}:
+            raise ValueError(f"Unsupported audience segment: {segment}")
+
         email_field = EMAILS_FIELDS.get("email", "Email")
-        # Usamos los campos Lookup que ya existen en la tabla Emails
-        donor_first_name_field = EMAILS_FIELDS.get("donor_name", "Name") 
-        donor_last_name_field = EMAILS_FIELDS.get("donor_last_name", "Last Name")
-        
+        donor_first_name_field = EMAILS_FIELDS.get("donor_name", "Name")
+        region_field = EMAILS_FIELDS.get("region", "Region")
         bounced_field = EMAILS_FIELDS.get("bounced_account", "Bounced Account")
         not_sending_field = EMAILS_FIELDS.get("not_sending", "Not Sending")
-        region_field = EMAILS_FIELDS.get("region", "Region")
         stage_field = EMAILS_FIELDS.get("stage_from_donor", "Stage (from Donor)")
         exclude_field = EMAILS_FIELDS.get("exclude_from_campaign", "Exclude From Current Campaign")
+        tag_field = EMAILS_FIELDS.get("utils_tags", "Tag (Mailchimp)")
+        donor_tag_field = "Tag (from Donor)"
+
+        branch_formula = "OR(" + ", ".join(
+            _branch_formula(region_field, bounced_field, branch)
+            for branch in audiences
+        ) + ")"
+        formula_parts = [
+            f"{{{stage_field}}} = 'Big Campaign'",
+            f"NOT({{{not_sending_field}}} = 1)",
+            f"FIND('Aol and other accounts', {{{tag_field}}} & '') = 0",
+            f"FIND('Apple_Accounts USA', {{{tag_field}}} & '') = 0",
+            f"FIND('Apple_Accounts EUR', {{{tag_field}}} & '') = 0",
+            f"FIND('Tag #4 New ones', {{{donor_tag_field}}} & '') = 0",
+            f"FIND('Tag #3 New ones', {{{donor_tag_field}}} & '') = 0",
+            branch_formula,
+        ]
+        if segment == "dnr":
+            formula_parts.append(f"{{{exclude_field}}} = 1")
+        else:
+            formula_parts.append(f"NOT({{{exclude_field}}} = 1)")
 
         try:
-            # --- Construir fórmula directamente para la tabla Emails ---
-            formula_parts = [
-                f"{{{region_field}}} = '{region}'",
-                f"{{{stage_field}}} = 'Big Campaign'",
-                f"NOT({{{not_sending_field}}} = 1)"  # Siempre excluir "Not Sending"
-            ]
-
-            # --- Excluir Tags Específicos ---
-            tag_field = EMAILS_FIELDS.get("utils_tags", "Tag (Mailchimp)")
-            donor_tag_field = "Tag (from Donor)"
-            
-            # Excluir 'Aol and other accounts', 'Apple_Accounts USA', 'Apple_Accounts EUR' de Mailchimp Tags
-            formula_parts.append(f"FIND('Aol and other accounts', {{{tag_field}}} & '') = 0")
-            formula_parts.append(f"FIND('Apple_Accounts USA', {{{tag_field}}} & '') = 0")
-            formula_parts.append(f"FIND('Apple_Accounts EUR', {{{tag_field}}} & '') = 0")
-            
-            # Excluir 'Tag #4 New ones', 'Tag #3 New ones' (que provienen del donante)
-            formula_parts.append(f"FIND('Tag #4 New ones', {{{donor_tag_field}}} & '') = 0")
-            formula_parts.append(f"FIND('Tag #3 New ones', {{{donor_tag_field}}} & '') = 0")
-            print("Excluyendo tags: Aol, Apple USA, Apple EUR, Tag #3 New ones, Tag #4 New ones")
-            
-            # Condición de Bounced Account
-            if is_bounced:
-                formula_parts.append(f"{{{bounced_field}}} = 1")
-                print("Buscando emails rebotados.")
-            else:
-                formula_parts.append(f"NOT({{{bounced_field}}} = 1)")
-                print("Excluyendo emails rebotados.")
-            
-            # Lógica de Segmento (Exclude From Current Campaign)
-            if segment == "dnr":
-                # DNR: Solo los que TIENEN el check marcado
-                formula_parts.append(f"{{{exclude_field}}} = 1")
-                print("Segmento DNR seleccionado: Buscando donantes excluidos.")
-            else:
-                # Standard (default): Solo los que NO tienen el check marcado
-                formula_parts.append(f"NOT({{{exclude_field}}} = 1)")
-                print("Segmento Standard seleccionado: Excluyendo donantes marcados.")
-
-            email_formula = f"AND({', '.join(formula_parts)})"
-            print(f"Airtable formula for Emails: {email_formula}")
-
-            # --- Consultar directamente la tabla Emails ---
-            # Pedimos Email y Name (Lookup) - Last Name ya no es necesario
             email_records = self.emails_table.all(
-                formula=email_formula, 
-                fields=[email_field, donor_first_name_field]
+                formula=f"AND({', '.join(formula_parts)})",
+                fields=[email_field, donor_first_name_field, region_field, bounced_field],
             )
+        except Exception as exc:
+            raise AirtableCampaignQueryError(
+                f"Unable to resolve campaign audiences from Airtable: {exc}"
+            ) from exc
 
-            # --- Preparar la lista final ---
-            contact_list = []
-            for rec in email_records:
-                fields = rec.get('fields', {})
-                email_address = fields.get(email_field)
-                
-                if email_address:
-                    # Extraer First Name (Lookup -> Lista)
-                    first_name_raw = fields.get(donor_first_name_field)
-                    first_name = ""
-                    if isinstance(first_name_raw, list) and first_name_raw:
-                        first_name = str(first_name_raw[0]).strip()
-                    elif isinstance(first_name_raw, str):
-                        first_name = first_name_raw.strip()
-                        
-                    # Usar solo el First Name (o fallback)
-                    final_name = first_name or "Valued Supporter"
-                    
-                    contact_list.append({
-                        "Email": email_address,
-                        "Name": final_name
-                    })
+        contacts_by_branch: dict[AudienceBranch, list[dict[str, str]]] = {
+            branch: [] for branch in audiences
+        }
+        all_contacts: list[dict[str, str]] = []
+        for record in email_records:
+            fields = record.get("fields", {})
+            region = fields.get(region_field)
+            if isinstance(region, list):
+                region = region[0] if region else None
+            is_bounced = fields.get(bounced_field) in {True, 1}
+            branch = (
+                AudienceBranch(region=region, is_bounced=is_bounced)
+                if region in {"USA", "EUR"}
+                else None
+            )
+            if branch not in contacts_by_branch:
+                continue
 
-            print(f"Found {len(contact_list)} emails matching all criteria.")
-            return contact_list
+            first_name = fields.get(donor_first_name_field)
+            if isinstance(first_name, list):
+                first_name = first_name[0] if first_name else ""
+            name = str(first_name).strip() if first_name else ""
+            contact = {
+                "Email": fields.get(email_field, ""),
+                "Name": name or "Valued Supporter",
+            }
+            contacts_by_branch[branch].append(contact)
+            all_contacts.append(contact)
 
-        except Exception as e:
-            print(f"Error getting campaign contacts from Airtable: {e}")
-            traceback.print_exc()
-            return []
-    
+        return AudienceResolution(
+            contacts=deduplicate_contacts(all_contacts),
+            branches=tuple(
+                AudienceCount(
+                    region=branch.region,
+                    is_bounced=branch.is_bounced,
+                    count=len(contacts_by_branch[branch]),
+                )
+                for branch in audiences
+            ),
+        )
+
+    def get_campaign_contacts(
+        self,
+        region: str,
+        is_bounced: bool,
+        segment: str = "standard",
+    ) -> List[Dict[str, Any]]:
+        """Resolve one legacy campaign filter through the combined resolver."""
+        audiences = normalize_audiences(
+            None,
+            legacy_region=region,
+            legacy_is_bounced=is_bounced,
+        )
+        return list(self.resolve_campaign_audiences(audiences, segment).contacts)
     def get_monthly_source_breakdown(self, start_date: date, end_date: date) -> Dict[str, Any]:
         """
         Calcula el desglose de donaciones por fuente para un rango de fechas.
