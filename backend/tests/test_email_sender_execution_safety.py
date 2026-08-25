@@ -1,5 +1,6 @@
 """Regression tests for campaign launch idempotency and restart recovery."""
 
+import asyncio
 import json
 
 import pytest
@@ -113,6 +114,56 @@ def campaign_directories(tmp_path, monkeypatch):
     monkeypatch.setattr(email_sender, "SENT_LOGS_DIR", str(sent_logs))
     monkeypatch.setattr(email_sender, "TARGETS_DIR", str(targets))
     return campaign_data, sent_logs, targets
+
+
+def test_duplicate_launch_is_rejected_before_second_task_is_queued(
+    campaign_directories,
+):
+    campaign_data, _sent_logs, _targets = campaign_directories
+    campaign_id = "Campaign_launch_once"
+    (campaign_data / f"{campaign_id}.json").write_text(
+        json.dumps({"id": campaign_id, "status": "Ready"}), encoding="utf-8"
+    )
+    tasks = CapturingBackgroundTasks()
+
+    response = email_sender.launch_campaign(
+        campaign_id, background_tasks=tasks, current_user="admin@example.org"
+    )
+
+    assert response["status"] == "Launching"
+    assert len(tasks.tasks) == 1
+    with pytest.raises(HTTPException) as error:
+        email_sender.launch_campaign(
+            campaign_id,
+            background_tasks=tasks,
+            current_user="admin@example.org",
+        )
+    assert error.value.status_code == 409
+    assert len(tasks.tasks) == 1
+
+
+def test_execution_wrapper_releases_lock_after_completion(
+    campaign_directories, monkeypatch
+):
+    campaign_data, _sent_logs, _targets = campaign_directories
+    campaign_id = "Campaign_release_lock"
+    (campaign_data / f"{campaign_id}.json").write_text(
+        json.dumps({"id": campaign_id, "status": "Ready"}), encoding="utf-8"
+    )
+    launch_id = email_sender.prepare_campaign_launch(campaign_id)
+    calls = []
+    monkeypatch.setattr(
+        email_sender,
+        "_run_campaign_task_unlocked",
+        lambda received_id, received_launch_id: calls.append(
+            (received_id, received_launch_id)
+        ),
+    )
+
+    email_sender.run_campaign_task(campaign_id, launch_id)
+
+    assert calls == [(campaign_id, launch_id)]
+    assert not email_sender._get_campaign_storage().is_launch_locked(campaign_id)
 
 
 def test_manual_launch_refreshes_stored_zero_and_queues_fresh_nonzero_audience(
@@ -373,4 +424,199 @@ def test_worker_resolver_failure_sets_error_without_send_or_target_rewrite(
         campaign_id,
         {"status": "Error - Airtable Fetch Failed"},
     )
+    assert not email_sender._get_campaign_storage().is_launch_locked(campaign_id)
+
+
+def test_scheduled_lock_collision_restores_remote_state_and_next_retry_refreshes(
+    execution_environment, monkeypatch
+):
+    campaign_data, _sent_logs, _targets, events, gmail, remote = execution_environment
+    campaign_id = "Campaign_scheduled_lock_retry"
+    config_path = write_airtable_campaign(
+        campaign_data, campaign_id, status="Scheduled", target_count=7
+    )
+    resolution = AudienceResolution(
+        contacts=({"Email": "retry@example.org", "Name": "Retry"},),
+        branches=(AudienceCount(region="USA", is_bounced=False, count=1),),
+    )
+    airtable = make_airtable_service([resolution], events)
+    monkeypatch.setattr(email_sender, "AirtableService", airtable)
+    storage = email_sender._get_campaign_storage()
+    update_owner = storage.acquire_launch_lock(campaign_id, "update-owner")
+    assert update_owner == "update-owner"
+
+    email_sender.run_campaign_task(campaign_id)
+
+    assert json.loads(config_path.read_text(encoding="utf-8"))["status"] == "Scheduled"
+    assert remote.updated[-1] == (campaign_id, {"status": "Scheduled"})
+    assert storage.owns_launch_lock(campaign_id, update_owner)
+    assert airtable.received == []
+    assert gmail.sent == []
+
+    assert storage.release_launch_lock(campaign_id, update_owner)
+    email_sender.run_campaign_task(campaign_id)
+
+    assert airtable.received == [([("USA", False)], "standard")]
+    assert gmail.sent == ["retry@example.org"]
+    assert not storage.is_launch_locked(campaign_id)
+
+
+def test_scheduler_submission_failure_restores_remote_scheduled(
+    campaign_directories, monkeypatch
+):
+    from backend.app.core import scheduler_worker
+    from backend.app.services import email_sender_service
+
+    campaign_data, _sent_logs, _targets = campaign_directories
+    campaign_id = "Campaign_scheduler_submission"
+    write_airtable_campaign(campaign_data, campaign_id, status="Scheduled")
+
+    class FakeScheduledService:
+        def __init__(self):
+            self.marked = []
+            self.updated = []
+
+        def get_pending_scheduled_campaigns(self):
+            return [{"id": campaign_id}]
+
+        def mark_campaign_launching(self, received_id):
+            self.marked.append(received_id)
+            return {"id": received_id, "status": "Launching"}
+
+        def update_campaign(self, received_id, updates):
+            self.updated.append((received_id, updates.copy()))
+
+    class ThrowingLoop:
+        def run_in_executor(self, *_args):
+            raise RuntimeError("executor unavailable")
+
+    service = FakeScheduledService()
+    monkeypatch.setattr(
+        email_sender_service, "get_email_sender_service", lambda: service
+    )
+    monkeypatch.setattr(scheduler_worker.os.path, "exists", lambda _path: True)
+    monkeypatch.setattr(
+        scheduler_worker.asyncio, "get_event_loop", lambda: ThrowingLoop()
+    )
+
+    asyncio.run(scheduler_worker.check_and_launch_scheduled_campaigns())
+
+    assert service.marked == [campaign_id]
+    assert service.updated == [(campaign_id, {"status": "Scheduled"})]
+
+
+def test_worker_refresh_commit_failure_preserves_prior_audience_snapshot(
+    execution_environment, monkeypatch
+):
+    campaign_data, _sent_logs, targets, events, gmail, remote = execution_environment
+    campaign_id = "Campaign_refresh_commit_failure"
+    prior_fetched_at = "2026-08-01T12:00:00"
+    config_path = write_airtable_campaign(
+        campaign_data,
+        campaign_id,
+        status="Launching",
+        target_count=7,
+        contacts_fetched_at=prior_fetched_at,
+    )
+    target_path = targets / f"target_{campaign_id}.csv"
+    target_path.write_text("Email\nstale@example.org\n", encoding="utf-8")
+    resolution = AudienceResolution(
+        contacts=({"Email": "fresh@example.org", "Name": "Fresh"},),
+        branches=(AudienceCount(region="USA", is_bounced=False, count=1),),
+    )
+    airtable = make_airtable_service([resolution], events)
+    monkeypatch.setattr(email_sender, "AirtableService", airtable)
+    storage = email_sender._get_campaign_storage()
+    monkeypatch.setattr(email_sender, "_get_campaign_storage", lambda: storage)
+
+    def fail_grouped_commit(*_args, **_kwargs):
+        raise OSError("simulated grouped commit failure")
+
+    monkeypatch.setattr(storage, "commit_audience_update", fail_grouped_commit)
+    launch_id = storage.acquire_launch_lock(campaign_id)
+    assert launch_id
+
+    email_sender.run_campaign_task(campaign_id, launch_id)
+
+    stored = json.loads(config_path.read_text(encoding="utf-8"))
+    assert stored["status"] == "Error - Airtable Fetch Failed"
+    assert stored["target_count"] == 7
+    assert stored["contacts_fetched_at"] == prior_fetched_at
+    assert target_path.read_text(encoding="utf-8").splitlines() == [
+        "Email",
+        "stale@example.org",
+    ]
+    assert gmail.sent == []
+    assert remote.updated[-1] == (
+        campaign_id,
+        {"status": "Error - Airtable Fetch Failed"},
+    )
+    assert not storage.is_launch_locked(campaign_id)
+
+
+def test_manual_queue_failure_restores_prior_status_before_releasing_lock(
+    campaign_directories
+):
+    campaign_data, _sent_logs, _targets = campaign_directories
+    campaign_id = "Campaign_manual_queue_failure"
+    config_path = campaign_data / f"{campaign_id}.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "id": campaign_id,
+                "source_type": "csv",
+                "status": "Ready",
+                "target_count": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class ThrowingBackgroundTasks:
+        def add_task(self, *_args, **_kwargs):
+            raise RuntimeError("queue unavailable")
+
+    with pytest.raises(RuntimeError, match="queue unavailable"):
+        email_sender.launch_campaign(
+            campaign_id,
+            background_tasks=ThrowingBackgroundTasks(),
+            current_user="admin@example.org",
+        )
+
+    stored = json.loads(config_path.read_text(encoding="utf-8"))
+    assert stored["status"] == "Ready"
+    assert "launch_id" not in stored
+    assert not email_sender._get_campaign_storage().is_launch_locked(campaign_id)
+
+
+def test_resume_queue_failure_restores_paused_before_releasing_lock(
+    campaign_directories
+):
+    campaign_data, _sent_logs, _targets = campaign_directories
+    campaign_id = "Campaign_resume_queue_failure"
+    config_path = campaign_data / f"{campaign_id}.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "id": campaign_id,
+                "source_type": "csv",
+                "status": "Paused",
+                "target_count": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class ThrowingBackgroundTasks:
+        def add_task(self, *_args, **_kwargs):
+            raise RuntimeError("resume queue unavailable")
+
+    with pytest.raises(RuntimeError, match="resume queue unavailable"):
+        email_sender.resume_campaign(
+            campaign_id,
+            background_tasks=ThrowingBackgroundTasks(),
+            current_user="admin@example.org",
+        )
+
+    assert json.loads(config_path.read_text(encoding="utf-8"))["status"] == "Paused"
     assert not email_sender._get_campaign_storage().is_launch_locked(campaign_id)

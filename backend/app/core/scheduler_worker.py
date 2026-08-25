@@ -51,13 +51,18 @@ async def check_and_launch_scheduled_campaigns():
                 
                 print(f"[Scheduler Worker] Launching campaign: {campaign_id}")
                 
-                # Mark as launching first (prevents duplicate launches)
-                service.mark_campaign_launching(campaign_id)
-                
-                # Run the campaign task in a thread to not block
-                # Since run_campaign_task is synchronous, we run it in executor
+                claimed = service.mark_campaign_launching(campaign_id)
+                if not claimed:
+                    continue
+
+                # The task acquires a persistent local launch lock before sending.
+                # Run the synchronous campaign task without blocking the event loop.
                 loop = asyncio.get_event_loop()
-                loop.run_in_executor(None, run_campaign_task, campaign_id)
+                try:
+                    loop.run_in_executor(None, run_campaign_task, campaign_id)
+                except Exception:
+                    service.update_campaign(campaign_id, {"status": "Scheduled"})
+                    raise
                 
                 print(f"[Scheduler Worker] Campaign {campaign_id} launch initiated")
                 

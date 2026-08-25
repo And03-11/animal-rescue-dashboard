@@ -174,15 +174,19 @@ def _refresh_airtable_campaign_contacts(
         branches, config.get("segment") or "standard"
     )
     contact_data = list(resolution.contacts)
-    config["audiences"] = serialize_audiences(branches)
-    config["target_count"] = resolution.total_unique
-    config["contacts_fetched_at"] = datetime.now().isoformat()
+    updated_config = {
+        **config,
+        "audiences": serialize_audiences(branches),
+        "target_count": resolution.total_unique,
+        "contacts_fetched_at": datetime.now().isoformat(),
+    }
     storage.commit_audience_update(
         campaign_id,
-        config,
+        updated_config,
         contact_data,
         owner_id=owner_id,
     )
+    config.update(updated_config)
     return contact_data
 
 
@@ -248,30 +252,6 @@ def prepare_campaign_launch(
         storage.release_launch_lock(campaign_id, owner_id)
         raise
 
-
-def recover_interrupted_campaigns() -> list[str]:
-    return _get_campaign_storage().recover_interrupted_campaigns()
-
-
-def _select_unique_pending_contacts(
-    contact_data: List[Dict[str, Any]], sent_emails: set[str]
-) -> List[Dict[str, Any]]:
-    pending: List[Dict[str, Any]] = []
-    queued_email_addresses: set[str] = set()
-    normalized_sent = {email.strip().lower() for email in sent_emails}
-    for contact in contact_data:
-        email = contact.get("Email")
-        if not isinstance(email, str) or not email.strip():
-            continue
-        normalized_email = email.strip().lower()
-        if (
-            normalized_email in normalized_sent
-            or normalized_email in queued_email_addresses
-        ):
-            continue
-        queued_email_addresses.add(normalized_email)
-        pending.append({**contact, "Email": email.strip()})
-    return pending
 
 class CampaignRequest(BaseModel):
     source_type: Literal["airtable", "csv"]
@@ -789,8 +769,10 @@ def run_campaign_task(campaign_id: str, launch_id: Optional[str] = None):
             launch_id = prepare_campaign_launch(
                 campaign_id, refresh_airtable=False
             )
-        except HTTPException as error:
-            print(f"[{campaign_id}] Launch skipped: {error.detail}")
+        except Exception as error:
+            _sync_remote_campaign_status(campaign_id, "Scheduled")
+            detail = getattr(error, "detail", str(error))
+            print(f"[{campaign_id}] Launch skipped: {detail}")
             return
     elif not storage.owns_launch_lock(campaign_id, launch_id):
         print(f"[{campaign_id}] Launch skipped: execution lock is not owned.")
@@ -810,6 +792,7 @@ def run_campaign_task(campaign_id: str, launch_id: Optional[str] = None):
             print(f"[{campaign_id}] Could not persist interrupted state: {recovery_error}")
     finally:
         storage.release_launch_lock(campaign_id, launch_id)
+
 
 # --- Fin función ---
 
@@ -1136,11 +1119,22 @@ def launch_campaign(
     """
     Lanza la tarea de envío para una campaña.
     """
+    storage = _get_campaign_storage()
+    previous_status = None
+    if storage.campaign_exists(campaign_id):
+        previous_status = storage.load_campaign(campaign_id).get("status")
     launch_id = prepare_campaign_launch(campaign_id)
     try:
         background_tasks.add_task(run_campaign_task, campaign_id, launch_id)
     except Exception:
-        _get_campaign_storage().release_launch_lock(campaign_id, launch_id)
+        try:
+            config = storage.load_campaign(campaign_id)
+            config["status"] = previous_status or "Interrupted"
+            config.pop("launch_id", None)
+            config["last_updated"] = datetime.now().isoformat()
+            storage.save_campaign(campaign_id, config, serialize_unknown=True)
+        finally:
+            storage.release_launch_lock(campaign_id, launch_id)
         raise
     return {
         "message": f"Campaign '{campaign_id}' has been queued for launch.",
@@ -1800,7 +1794,15 @@ def resume_campaign(
             background_tasks.add_task(run_campaign_task, campaign_id, launch_id)
     except Exception:
         if launch_id is not None:
-            storage.release_launch_lock(campaign_id, launch_id)
+            try:
+                config = storage.load_campaign(campaign_id)
+                config["status"] = "Paused"
+                config["last_updated"] = datetime.now().isoformat()
+                storage.save_campaign(
+                    campaign_id, config, serialize_unknown=True
+                )
+            finally:
+                storage.release_launch_lock(campaign_id, launch_id)
         raise
     return updated_config
 
