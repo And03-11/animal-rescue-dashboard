@@ -1,3 +1,7 @@
+import {
+  CAMPAIGN_WIZARD_CSV_ERRORS,
+  CAMPAIGN_WIZARD_VALIDATION_MESSAGES,
+} from './campaignWizardState.ts';
 import type { CampaignWizardStep } from './campaignWizardState.ts';
 
 export const WIZARD_FOCUS_TARGET_IDS = {
@@ -22,23 +26,39 @@ export const WIZARD_FOCUS_TARGET_IDS = {
 export type WizardFocusTarget = keyof typeof WIZARD_FOCUS_TARGET_IDS;
 
 export const VALIDATION_FOCUS_TARGETS: Readonly<Record<string, WizardFocusTarget>> = Object.freeze({
-  'Select at least one Airtable audience.': 'audienceMatrix',
-  'Select no more than four Airtable audiences.': 'audienceMatrix',
-  'Refresh the Airtable audience preview before continuing.': 'audienceMatrix',
-  'Please select a CSV file.': 'csvFile',
-  'Wait for the CSV preview to finish loading.': 'csvFile',
-  'The CSV must be previewed before continuing.': 'csvFile',
-  'Select the column containing email addresses.': 'csvEmailColumn',
-  'Select the column containing recipient names.': 'csvNameColumn',
-  'Email and name must be mapped to different columns.': 'csvEmailColumn',
-  'Select a sender group.': 'senderGroup',
-  'Select at least one sender account.': 'senderAccounts',
-  'Select a sender mode.': 'senderMode',
-  'Campaign name is required.': 'campaignName',
-  'Email subject is required.': 'subject',
-  'Cannot schedule a campaign with zero recipients.': 'schedule',
-  'Email body is required.': 'emailBody',
+  [CAMPAIGN_WIZARD_VALIDATION_MESSAGES.audienceRequired]: 'audienceMatrix',
+  [CAMPAIGN_WIZARD_VALIDATION_MESSAGES.tooManyAudiences]: 'audienceMatrix',
+  [CAMPAIGN_WIZARD_VALIDATION_MESSAGES.audiencePreviewStale]: 'audienceMatrix',
+  [CAMPAIGN_WIZARD_VALIDATION_MESSAGES.csvFileRequired]: 'csvFile',
+  [CAMPAIGN_WIZARD_CSV_ERRORS.previewLoading]: 'csvFile',
+  [CAMPAIGN_WIZARD_CSV_ERRORS.previewRequired]: 'csvFile',
+  [CAMPAIGN_WIZARD_CSV_ERRORS.emailColumnRequired]: 'csvEmailColumn',
+  [CAMPAIGN_WIZARD_CSV_ERRORS.nameColumnRequired]: 'csvNameColumn',
+  [CAMPAIGN_WIZARD_CSV_ERRORS.columnsMustDiffer]: 'csvEmailColumn',
+  [CAMPAIGN_WIZARD_CSV_ERRORS.invalidFile]: 'csvFile',
+  [CAMPAIGN_WIZARD_CSV_ERRORS.readFailure]: 'csvFile',
+  [CAMPAIGN_WIZARD_CSV_ERRORS.emptyFile]: 'csvFile',
+  [CAMPAIGN_WIZARD_VALIDATION_MESSAGES.senderGroupRequired]: 'senderGroup',
+  [CAMPAIGN_WIZARD_VALIDATION_MESSAGES.senderAccountsRequired]: 'senderAccounts',
+  [CAMPAIGN_WIZARD_VALIDATION_MESSAGES.senderModeRequired]: 'senderMode',
+  [CAMPAIGN_WIZARD_VALIDATION_MESSAGES.campaignNameRequired]: 'campaignName',
+  [CAMPAIGN_WIZARD_VALIDATION_MESSAGES.subjectRequired]: 'subject',
+  [CAMPAIGN_WIZARD_VALIDATION_MESSAGES.zeroRecipientSchedule]: 'schedule',
+  [CAMPAIGN_WIZARD_VALIDATION_MESSAGES.bodyRequired]: 'emailBody',
 });
+
+export interface WizardValidationFocusPlan {
+  target: WizardFocusTarget;
+  viewMode?: 'code';
+  fallbackTarget?: WizardFocusTarget;
+}
+
+export function focusPlanForValidationError(message: string): WizardValidationFocusPlan {
+  const target = focusTargetForValidationError(message);
+  return target === 'emailBody'
+    ? { target, viewMode: 'code', fallbackTarget: 'errorAlert' }
+    : { target };
+}
 
 const STEP_FOCUS_TARGETS: Readonly<Record<CampaignWizardStep, WizardFocusTarget>> = {
   0: 'stepAudience',
@@ -71,6 +91,7 @@ export interface ScheduleWizardFocusOptions {
   scheduler: WizardFocusScheduler;
   getRoot: () => WizardFocusRoot | null;
   target: WizardFocusTarget;
+  fallbackTarget?: WizardFocusTarget;
   isCurrent: () => boolean;
 }
 
@@ -89,14 +110,22 @@ export function scheduleWizardFocus({
   scheduler,
   getRoot,
   target,
+  fallbackTarget,
   isCurrent,
 }: ScheduleWizardFocusOptions): () => void {
   let cancelled = false;
   const handle = scheduler.request(() => {
     if (cancelled || !isCurrent()) return;
-    const targetId = WIZARD_FOCUS_TARGET_IDS[target];
-    const element = getRoot()?.querySelector(`#${targetId}`);
-    if (isWizardFocusable(element)) element.focus();
+    const root = getRoot();
+    if (!root) return;
+    const element = root.querySelector(`#${WIZARD_FOCUS_TARGET_IDS[target]}`);
+    if (isWizardFocusable(element)) {
+      element.focus();
+      return;
+    }
+    if (!fallbackTarget || fallbackTarget === target) return;
+    const fallback = root.querySelector(`#${WIZARD_FOCUS_TARGET_IDS[fallbackTarget]}`);
+    if (isWizardFocusable(fallback)) fallback.focus();
   });
 
   return () => {

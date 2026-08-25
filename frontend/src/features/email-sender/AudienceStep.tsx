@@ -27,6 +27,14 @@ import {
   toggleAudience,
 } from './audienceSelection';
 import type { AudienceShortcut } from './audienceSelection';
+import {
+  CAMPAIGN_WIZARD_CSV_ERRORS,
+  createSuggestedCsvMapping,
+  isCsvColumnMapping,
+  isCsvPreview,
+  validateCsvContent,
+  validateCsvFileSelection,
+} from './campaignWizardState';
 import type { CampaignWizardDraft } from './campaignWizardState';
 import { WIZARD_FOCUS_TARGET_IDS } from './campaignWizardFocus';
 import type {
@@ -53,54 +61,14 @@ const EMPTY_MAPPING: CsvColumnMapping = {
   has_header: false,
 };
 
-// eslint-disable-next-line react-refresh/only-export-components -- CSV helpers are shared with the wizard owner.
-export function isCsvPreview(value: unknown): value is CsvPreview {
-  if (!value || typeof value !== 'object') return false;
-  const preview = value as Partial<CsvPreview>;
-  return Array.isArray(preview.columns)
-    && preview.columns.every((column) => typeof column === 'string')
-    && Array.isArray(preview.preview_row)
-    && preview.preview_row.every((cell) => typeof cell === 'string')
-    && typeof preview.has_header === 'boolean';
-}
-
-// eslint-disable-next-line react-refresh/only-export-components -- CSV helpers are shared with the wizard owner.
-export function isCsvColumnMapping(value: unknown): value is CsvColumnMapping {
-  if (!value || typeof value !== 'object') return false;
-  const mapping = value as Partial<CsvColumnMapping>;
-  return typeof mapping.email === 'string'
-    && typeof mapping.name === 'string'
-    && typeof mapping.has_header === 'boolean';
-}
-
-// eslint-disable-next-line react-refresh/only-export-components -- CSV helpers are shared with the wizard owner.
-export function createSuggestedCsvMapping(preview: CsvPreview): CsvColumnMapping {
-  const columnsLower = preview.columns.map((column) => column.toLowerCase());
-  const emailIndex = columnsLower.findIndex((column) => (
-    column === 'email' || column === 'correo' || column.includes('mail')
-  ));
-  const nameIndex = columnsLower.findIndex((column) => (
-    column === 'name'
-    || column === 'nombre'
-    || column.includes('first name')
-    || column.includes('primer nombre')
-    || column.includes('first')
-  ));
-
-  return {
-    email: emailIndex >= 0 ? preview.columns[emailIndex] : '',
-    name: nameIndex >= 0 ? preview.columns[nameIndex] : '',
-    has_header: preview.has_header,
-  };
-}
-
 interface AudienceStepProps {
   draft: CampaignWizardDraft;
   previewLoading: boolean;
   csvPreviewLoading: boolean;
   error: string | null;
   onDraftChange: (patch: Partial<CampaignWizardDraft>) => void;
-  onErrorChange: (error: string | null) => void;
+  onErrorClear: () => void;
+  onCsvError: (message: string) => void;
   onCsvPreviewLoadingChange: (loading: boolean) => void;
 }
 
@@ -110,11 +78,12 @@ function parseCsvFile(
   onSuccess: (preview: CsvPreview) => void,
   onError: (message: string) => void,
 ) {
-  reader.onerror = () => onError('The CSV file could not be read. Try another file.');
+  reader.onerror = () => onError(CAMPAIGN_WIZARD_CSV_ERRORS.readFailure);
   reader.onload = (event) => {
-    const text = event.target?.result;
-    if (typeof text !== 'string' || !text.trim()) {
-      onError('CSV file is empty.');
+    const text = typeof event.target?.result === 'string' ? event.target.result : '';
+    const contentError = validateCsvContent(text);
+    if (contentError) {
+      onError(contentError);
       return;
     }
 
@@ -165,7 +134,8 @@ export function AudienceStep({
   csvPreviewLoading,
   error,
   onDraftChange,
-  onErrorChange,
+  onErrorClear,
+  onCsvError,
   onCsvPreviewLoadingChange,
 }: AudienceStepProps) {
   const [isDragging, setIsDragging] = useState(false);
@@ -200,7 +170,7 @@ export function AudienceStep({
       readerRef.current = null;
       onCsvPreviewLoadingChange(false);
     }
-    onErrorChange(null);
+    onErrorClear();
     onDraftChange(
       shouldDiscardPendingCsv
         ? { sourceType, csvFile: null, csvPreview: null, csvMapping: null }
@@ -214,8 +184,9 @@ export function AudienceStep({
     readerRef.current?.abort();
     readerRef.current = null;
 
-    if (file.type !== 'text/csv' && !file.name.toLowerCase().endsWith('.csv')) {
-      onErrorChange('Please select a valid CSV file.');
+    const fileError = validateCsvFileSelection(file);
+    if (fileError) {
+      onCsvError(fileError);
       onCsvPreviewLoadingChange(false);
       onDraftChange({ csvFile: null, csvPreview: null, csvMapping: null });
       return;
@@ -223,7 +194,7 @@ export function AudienceStep({
 
     const reader = new FileReader();
     readerRef.current = reader;
-    onErrorChange(null);
+    onErrorClear();
     onCsvPreviewLoadingChange(true);
     onDraftChange({ csvFile: file, csvPreview: null, csvMapping: null });
     parseCsvFile(
@@ -242,7 +213,7 @@ export function AudienceStep({
         if (readGenerationRef.current !== generation || readerRef.current !== reader) return;
         readerRef.current = null;
         onDraftChange({ csvFile: null, csvPreview: null, csvMapping: null });
-        onErrorChange(message);
+        onCsvError(message);
         onCsvPreviewLoadingChange(false);
       },
     );
@@ -313,7 +284,7 @@ export function AudienceStep({
               fullWidth
               onChange={(_event, segment: CampaignWizardDraft['segment'] | null) => {
                 if (segment) {
-                  onErrorChange(null);
+                  onErrorClear();
                   onDraftChange({ segment });
                 }
               }}
@@ -341,7 +312,7 @@ export function AudienceStep({
                   size="small"
                   variant="outlined"
                   onClick={() => {
-                    onErrorChange(null);
+                    onErrorClear();
                     onDraftChange({ audiences: applyAudienceShortcut(shortcut) });
                   }}
                 >
@@ -379,7 +350,7 @@ export function AudienceStep({
                             <Checkbox
                               checked={isSelected(region, isBounced)}
                               onChange={() => {
-                                onErrorChange(null);
+                                onErrorClear();
                                 onDraftChange({
                                   audiences: toggleAudience(draft.audiences, audience),
                                 });
@@ -438,6 +409,10 @@ export function AudienceStep({
       ) : (
         <Stack spacing={2}>
           <Box
+            id={WIZARD_FOCUS_TARGET_IDS.csvFile}
+            role="group"
+            tabIndex={-1}
+            aria-labelledby="campaign-wizard-csv-upload-label"
             onDragOver={(event: DragEvent<HTMLDivElement>) => {
               event.preventDefault();
               setIsDragging(true);
@@ -458,7 +433,7 @@ export function AudienceStep({
             }}
           >
             <CloudUploadOutlinedIcon color={isDragging ? 'primary' : 'action'} sx={{ fontSize: 40 }} />
-            <Typography variant="subtitle1" sx={{ mt: 1 }}>
+            <Typography id="campaign-wizard-csv-upload-label" variant="subtitle1" sx={{ mt: 1 }}>
               {isDragging ? 'Drop CSV here' : 'Drag and drop a CSV'}
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, mb: 2 }}>
@@ -466,7 +441,6 @@ export function AudienceStep({
             </Typography>
             <Button
               component="label"
-              id={WIZARD_FOCUS_TARGET_IDS.csvFile}
               variant="outlined"
             >
               {draft.csvFile ? 'Change file' : 'Browse files'}
@@ -529,7 +503,7 @@ export function AudienceStep({
                     label="Email column"
                     value={csvMapping.email}
                     onChange={(event) => {
-                      onErrorChange(null);
+                      onErrorClear();
                       onDraftChange({
                         csvMapping: { ...csvMapping, email: event.target.value },
                       });
@@ -549,7 +523,7 @@ export function AudienceStep({
                     label="Name column"
                     value={csvMapping.name}
                     onChange={(event) => {
-                      onErrorChange(null);
+                      onErrorClear();
                       onDraftChange({
                         csvMapping: { ...csvMapping, name: event.target.value },
                       });

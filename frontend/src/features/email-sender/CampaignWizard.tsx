@@ -26,8 +26,11 @@ import apiClient from '../../api/axiosConfig';
 import {
   buildCampaignPayload,
   computeAudiencePreviewKey,
+  createSuggestedCsvMapping,
   hydrateCampaignWizardDraft,
   invalidateAudiencePreview,
+  isCsvColumnMapping,
+  validateCsvMapping,
   validateWizardStep,
 } from './campaignWizardState';
 import type {
@@ -35,8 +38,8 @@ import type {
   CampaignWizardStep,
 } from './campaignWizardState';
 import {
+  focusPlanForValidationError,
   focusTargetForStep,
-  focusTargetForValidationError,
   scheduleWizardFocus,
   WIZARD_FOCUS_TARGET_IDS,
 } from './campaignWizardFocus';
@@ -44,12 +47,7 @@ import type {
   WizardFocusScheduler,
   WizardFocusTarget,
 } from './campaignWizardFocus';
-import {
-  AudienceStep,
-  createSuggestedCsvMapping,
-  isCsvColumnMapping,
-  isCsvPreview,
-} from './AudienceStep';
+import { AudienceStep } from './AudienceStep';
 import { CampaignSetupStep } from './CampaignSetupStep';
 import { WizardSessionLifecycle } from './campaignWizardOrchestration';
 import type { WizardSessionHandle } from './campaignWizardOrchestration';
@@ -120,21 +118,6 @@ function createInitialDraft(campaignId?: string | null): CampaignWizardDraft {
   });
 }
 
-function csvMappingError(draft: CampaignWizardDraft, csvPreviewLoading: boolean): string | null {
-  if (draft.sourceType !== 'csv') return null;
-  if (csvPreviewLoading) return 'Wait for the CSV preview to finish loading.';
-
-  const preview = isCsvPreview(draft.csvPreview) ? draft.csvPreview : null;
-  const mapping = isCsvColumnMapping(draft.csvMapping) ? draft.csvMapping : null;
-  if (!preview) {
-    return draft.campaignId ? null : 'The CSV must be previewed before continuing.';
-  }
-  if (!mapping?.email) return 'Select the column containing email addresses.';
-  if (!mapping.name) return 'Select the column containing recipient names.';
-  if (mapping.email === mapping.name) return 'Email and name must be mapped to different columns.';
-  return null;
-}
-
 export function CampaignWizard({
   open,
   initialCampaignId = null,
@@ -184,6 +167,7 @@ export function CampaignWizard({
   const requestFocus = useCallback((
     target: WizardFocusTarget,
     expectedSession?: WizardSessionHandle | null,
+    fallbackTarget?: WizardFocusTarget,
   ) => {
     cancelPendingFocus();
     const session = expectedSession ?? getActiveSession();
@@ -197,6 +181,7 @@ export function CampaignWizard({
       scheduler,
       getRoot: () => dialogPaperRef.current,
       target,
+      fallbackTarget,
       isCurrent: () => sessionLifecycleRef.current.isCurrent(session),
     });
   }, [cancelPendingFocus, getActiveSession]);
@@ -205,9 +190,13 @@ export function CampaignWizard({
     message: string,
     session?: WizardSessionHandle | null,
   ) => {
+    const focusPlan = focusPlanForValidationError(message);
     setError(message);
-    requestFocus(focusTargetForValidationError(message), session);
+    if (focusPlan.viewMode) setViewMode(focusPlan.viewMode);
+    requestFocus(focusPlan.target, session, focusPlan.fallbackTarget);
   }, [requestFocus]);
+
+  const clearError = useCallback(() => setError(null), []);
 
   const showAsyncError = useCallback((
     message: string,
@@ -455,7 +444,7 @@ export function CampaignWizard({
         await requestAudiencePreview();
         return;
       }
-      const validationError = validateWizardStep(0, draft) ?? csvMappingError(draft, csvPreviewLoading);
+      const validationError = validateWizardStep(0, draft) ?? validateCsvMapping(draft, csvPreviewLoading);
       if (validationError) {
         showValidationError(validationError);
         return;
@@ -705,7 +694,8 @@ export function CampaignWizard({
                     csvPreviewLoading={csvPreviewLoading}
                     error={error}
                     onDraftChange={patchAudienceDraft}
-                    onErrorChange={setError}
+                    onErrorClear={clearError}
+                    onCsvError={showValidationError}
                     onCsvPreviewLoadingChange={setCsvPreviewLoading}
                   />
                 </Box>

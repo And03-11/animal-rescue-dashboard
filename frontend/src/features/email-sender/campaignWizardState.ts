@@ -8,6 +8,8 @@ import type {
   AudienceSegment,
   CampaignFormData,
   CampaignSource,
+  CsvColumnMapping,
+  CsvPreview,
   SelectedAccount,
 } from './types.ts';
 
@@ -43,6 +45,31 @@ export interface CampaignWizardDraft {
 export type CampaignWizardPayload = Omit<CampaignFormData, 'csvFile'> & {
   csvFile?: File;
 };
+
+export const CAMPAIGN_WIZARD_VALIDATION_MESSAGES = Object.freeze({
+  audienceRequired: 'Select at least one Airtable audience.',
+  tooManyAudiences: 'Select no more than four Airtable audiences.',
+  audiencePreviewStale: 'Refresh the Airtable audience preview before continuing.',
+  csvFileRequired: 'Please select a CSV file.',
+  senderGroupRequired: 'Select a sender group.',
+  senderAccountsRequired: 'Select at least one sender account.',
+  senderModeRequired: 'Select a sender mode.',
+  campaignNameRequired: 'Campaign name is required.',
+  subjectRequired: 'Email subject is required.',
+  zeroRecipientSchedule: 'Cannot schedule a campaign with zero recipients.',
+  bodyRequired: 'Email body is required.',
+} as const);
+
+export const CAMPAIGN_WIZARD_CSV_ERRORS = Object.freeze({
+  previewLoading: 'Wait for the CSV preview to finish loading.',
+  previewRequired: 'The CSV must be previewed before continuing.',
+  emailColumnRequired: 'Select the column containing email addresses.',
+  nameColumnRequired: 'Select the column containing recipient names.',
+  columnsMustDiffer: 'Email and name must be mapped to different columns.',
+  invalidFile: 'Please select a valid CSV file.',
+  readFailure: 'The CSV file could not be read. Try another file.',
+  emptyFile: 'CSV file is empty.',
+} as const);
 
 type HydrationInput = Partial<CampaignFormData> & {
   id?: string | null;
@@ -101,6 +128,74 @@ function hasZeroFreshPreview(draft: CampaignWizardDraft): boolean {
   return draft.audiencePreview?.total_unique === 0 && !draft.audiencePreviewStale;
 }
 
+export function isCsvPreview(value: unknown): value is CsvPreview {
+  if (!value || typeof value !== 'object') return false;
+  const preview = value as Partial<CsvPreview>;
+  return Array.isArray(preview.columns)
+    && preview.columns.every((column) => typeof column === 'string')
+    && Array.isArray(preview.preview_row)
+    && preview.preview_row.every((cell) => typeof cell === 'string')
+    && typeof preview.has_header === 'boolean';
+}
+
+export function isCsvColumnMapping(value: unknown): value is CsvColumnMapping {
+  if (!value || typeof value !== 'object') return false;
+  const mapping = value as Partial<CsvColumnMapping>;
+  return typeof mapping.email === 'string'
+    && typeof mapping.name === 'string'
+    && typeof mapping.has_header === 'boolean';
+}
+
+export function createSuggestedCsvMapping(preview: CsvPreview): CsvColumnMapping {
+  const columnsLower = preview.columns.map((column) => column.toLowerCase());
+  const emailIndex = columnsLower.findIndex((column) => (
+    column === 'email' || column === 'correo' || column.includes('mail')
+  ));
+  const nameIndex = columnsLower.findIndex((column) => (
+    column === 'name'
+    || column === 'nombre'
+    || column.includes('first name')
+    || column.includes('primer nombre')
+    || column.includes('first')
+  ));
+
+  return {
+    email: emailIndex >= 0 ? preview.columns[emailIndex] : '',
+    name: nameIndex >= 0 ? preview.columns[nameIndex] : '',
+    has_header: preview.has_header,
+  };
+}
+
+export function validateCsvFileSelection(file: Pick<File, 'name' | 'type'>): string | null {
+  return file.type === 'text/csv' || file.name.toLowerCase().endsWith('.csv')
+    ? null
+    : CAMPAIGN_WIZARD_CSV_ERRORS.invalidFile;
+}
+
+export function validateCsvContent(value: unknown): string | null {
+  return typeof value === 'string' && value.trim()
+    ? null
+    : CAMPAIGN_WIZARD_CSV_ERRORS.emptyFile;
+}
+
+export function validateCsvMapping(
+  draft: CampaignWizardDraft,
+  csvPreviewLoading: boolean,
+): string | null {
+  if (draft.sourceType !== 'csv') return null;
+  if (csvPreviewLoading) return CAMPAIGN_WIZARD_CSV_ERRORS.previewLoading;
+
+  const preview = isCsvPreview(draft.csvPreview) ? draft.csvPreview : null;
+  const mapping = isCsvColumnMapping(draft.csvMapping) ? draft.csvMapping : null;
+  if (!preview) {
+    return draft.campaignId ? null : CAMPAIGN_WIZARD_CSV_ERRORS.previewRequired;
+  }
+  if (!mapping?.email) return CAMPAIGN_WIZARD_CSV_ERRORS.emailColumnRequired;
+  if (!mapping.name) return CAMPAIGN_WIZARD_CSV_ERRORS.nameColumnRequired;
+  if (mapping.email === mapping.name) return CAMPAIGN_WIZARD_CSV_ERRORS.columnsMustDiffer;
+  return null;
+}
+
 /** Validate only the fields owned by one wizard step. Returns null when valid. */
 export function validateWizardStep(
   step: CampaignWizardStep,
@@ -110,51 +205,51 @@ export function validateWizardStep(
     if (draft.sourceType === 'airtable') {
       const audiences = normalizeAudienceSelection(draft.audiences);
       if (audiences.length === 0) {
-        return 'Select at least one Airtable audience.';
+        return CAMPAIGN_WIZARD_VALIDATION_MESSAGES.audienceRequired;
       }
       if (audiences.length > 4) {
-        return 'Select no more than four Airtable audiences.';
+        return CAMPAIGN_WIZARD_VALIDATION_MESSAGES.tooManyAudiences;
       }
       if (
         !draft.audiencePreview
         || draft.audiencePreviewStale
         || draft.audiencePreviewKey !== computeAudiencePreviewKey(audiences, draft.segment)
       ) {
-        return 'Refresh the Airtable audience preview before continuing.';
+        return CAMPAIGN_WIZARD_VALIDATION_MESSAGES.audiencePreviewStale;
       }
       return null;
     }
 
     if (!draft.campaignId && !draft.csvFile) {
-      return 'Please select a CSV file.';
+      return CAMPAIGN_WIZARD_VALIDATION_MESSAGES.csvFileRequired;
     }
     return null;
   }
 
   if (step === 1) {
     if (draft.senderMode === 'group' && !draft.selectedGroup.trim()) {
-      return 'Select a sender group.';
+      return CAMPAIGN_WIZARD_VALIDATION_MESSAGES.senderGroupRequired;
     }
     if (draft.senderMode === 'manual' && draft.selectedAccounts.length === 0) {
-      return 'Select at least one sender account.';
+      return CAMPAIGN_WIZARD_VALIDATION_MESSAGES.senderAccountsRequired;
     }
     if (draft.senderMode !== 'all' && draft.senderMode !== 'group' && draft.senderMode !== 'manual') {
-      return 'Select a sender mode.';
+      return CAMPAIGN_WIZARD_VALIDATION_MESSAGES.senderModeRequired;
     }
     if (!draft.campaignName.trim()) {
-      return 'Campaign name is required.';
+      return CAMPAIGN_WIZARD_VALIDATION_MESSAGES.campaignNameRequired;
     }
     if (!draft.subject.trim()) {
-      return 'Email subject is required.';
+      return CAMPAIGN_WIZARD_VALIDATION_MESSAGES.subjectRequired;
     }
     if (draft.sourceType === 'airtable' && normalizeScheduledAt(draft.scheduledAt) && hasZeroFreshPreview(draft)) {
-      return 'Cannot schedule a campaign with zero recipients.';
+      return CAMPAIGN_WIZARD_VALIDATION_MESSAGES.zeroRecipientSchedule;
     }
     return null;
   }
 
   if (!draft.htmlBody.trim()) {
-    return 'Email body is required.';
+    return CAMPAIGN_WIZARD_VALIDATION_MESSAGES.bodyRequired;
   }
   return null;
 }
