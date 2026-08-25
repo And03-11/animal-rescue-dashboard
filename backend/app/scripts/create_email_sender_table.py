@@ -35,6 +35,14 @@ def create_email_sender_table():
                 ALTER TABLE email_sender_campaigns 
                 ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMP WITH TIME ZONE
             """)
+            cur.execute("""
+                ALTER TABLE email_sender_campaigns
+                ADD COLUMN IF NOT EXISTS audiences JSONB NOT NULL DEFAULT '[]'::jsonb
+            """)
+            cur.execute("""
+                ALTER TABLE email_sender_campaigns
+                ADD COLUMN IF NOT EXISTS segment VARCHAR(20) NOT NULL DEFAULT 'standard'
+            """)
             conn.commit()
             print("✅ Added scheduled_at column if missing.")
             return True
@@ -43,6 +51,8 @@ def create_email_sender_table():
         print("📧 Creating email_sender_campaigns table...")
         cur.execute("""
             CREATE TABLE email_sender_campaigns (
+                audiences JSONB NOT NULL DEFAULT '[]'::jsonb,
+                segment VARCHAR(20) NOT NULL DEFAULT 'standard',
                 id VARCHAR(100) PRIMARY KEY,
                 campaign_name VARCHAR(255) NOT NULL,
                 source_type VARCHAR(20) NOT NULL,

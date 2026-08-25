@@ -13,6 +13,26 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+CAMPAIGN_SUMMARY_FIELDS = frozenset(
+    {
+        "id",
+        "createdAt",
+        "campaign_name",
+        "subject",
+        "source_type",
+        "audiences",
+        "segment",
+        "region",
+        "is_bounced",
+        "csv_filename",
+        "status",
+        "scheduled_at",
+        "sent_count_final",
+        "target_count",
+        "performance",
+    }
+)
+
 
 class InvalidCampaignIdError(ValueError):
     """Raised before a non-canonical campaign ID reaches filesystem paths."""

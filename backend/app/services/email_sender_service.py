@@ -64,6 +64,9 @@ class EmailSenderService:
                     sender_config = json.dumps(sender_config)
                 elif isinstance(sender_config, str):
                     sender_config = json.dumps(sender_config)
+
+                audiences_json = json.dumps(campaign_data.get('audiences', []))
+                segment = campaign_data.get('segment', 'standard')
                 
                 # Handle scheduled_at
                 scheduled_at = campaign_data.get('scheduled_at')
@@ -73,9 +76,9 @@ class EmailSenderService:
                     INSERT INTO email_sender_campaigns (
                         id, campaign_name, source_type, subject, html_body,
                         region, is_bounced, sender_config, status, scheduled_at,
-                        target_count, created_at
+                        target_count, audiences, segment, created_at
                     ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW()
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW()
                     ) RETURNING *
                 """, (
                     campaign_data['id'],
@@ -88,7 +91,9 @@ class EmailSenderService:
                     sender_config,
                     status,
                     scheduled_at,
-                    campaign_data.get('target_count', 0)
+                    campaign_data.get('target_count', 0),
+                    audiences_json,
+                    segment,
                 ))
                 result = cur.fetchone()
             conn.commit()
@@ -144,6 +149,14 @@ class EmailSenderService:
             values = []
             
             field_mapping = {
+                'campaign_name': 'campaign_name',
+                'subject': 'subject',
+                'html_body': 'html_body',
+                'sender_config': 'sender_config',
+                'region': 'region',
+                'is_bounced': 'is_bounced',
+                'audiences': 'audiences',
+                'segment': 'segment',
                 'status': 'status',
                 'csv_filename': 'csv_filename',
                 'mapping': 'mapping',
