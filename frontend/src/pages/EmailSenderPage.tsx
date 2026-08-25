@@ -30,6 +30,7 @@ import {
   Edit as EditIcon,
 } from '@mui/icons-material';
 import { Link as RouterLink } from 'react-router-dom';
+import axios from 'axios';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch';
@@ -38,16 +39,51 @@ import PauseCircleOutlineIcon from '@mui/icons-material/PauseCircleOutline';
 import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
 import apiClient from '../api/axiosConfig';
 import { CampaignWizard } from '../features/email-sender/CampaignWizard';
+import { planCampaignSave } from '../features/email-sender/campaignWizardOrchestration';
+import type {
+  CampaignFormData,
+  CampaignLaunchResponse,
+  CreateCampaignResponse,
+  CsvColumnMapping,
+  EmailCampaign,
+} from '../features/email-sender/types';
+
+interface ApiErrorPayload {
+  detail?: string;
+}
+
+const isAbortError = (error: unknown): boolean => (
+  axios.isCancel(error) || (error instanceof Error && error.name === 'AbortError')
+);
+
+const getApiErrorMessage = (error: unknown, fallback: string): string => {
+  if (axios.isAxiosError<ApiErrorPayload>(error)) {
+    return error.response?.data?.detail || fallback;
+  }
+
+  return fallback;
+};
+
+const getCampaignSaveErrorMessage = (error: unknown): string => {
+  if (axios.isAxiosError<ApiErrorPayload>(error)) {
+    if (error.response) {
+      return error.response.data?.detail || `Server error: ${error.response.status}`;
+    }
+    if (error.request) return 'No response from server.';
+  }
+
+  return error instanceof Error ? `Error: ${error.message}` : 'Failed operation.';
+};
 
 // --- Componente Principal de la Página (SIN CAMBIOS RESPECTO AL CÓDIGO QUE YA TENÍAS) ---
 export const EmailSenderPage = () => {
-  const [campaigns, setCampaigns] = useState<any[]>([]);
+  const [campaigns, setCampaigns] = useState<EmailCampaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState<string | null>(null);
   const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null); // Para saber si estamos subiendo CSV a una existente
-  const [campaignToDelete, setCampaignToDelete] = useState<any | null>(null); // Guarda la campaña a eliminar
+  const [campaignToDelete, setCampaignToDelete] = useState<EmailCampaign | null>(null); // Guarda la campaña a eliminar
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false); // Controla el modal de confirmación
   const [deleting, setDeleting] = useState(false);
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
@@ -55,15 +91,15 @@ export const EmailSenderPage = () => {
   const fetchCampaigns = useCallback(async () => {
     // No mostramos spinner principal en refrescos automáticos
     try {
-      const response = await apiClient.get('/sender/campaigns', {
+      const response = await apiClient.get<EmailCampaign[]>('/sender/campaigns', {
         headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache', 'Expires': '0' }
       });
       setCampaigns(response.data);
       if (loading) setError(null); // Limpia error solo si era carga inicial
-    } catch (err: any) {
+    } catch (err: unknown) {
       // Solo muestra error si no es un error de cancelación (AbortError)
       // y si es la carga inicial o ya no hay campañas en la lista (para evitar parpadeo)
-      if (err.name !== 'AbortError' && (loading || campaigns.length === 0)) {
+      if (!isAbortError(err) && (loading || campaigns.length === 0)) {
         setError('Failed to load campaigns.');
         console.error(err);
       }
@@ -96,128 +132,87 @@ export const EmailSenderPage = () => {
   }, [campaigns, fetchCampaigns]);
 
 
-  // --- handleSaveCampaign (ACTUALIZADO para manejar errores y mensajes) ---
   const handleSaveCampaign = async (
-    campaignDataFromForm: any,
-    mapping?: { email: string; name: string; has_header: boolean }
+    campaignDataFromForm: CampaignFormData,
+    mapping?: CsvColumnMapping,
+    signal?: AbortSignal,
   ) => {
-    const { csvFile, ...campaignBaseData } = campaignDataFromForm; // Extrae csvFile
-    const source_type = campaignBaseData.source_type;
-    setError(null); // Limpia errores generales previos
-    setSnackbarMessage(null); // Limpia mensajes previos
+    const { csvFile, ...campaignBaseData } = campaignDataFromForm;
+    const sourceType = campaignBaseData.source_type;
+    const operations = planCampaignSave({
+      existingCampaignId: editingCampaignId,
+      sourceType,
+      hasCsvFile: Boolean(csvFile),
+      hasMapping: Boolean(mapping),
+    });
+    let campaignId = editingCampaignId;
+
+    setError(null);
+    setSnackbarMessage(null);
 
     try {
-      // --- ETAPA 2: Guardar el Mapeo ---
-      if (mapping && editingCampaignId && source_type === 'csv') {
-        console.log("Etapa 2: Confirmando mapeo para:", editingCampaignId, mapping);
-        setSnackbarMessage(`Saving column mapping for campaign ${editingCampaignId}...`);
-        try {
-          await apiClient.post(`/sender/campaigns/${editingCampaignId}/save-mapping`, mapping);
-          setSnackbarMessage(`Column mapping saved successfully! Campaign is Ready.`);
-          setIsModalOpen(false);
-          setEditingCampaignId(null);
-          fetchCampaigns();
-          return; // Termina
-        } catch (mapErr: any) {
-          console.error("Error saving mapping:", mapErr);
-          // Muestra el error DENTRO del modal
-          // Necesitaríamos pasar una función `setFormError` a CampaignForm o manejarlo aquí
-          // Por ahora, lo mostramos como error general y dejamos modal abierto
-          setError(mapErr.response?.data?.detail || 'Failed to save column mapping.');
-          setSnackbarMessage(null); // Oculta snackbar si hay error
-          // NO CERRAMOS EL MODAL para que el usuario corrija
-          throw mapErr;
+      for (const operation of operations) {
+        if (operation === 'create-campaign') {
+          setSnackbarMessage('Saving campaign configuration…');
+          const response = await apiClient.post<CreateCampaignResponse>(
+            '/sender/campaigns',
+            campaignBaseData,
+            { signal },
+          );
+          campaignId = response.data.id;
+          setEditingCampaignId(campaignId);
+          continue;
+        }
+
+        if (!campaignId) throw new Error('Campaign ID is required to complete this save.');
+
+        if (operation === 'update-campaign') {
+          setSnackbarMessage('Updating campaign configuration…');
+          await apiClient.put(`/sender/campaigns/${campaignId}`, campaignBaseData, { signal });
+        } else if (operation === 'upload-csv') {
+          if (!csvFile) throw new Error('CSV file is required for upload.');
+          setSnackbarMessage('Uploading CSV file…');
+          const formData = new FormData();
+          formData.append('csv_file', csvFile, csvFile.name);
+          await apiClient.post(`/sender/campaigns/${campaignId}/upload-csv`, formData, { signal });
+        } else if (operation === 'save-mapping') {
+          if (!mapping) throw new Error('CSV mapping is required to complete this save.');
+          setSnackbarMessage('Saving column mapping…');
+          await apiClient.post(`/sender/campaigns/${campaignId}/save-mapping`, mapping, { signal });
         }
       }
 
-      // --- ETAPA 1: Crear o Actualizar Campaña y/o Subir Archivo ---
-      let campaignId = editingCampaignId;
-      if (!campaignId) {
-        console.log("Etapa 1: Creando configuración de campaña...");
-        setSnackbarMessage(`Saving campaign configuration...`);
-        // Asegúrate que campaignBaseData tenga todo lo necesario (incluyendo sender_config)
-        const createResponse = await apiClient.post('/sender/campaigns', campaignBaseData);
-        campaignId = createResponse.data.id;
-        setEditingCampaignId(campaignId); // Guarda el ID nuevo
-        console.log(`Etapa 1: Configuración guardada (ID: ${campaignId})`);
-        setSnackbarMessage(`Configuration saved (ID: ${campaignId})...`);
-      } else {
-        console.log(`Etapa 1: Actualizando campaignId existente: ${campaignId}`);
-        setSnackbarMessage(`Updating campaign configuration...`);
-        await apiClient.put(`/sender/campaigns/${campaignId}`, campaignBaseData);
-        setSnackbarMessage(`Configuration updated (ID: ${campaignId})...`);
-      }
-
-      // Subir CSV si aplica
-      if (source_type === 'csv' && csvFile && campaignId) {
-        console.log(`Etapa 1: Subiendo archivo CSV para ${campaignId}...`);
-        setSnackbarMessage(`Uploading CSV file for campaign ${campaignId}...`);
-        const formData = new FormData();
-        formData.append('csv_file', csvFile, csvFile.name);
-        try {
-          await apiClient.post(`/sender/campaigns/${campaignId}/upload-csv`, formData);
-          console.log(`Etapa 1: CSV subido para ${campaignId}`);
-
-          // ✅ SI HAY MAPPING, GUARDARLO INMEDIATAMENTE
-          if (mapping) {
-            console.log("Mapeo recibido en Etapa 1, guardando inmediatamente...");
-            setSnackbarMessage(`Saving column mapping...`);
-            await apiClient.post(`/sender/campaigns/${campaignId}/save-mapping`, mapping);
-            console.log("Mapeo guardado exitosamente.");
-            setSnackbarMessage(`Campaign saved successfully!`);
-            setIsModalOpen(false);
-            setEditingCampaignId(null);
-            fetchCampaigns();
-            return;
-          }
-
-          setSnackbarMessage(`CSV uploaded! Please map columns below.`);
-          // Si no hay mapping (flujo antiguo), dejamos abierto
-        } catch (uploadErr: any) {
-          console.error("Error uploading/mapping CSV:", uploadErr);
-          setError(uploadErr.response?.data?.detail || 'Failed to upload/map CSV file.');
-          setSnackbarMessage(null);
-          throw uploadErr;
-        }
-
-      } else if (source_type === 'airtable' && campaignId) {
-        // Si es Airtable, la creación fue todo.
-        console.log("Etapa 1: Campaña Airtable creada/guardada. Cerrando modal.");
-        setSnackbarMessage(`Airtable campaign ${campaignId} saved successfully!`);
-        setIsModalOpen(false);
-        setEditingCampaignId(null); // Limpia ID
-        fetchCampaigns(); // Refresca lista
-      }
-
-    } catch (err: any) {
-      // Captura errores de la creación inicial de campaña (si falló antes de subir CSV)
-      console.error("Error en handleSaveCampaign (Etapa 1 - Creación):", err);
-      let errorMessage = 'Failed operation.';
-      if (err.response) { errorMessage = err.response.data?.detail || `Server error: ${err.response.status}`; }
-      else if (err.request) { errorMessage = 'No response from server.'; }
-      else { errorMessage = `Error: ${err.message}`; }
-      setError(errorMessage);
+      if (!campaignId) throw new Error('Campaign ID was not returned by the server.');
+      setSnackbarMessage(
+        sourceType === 'csv'
+          ? 'CSV campaign saved successfully!'
+          : `Airtable campaign ${campaignId} saved successfully!`,
+      );
+      setIsModalOpen(false);
+      setEditingCampaignId(null);
+      void fetchCampaigns();
+    } catch (err: unknown) {
+      if (isAbortError(err)) return;
+      console.error('Error saving campaign:', err);
+      setError(getCampaignSaveErrorMessage(err));
       setSnackbarMessage(null);
-      // Resetea editingCampaignId si la creación inicial falló
-      if (!mapping && !editingCampaignId) setEditingCampaignId(null);
+      if (!campaignId) setEditingCampaignId(null);
       throw err;
     }
-    // No ponemos finally(setLoading(false)) porque el loading relevante es el snackbar o el error
   };
-
 
   const handleLaunchCampaign = async (campaignId: string) => {
     // ... (sin cambios respecto a lo anterior) ...
     try {
-      const response = await apiClient.post(`/sender/campaigns/${campaignId}/launch`);
+      const response = await apiClient.post<CampaignLaunchResponse>(`/sender/campaigns/${campaignId}/launch`);
       setSnackbarMessage(response.data.message || 'Campaign launch initiated!');
       setTimeout(fetchCampaigns, 1500); // Refresca tras un delay
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to launch campaign.');
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, 'Failed to launch campaign.'));
       console.error(err);
     }
   };
-  const handleDeleteClick = (campaign: any) => {
+  const handleDeleteClick = (campaign: EmailCampaign) => {
     setCampaignToDelete(campaign);
     setDeleteConfirmOpen(true);
   };
@@ -252,9 +247,9 @@ export const EmailSenderPage = () => {
       // para dar tiempo al backend a procesar si la tarea estaba activa.
       setTimeout(fetchCampaigns, isCancelAction ? 1000 : 0);
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(`Error ${isCancelAction ? 'cancelling' : 'deleting'} campaign:`, err);
-      setError(err.response?.data?.detail || `Failed to ${isCancelAction ? 'cancel' : 'delete'} campaign.`);
+      setError(getApiErrorMessage(err, `Failed to ${isCancelAction ? 'cancel' : 'delete'} campaign.`));
       handleDeleteClose(); // Cerramos modal incluso si falla por ahora
     } finally {
       setDeleting(false);
@@ -269,9 +264,9 @@ export const EmailSenderPage = () => {
       await apiClient.post(`/sender/campaigns/${campaignId}/pause`);
       setSnackbarMessage(`Campaign '${campaignId}' paused.`);
       fetchCampaigns(); // Refresca para actualizar el estado visual
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Error pausing campaign:", err);
-      setError(err.response?.data?.detail || 'Failed to pause campaign.');
+      setError(getApiErrorMessage(err, 'Failed to pause campaign.'));
     } finally {
       setActionLoading(prev => ({ ...prev, [campaignId]: false })); // Desactiva spinner
     }
@@ -286,9 +281,9 @@ export const EmailSenderPage = () => {
       setSnackbarMessage(`Campaign '${campaignId}' resuming...`);
       // El backend la pone en 'Sending', el polling la actualizará
       fetchCampaigns(); // Refresca para mostrar 'Sending'
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Error resuming campaign:", err);
-      setError(err.response?.data?.detail || 'Failed to resume campaign.');
+      setError(getApiErrorMessage(err, 'Failed to resume campaign.'));
     } finally {
       setActionLoading(prev => ({ ...prev, [campaignId]: false })); // Desactiva spinner
     }
@@ -439,7 +434,7 @@ export const EmailSenderPage = () => {
                             campaign.status === 'Ready' ||
                             (campaign.source_type === 'airtable' && campaign.status === 'Draft') ||
                             (campaign.status === 'Completed with Errors' && (campaign.sent_count_final ?? campaign.progress?.sent ?? 0) < (campaign.target_count ?? campaign.progress?.total ?? 0))
-                          ) || campaign.status === 'Sending' // Siempre deshabilitado si está enviando
+                          )
                         }
                       >
                         {campaign.status === 'Sending' ? 'Sending...' : (campaign.status === 'Completed with Errors' ? 'Retry Failed' : 'Launch')}
@@ -508,12 +503,12 @@ export const EmailSenderPage = () => {
         <DialogContent>
           <DialogContentText id="delete-confirm-description">
             {/* --- INICIO MODIFICACIÓN --- */}
-            {['Sending', 'Paused'].includes(campaignToDelete?.status)
+            {['Sending', 'Paused'].includes(campaignToDelete?.status ?? '')
               ? `Are you sure you want to cancel and permanently delete the campaign `
               : `Are you sure you want to permanently delete the campaign `
             }
             <strong>"{campaignToDelete?.subject || 'this campaign'}"</strong>?
-            {['Sending', 'Paused'].includes(campaignToDelete?.status) && ` The sending process will be stopped.`}
+            {['Sending', 'Paused'].includes(campaignToDelete?.status ?? '') && ` The sending process will be stopped.`}
             This action cannot be undone.
             {/* --- FIN MODIFICACIÓN --- */}
           </DialogContentText>
@@ -523,7 +518,7 @@ export const EmailSenderPage = () => {
           <Button onClick={handleDeleteClose} disabled={deleting}>Cancel</Button>
           {/* Cambia el texto del botón de confirmación */}
           <Button onClick={handleDeleteConfirm} color="error" disabled={deleting} autoFocus>
-            {['Sending', 'Paused'].includes(campaignToDelete?.status) ? 'Cancel & Delete' : 'Delete'}
+            {['Sending', 'Paused'].includes(campaignToDelete?.status ?? '') ? 'Cancel & Delete' : 'Delete'}
           </Button>
         </DialogActions>
       </Dialog>

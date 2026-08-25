@@ -41,3 +41,48 @@ Complete. Base was `5585fcba7306cb5fbcc4c6a97be911b4718df045`; the intended impl
 - No new dependency was added, and Task 8 components depend only on files present at the recorded base plus existing frontend libraries/components.
 - Browser visual verification remains assigned to Task 10 by the ledger. This task verified responsive layout rules by code inspection, focused lint, TypeScript, and the production build.
 - Existing unrelated dirty and untracked files remain untouched and unstaged.
+
+## Review round 1 — RED/GREEN
+
+1. **CSV edit save contract**
+   - RED: the reviewed callback returned after `/save-mapping` whenever an existing CSV edit supplied mapping, so the later campaign `PUT` never ran. The new orchestration suite was first run without an implementation module and failed all four assertions (exit 1), including the required edit and create ordering.
+   - GREEN: `planCampaignSave` is now the single ordered flow decision. Existing CSV edits produce `update-campaign -> save-mapping` (and upload between them only when a replacement file exists); new CSV campaigns produce `create-campaign -> upload-csv -> save-mapping`. The page executes that plan with the full campaign payload and one campaign ID, preserving Airtable create/update behavior.
+
+2. **Fatal edit hydration**
+   - RED: a details-load rejection cleared the loading flag but left the default draft and normal footer active against the existing ID.
+   - GREEN: the wizard now records `loading`, `ready`, or `failed` hydration. A failed edit exposes only a persistent error with Retry and Close; step navigation and final save remain disabled until a guarded retry successfully hydrates the draft.
+
+3. **Wizard async session isolation**
+   - RED: audience preview and several template/test calls had no open/campaign session identity, so a closed session could complete into a reopened wizard.
+   - GREEN: `WizardSessionLifecycle` gives every open/retry/ID generation its own `AbortController`. Begin, retry, close, ID change, reopen, and effect cleanup abort/invalidate older handles. Audience preview, credentials, templates, detail/CSV hydration, template load/save, send-test, and parent save all receive the active signal and gate success, error, loading, and navigation mutations on current-session identity. The lifecycle test proves begin and explicit abort invalidate every older handle.
+
+4. **CSV FileReader isolation**
+   - RED: each file selection created an untracked reader whose callbacks could overwrite the current file's preview and mapping after a later selection or unmount.
+   - GREEN: `AudienceStep` aborts the previous reader, increments a per-read generation, and accepts callbacks only from the current reader/generation. Source switch and unmount invalidate/abort the reader; invalid/read-error paths clear the file preview/mapping and loading state, so file B cannot be saved with file A's columns.
+
+5. **Exact committed lint gate**
+   - RED: the reviewed committed page contained 12 explicit `any` occurrences at the reported locations; the prior success came from a dirty configuration that downgraded the rule.
+   - GREEN: the Task 8 page index blob is derived from the exact prior commit and replaces all 12 occurrences with campaign/API/error domain types. An archive of staged source tree `f5dbef6d0058ccfc402d8f3e038a1c4b4cf1d9eb`, using the committed ESLint configuration, passed the mandated five-file command with `FIVE_FILE_ESLINT_EXIT=0`; the new orchestration helper separately passed with `HELPER_ESLINT_EXIT=0`. No lint/config/package dependency change is staged.
+
+## Review round 1 files and commit scope
+
+- Modified `CampaignWizard.tsx` for fatal hydration, retry/close, session generations, abort signals, and guarded async completions.
+- Modified `AudienceStep.tsx` for tracked, abortable, generation-gated CSV reads and stale-state cleanup.
+- Added `campaignWizardOrchestration.ts` and `campaignWizardOrchestration.test.ts` for save ordering and session lifecycle contracts.
+- Staged only the Task 8 `EmailSenderPage.tsx` save-order/type hunks through verified blob `3b5f5dbb25a5337ceae35bc6c3a484a87e851c06`; the page's unrelated dirty workspace refactors remain unstaged.
+- This report update and those five implementation/test paths are the complete intended scope of `fix: harden campaign wizard sessions and CSV edits`.
+
+## Review round 1 verification
+
+- RED: `node --test tests/campaignWizardOrchestration.test.ts` — exit 1, 0/4 passed before the helper existed.
+- GREEN exact staged snapshot: `node --test tests/audienceSelection.test.ts tests/campaignWizardState.test.ts tests/campaignWizardOrchestration.test.ts` — exit 0, 24/24 passed.
+- GREEN exact staged snapshot: mandated ESLint on `EmailSenderPage.tsx`, `CampaignWizard.tsx`, `AudienceStep.tsx`, `CampaignSetupStep.tsx`, and `ContentReviewStep.tsx` — exit 0; helper ESLint — exit 0.
+- Exact staged TypeScript first exposed four legacy-page typing errors after removing `any`; the equivalent typed expressions were corrected. Rerun: `tsc -p tsconfig.app.json --noEmit` — exit 0.
+- GREEN exact staged snapshot: `npm run build` — exit 0; `tsc -b`, 13,171 transformed modules, and the Vite production bundle completed.
+- `git diff --cached --check` is required again immediately before commit.
+
+## Review round 1 self-review / concerns
+
+- No component-test DOM runtime is installed. The save/session contracts are covered by dependency-free tests; fatal hydration and FileReader callback gating were verified through focused lint, TypeScript, exact diff review, and production build. Browser interaction remains part of Task 10.
+- Cancel intentionally remains enabled while preview/save work is active; it synchronously aborts and invalidates the session before delegating close.
+- Existing unrelated dirty and untracked files are preserved and excluded from the index.

@@ -41,6 +41,8 @@ import {
   isCsvPreview,
 } from './AudienceStep';
 import { CampaignSetupStep } from './CampaignSetupStep';
+import { WizardSessionLifecycle } from './campaignWizardOrchestration';
+import type { WizardSessionHandle } from './campaignWizardOrchestration';
 import { ContentReviewStep } from './ContentReviewStep';
 import type {
   AudiencePreview,
@@ -86,7 +88,11 @@ export interface CampaignWizardProps {
   open: boolean;
   initialCampaignId?: string | null;
   onClose: () => void;
-  onSave: (campaign: CampaignFormData, mapping?: CsvColumnMapping) => Promise<void> | void;
+  onSave: (
+    campaign: CampaignFormData,
+    mapping?: CsvColumnMapping,
+    signal?: AbortSignal,
+  ) => Promise<void> | void;
 }
 
 function createInitialDraft(campaignId?: string | null): CampaignWizardDraft {
@@ -140,58 +146,90 @@ export function CampaignWizard({
   const [sendingTest, setSendingTest] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [hydrationStatus, setHydrationStatus] = useState<'idle' | 'loading' | 'ready' | 'failed'>('idle');
+  const [hydrationError, setHydrationError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const sessionLifecycleRef = useRef(new WizardSessionLifecycle());
+  const activeSessionRef = useRef<WizardSessionHandle | null>(null);
+  const activeSessionCampaignIdRef = useRef<string | null | undefined>(undefined);
   const draftRef = useRef(draft);
   draftRef.current = draft;
 
-  useEffect(() => {
-    if (!open) return;
+  const isSessionCurrent = useCallback((session: WizardSessionHandle) => (
+    sessionLifecycleRef.current.isCurrent(session)
+  ), []);
 
-    const controller = new AbortController();
+  const getActiveSession = useCallback(() => {
+    const session = activeSessionRef.current;
+    return session && sessionLifecycleRef.current.isCurrent(session) ? session : null;
+  }, []);
+
+  useEffect(() => {
+    const lifecycle = sessionLifecycleRef.current;
+    if (!open) {
+      lifecycle.abort();
+      activeSessionRef.current = null;
+      activeSessionCampaignIdRef.current = undefined;
+      return;
+    }
+
+    const session = lifecycle.begin();
+    activeSessionRef.current = session;
+    const isCurrent = () => lifecycle.isCurrent(session);
     const campaignId = initialCampaignId ?? null;
+    activeSessionCampaignIdRef.current = campaignId;
     setDraft(createInitialDraft(campaignId));
     setActiveStep(0);
     setViewMode('code');
     setError(null);
     setSuccessMessage(null);
+    setHydrationError(null);
+    setHydrationStatus(campaignId ? 'loading' : 'ready');
     setTemplates([]);
     setSenderOptions({ groups: [], accounts: [] });
     setCsvPreviewLoading(false);
+    setPreviewLoading(false);
+    setSaving(false);
+    setSendingTest(false);
 
     setLoadingSenders(true);
     void apiClient.get<SenderOptions>('/sender/credentials', {
-      signal: controller.signal,
+      signal: session.signal,
       timeout: 15_000,
     }).then((response) => {
-      setSenderOptions(response.data);
+      if (isCurrent()) setSenderOptions(response.data);
     }).catch((requestError: unknown) => {
-      if (!isAbortError(requestError)) {
+      if (isCurrent() && !isAbortError(requestError)) {
         setError(getApiErrorMessage(requestError, 'Failed to load sender account options.'));
       }
     }).finally(() => {
-      if (!controller.signal.aborted) setLoadingSenders(false);
+      if (isCurrent()) setLoadingSenders(false);
     });
 
     void apiClient.get<EmailTemplate[]>('/templates', {
-      signal: controller.signal,
+      signal: session.signal,
       timeout: 15_000,
     }).then((response) => {
-      setTemplates(response.data);
+      if (isCurrent()) setTemplates(response.data);
     }).catch((requestError: unknown) => {
-      if (!isAbortError(requestError)) {
+      if (isCurrent() && !isAbortError(requestError)) {
         setError(getApiErrorMessage(requestError, 'Failed to load email templates.'));
       }
     });
 
     if (!campaignId) {
       setLoadingCampaign(false);
-      return () => controller.abort();
+      return () => {
+        if (lifecycle.isCurrent(session)) lifecycle.abort();
+      };
     }
 
     setLoadingCampaign(true);
     void apiClient.get<CampaignDetailsEnvelope>(`/sender/campaigns/${campaignId}/details`, {
-      signal: controller.signal,
+      signal: session.signal,
       timeout: 15_000,
     }).then(async (response) => {
+      if (!isCurrent()) return;
       const details = response.data.details;
       let csvPreview: CsvPreview | undefined;
       if (details.source_type === 'csv') {
@@ -199,19 +237,19 @@ export function CampaignWizard({
         try {
           const previewResponse = await apiClient.get<CsvPreview>(
             `/sender/campaigns/${campaignId}/csv-preview`,
-            { signal: controller.signal, timeout: 15_000 },
+            { signal: session.signal, timeout: 15_000 },
           );
-          csvPreview = previewResponse.data;
+          if (isCurrent()) csvPreview = previewResponse.data;
         } catch (requestError: unknown) {
-          if (!isAbortError(requestError)) {
+          if (isCurrent() && !isAbortError(requestError)) {
             setError(getApiErrorMessage(requestError, 'Failed to load the existing CSV preview.'));
           }
         } finally {
-          if (!controller.signal.aborted) setCsvPreviewLoading(false);
+          if (isCurrent()) setCsvPreviewLoading(false);
         }
       }
 
-      if (controller.signal.aborted) return;
+      if (!isCurrent()) return;
       setDraft(hydrateCampaignWizardDraft({
         ...details,
         campaignId,
@@ -220,17 +258,39 @@ export function CampaignWizard({
           ? details.mapping
           : csvPreview ? createSuggestedCsvMapping(csvPreview) : undefined,
       }));
+      setHydrationStatus('ready');
+      setHydrationError(null);
     }).catch((requestError: unknown) => {
-      if (!isAbortError(requestError)) {
-        setError(getApiErrorMessage(requestError, 'Failed to load campaign details.'));
-      }
+      if (!isCurrent() || isAbortError(requestError)) return;
+      setHydrationError(getApiErrorMessage(requestError, 'Campaign details could not be loaded.'));
+      setHydrationStatus('failed');
+      setError(null);
     }).finally(() => {
-      if (!controller.signal.aborted) setLoadingCampaign(false);
+      if (isCurrent()) setLoadingCampaign(false);
     });
 
-    return () => controller.abort();
-  }, [initialCampaignId, open]);
+    return () => {
+      if (lifecycle.isCurrent(session)) lifecycle.abort();
+    };
+  }, [initialCampaignId, loadAttempt, open]);
 
+  const handleClose = useCallback(() => {
+    sessionLifecycleRef.current.abort();
+    activeSessionRef.current = null;
+    activeSessionCampaignIdRef.current = undefined;
+    setHydrationStatus('idle');
+    onClose();
+  }, [onClose]);
+
+  const handleRetryHydration = useCallback(() => {
+    sessionLifecycleRef.current.abort();
+    activeSessionRef.current = null;
+    activeSessionCampaignIdRef.current = undefined;
+    setHydrationError(null);
+    setHydrationStatus('loading');
+    setLoadingCampaign(true);
+    setLoadAttempt((attempt) => attempt + 1);
+  }, []);
   useEffect(() => {
     if (loadingSenders || senderOptions.accounts.length === 0) return;
     setDraft((current) => {
@@ -265,6 +325,8 @@ export function CampaignWizard({
   }, []);
 
   const requestAudiencePreview = async () => {
+    const session = getActiveSession();
+    if (!session) return;
     const requestedKey = computeAudiencePreviewKey(draft.audiences, draft.segment);
     const selectionError = validateWizardStep(0, {
       ...draft,
@@ -282,8 +344,9 @@ export function CampaignWizard({
       const response = await apiClient.post<AudiencePreview>(
         '/sender/audience-preview',
         { audiences: draft.audiences, segment: draft.segment },
-        { timeout: 15_000 },
+        { timeout: 15_000, signal: session.signal },
       );
+      if (!isSessionCurrent(session)) return;
       const current = draftRef.current;
       if (computeAudiencePreviewKey(current.audiences, current.segment) !== requestedKey) {
         setError('The audience changed while the preview was loading. Continue again to refresh it.');
@@ -297,13 +360,15 @@ export function CampaignWizard({
       }));
       setActiveStep(1);
     } catch (requestError: unknown) {
-      setError(getApiErrorMessage(requestError, 'Failed to preview the Airtable audience.'));
+      if (isSessionCurrent(session) && !isAbortError(requestError)) {
+        setError(getApiErrorMessage(requestError, 'Failed to preview the Airtable audience.'));
+      }
     } finally {
-      setPreviewLoading(false);
+      if (isSessionCurrent(session)) setPreviewLoading(false);
     }
   };
-
   const handleContinue = async () => {
+    if (hydrationStatus !== 'ready') return;
     setError(null);
     if (activeStep === 0) {
       if (draft.sourceType === 'airtable') {
@@ -328,26 +393,30 @@ export function CampaignWizard({
   };
 
   const handleSave = async () => {
+    if (hydrationStatus !== 'ready') return;
     const validationError = validateWizardStep(2, draft);
     if (validationError) {
       setError(validationError);
       return;
     }
 
+    const session = getActiveSession();
+    if (!session) return;
     const mapping = draft.sourceType === 'csv' && isCsvColumnMapping(draft.csvMapping)
       ? draft.csvMapping
       : undefined;
     setSaving(true);
     setError(null);
     try {
-      await onSave(buildCampaignPayload(draft), mapping);
+      await onSave(buildCampaignPayload(draft), mapping, session.signal);
     } catch (saveError: unknown) {
-      setError(getApiErrorMessage(saveError, 'Failed to save campaign.'));
+      if (isSessionCurrent(session) && !isAbortError(saveError)) {
+        setError(getApiErrorMessage(saveError, 'Failed to save campaign.'));
+      }
     } finally {
-      setSaving(false);
+      if (isSessionCurrent(session)) setSaving(false);
     }
   };
-
   const handleLoadTemplate = (templateId: string) => {
     if (!templateId) {
       patchDraft({ htmlBody: DEFAULT_HTML, templateId: null });
@@ -359,36 +428,46 @@ export function CampaignWizard({
       return;
     }
 
+    const session = getActiveSession();
+    if (!session) return;
     patchDraft({ templateId: Number(templateId) });
-    void apiClient.get<EmailTemplate>(`/templates/${templateId}`, { timeout: 15_000 })
-      .then((response) => {
-        patchDraft({
-          htmlBody: response.data.content,
-          templateId: response.data.id,
-          template: response.data,
-        });
-      })
-      .catch((requestError: unknown) => {
-        setError(getApiErrorMessage(requestError, 'Failed to load template content.'));
+    void apiClient.get<EmailTemplate>(`/templates/${templateId}`, {
+      timeout: 15_000,
+      signal: session.signal,
+    }).then((response) => {
+      if (!isSessionCurrent(session)) return;
+      patchDraft({
+        htmlBody: response.data.content,
+        templateId: response.data.id,
+        template: response.data,
       });
+    }).catch((requestError: unknown) => {
+      if (isSessionCurrent(session) && !isAbortError(requestError)) {
+        setError(getApiErrorMessage(requestError, 'Failed to load template content.'));
+      }
+    });
   };
-
   const handleSaveTemplate = async (name: string) => {
+    const session = getActiveSession();
+    if (!session) return;
     setError(null);
     try {
       const response = await apiClient.post<EmailTemplate>('/templates', {
         name,
         content: draftRef.current.htmlBody,
-      }, { timeout: 15_000 });
+      }, { timeout: 15_000, signal: session.signal });
+      if (!isSessionCurrent(session)) return;
       setTemplates((current) => [response.data, ...current]);
       setSuccessMessage(`Template “${response.data.name}” saved.`);
     } catch (requestError: unknown) {
+      if (!isSessionCurrent(session) || isAbortError(requestError)) return;
       setError(getApiErrorMessage(requestError, 'Failed to save template.'));
       throw requestError;
     }
   };
-
   const handleSendTest = async (emails: string[]) => {
+    const session = getActiveSession();
+    if (!session) return;
     const current = draftRef.current;
     const senderConfig = buildCampaignPayload(current).sender_config;
     setSendingTest(true);
@@ -405,18 +484,25 @@ export function CampaignWizard({
           ? `/sender/campaigns/${current.campaignId}/send-test`
           : '/sender/send-test-adhoc',
         payload,
-        { timeout: 30_000 },
+        { timeout: 30_000, signal: session.signal },
       );
+      if (!isSessionCurrent(session)) return;
       setSuccessMessage(`Test email sent to ${emails.length} recipient${emails.length === 1 ? '' : 's'}.`);
     } catch (requestError: unknown) {
+      if (!isSessionCurrent(session) || isAbortError(requestError)) return;
       setError(getApiErrorMessage(requestError, 'Failed to send test emails.'));
       throw requestError;
     } finally {
-      setSendingTest(false);
+      if (isSessionCurrent(session)) setSendingTest(false);
     }
   };
-
-  const isBusy = loadingCampaign || previewLoading || saving;
+  const hydrationReady = (
+    open
+    && hydrationStatus === 'ready'
+    && activeSessionCampaignIdRef.current === (initialCampaignId ?? null)
+    && getActiveSession() !== null
+  );
+  const isBusy = !hydrationReady || loadingCampaign || previewLoading || saving;
   const finalActionLabel = draft.scheduledAt ? 'Schedule campaign' : 'Save draft';
   const finalActionHint = draft.scheduledAt
     ? `Delivery will be scheduled for ${new Date(draft.scheduledAt).toLocaleString()}.`
@@ -428,7 +514,7 @@ export function CampaignWizard({
     <>
       <Dialog
         open={open}
-        onClose={onClose}
+        onClose={handleClose}
         fullWidth
         fullScreen={fullScreen}
         maxWidth="lg"
@@ -480,6 +566,24 @@ export function CampaignWizard({
                 </Typography>
               </Box>
             </Box>
+          ) : hydrationStatus === 'failed' ? (
+            <Box sx={{ minHeight: 240, display: 'grid', placeItems: 'center' }}>
+              <Alert
+                severity="error"
+                action={(
+                  <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                    <Button color="inherit" size="small" onClick={handleRetryHydration}>Retry</Button>
+                    <Button color="inherit" size="small" onClick={handleClose}>Close</Button>
+                  </Box>
+                )}
+                sx={{ width: '100%', maxWidth: 680 }}
+              >
+                <Typography variant="subtitle2">Campaign could not be loaded.</Typography>
+                <Typography variant="body2" sx={{ mt: 0.5 }}>
+                  {hydrationError ?? 'Retry the load or close this wizard.'}
+                </Typography>
+              </Alert>
+            </Box>
           ) : (
             <>
               {activeStep > 0 && error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
@@ -502,7 +606,7 @@ export function CampaignWizard({
                   onDraftChange={patchDraft}
                 />
               )}
-              {activeStep === 2 && (
+              {activeStep === 2 && hydrationReady && (
                 <ContentReviewStep
                   draft={draft}
                   templates={templates}
@@ -532,7 +636,7 @@ export function CampaignWizard({
             '& > :not(style) ~ :not(style)': { ml: 0 },
           }}
         >
-          {activeStep === 2 && (
+          {activeStep === 2 && hydrationReady && (
             <Typography
               variant="caption"
               color="text.secondary"
@@ -551,14 +655,14 @@ export function CampaignWizard({
               '& > button': { flex: { xs: '1 1 auto', sm: '0 0 auto' } },
             }}
           >
-            <Button onClick={onClose} disabled={saving}>Cancel</Button>
+            <Button onClick={handleClose}>{hydrationStatus === 'failed' ? 'Close' : 'Cancel'}</Button>
             {activeStep > 0 && (
               <Button
                 onClick={() => {
                   setError(null);
                   setActiveStep((activeStep - 1) as CampaignWizardStep);
                 }}
-                disabled={isBusy || sendingTest}
+                disabled={!hydrationReady || isBusy || sendingTest}
               >
                 Back
               </Button>
@@ -567,7 +671,7 @@ export function CampaignWizard({
               <Button
                 variant="contained"
                 onClick={() => void handleContinue()}
-                disabled={isBusy || csvPreviewLoading || (activeStep === 1 && loadingSenders)}
+                disabled={!hydrationReady || isBusy || csvPreviewLoading || (activeStep === 1 && loadingSenders)}
                 startIcon={previewLoading ? <CircularProgress size={16} color="inherit" /> : undefined}
               >
                 {previewLoading ? 'Checking audience…' : 'Continue'}
@@ -576,7 +680,7 @@ export function CampaignWizard({
               <Button
                 variant="contained"
                 onClick={() => void handleSave()}
-                disabled={saving || sendingTest}
+                disabled={!hydrationReady || saving || sendingTest}
                 startIcon={saving ? <CircularProgress size={16} color="inherit" /> : undefined}
               >
                 {saving ? 'Saving…' : finalActionLabel}

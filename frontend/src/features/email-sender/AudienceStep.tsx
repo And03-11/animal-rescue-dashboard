@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, DragEvent } from 'react';
 import {
   Alert,
@@ -105,10 +105,10 @@ interface AudienceStepProps {
 
 function parseCsvFile(
   file: File,
+  reader: FileReader,
   onSuccess: (preview: CsvPreview) => void,
   onError: (message: string) => void,
 ) {
-  const reader = new FileReader();
   reader.onerror = () => onError('The CSV file could not be read. Try another file.');
   reader.onload = (event) => {
     const text = event.target?.result;
@@ -168,30 +168,69 @@ export function AudienceStep({
   onCsvPreviewLoadingChange,
 }: AudienceStepProps) {
   const [isDragging, setIsDragging] = useState(false);
+  const readerRef = useRef<FileReader | null>(null);
+  const readGenerationRef = useRef(0);
   const csvPreview = isCsvPreview(draft.csvPreview) ? draft.csvPreview : null;
   const csvMapping = isCsvColumnMapping(draft.csvMapping)
     ? draft.csvMapping
     : { ...EMPTY_MAPPING, has_header: csvPreview?.has_header ?? false };
 
+  useEffect(() => {
+    if (draft.sourceType !== 'csv') {
+      readGenerationRef.current += 1;
+      readerRef.current?.abort();
+      readerRef.current = null;
+      onCsvPreviewLoadingChange(false);
+    }
+
+    return () => {
+      readGenerationRef.current += 1;
+      readerRef.current?.abort();
+      readerRef.current = null;
+    };
+  }, [draft.sourceType, onCsvPreviewLoadingChange]);
+
   const setSource = (sourceType: CampaignSource | null) => {
     if (!sourceType || sourceType === draft.sourceType) return;
+    const shouldDiscardPendingCsv = sourceType !== 'csv' && readerRef.current !== null;
+    if (sourceType !== 'csv') {
+      readGenerationRef.current += 1;
+      readerRef.current?.abort();
+      readerRef.current = null;
+      onCsvPreviewLoadingChange(false);
+    }
     onErrorChange(null);
-    onDraftChange({ sourceType });
+    onDraftChange(
+      shouldDiscardPendingCsv
+        ? { sourceType, csvFile: null, csvPreview: null, csvMapping: null }
+        : { sourceType },
+    );
   };
 
   const setCsvFile = (file: File) => {
+    const generation = readGenerationRef.current + 1;
+    readGenerationRef.current = generation;
+    readerRef.current?.abort();
+    readerRef.current = null;
+
     if (file.type !== 'text/csv' && !file.name.toLowerCase().endsWith('.csv')) {
       onErrorChange('Please select a valid CSV file.');
+      onCsvPreviewLoadingChange(false);
       onDraftChange({ csvFile: null, csvPreview: null, csvMapping: null });
       return;
     }
 
+    const reader = new FileReader();
+    readerRef.current = reader;
     onErrorChange(null);
     onCsvPreviewLoadingChange(true);
     onDraftChange({ csvFile: file, csvPreview: null, csvMapping: null });
     parseCsvFile(
       file,
+      reader,
       (preview) => {
+        if (readGenerationRef.current !== generation || readerRef.current !== reader) return;
+        readerRef.current = null;
         onDraftChange({
           csvPreview: preview,
           csvMapping: createSuggestedCsvMapping(preview),
@@ -199,12 +238,14 @@ export function AudienceStep({
         onCsvPreviewLoadingChange(false);
       },
       (message) => {
+        if (readGenerationRef.current !== generation || readerRef.current !== reader) return;
+        readerRef.current = null;
+        onDraftChange({ csvFile: null, csvPreview: null, csvMapping: null });
         onErrorChange(message);
         onCsvPreviewLoadingChange(false);
       },
     );
   };
-
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) setCsvFile(file);
