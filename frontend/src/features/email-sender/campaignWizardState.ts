@@ -147,7 +147,7 @@ export function validateWizardStep(
     if (!draft.subject.trim()) {
       return 'Email subject is required.';
     }
-    if (normalizeScheduledAt(draft.scheduledAt) && hasZeroFreshPreview(draft)) {
+    if (draft.sourceType === 'airtable' && normalizeScheduledAt(draft.scheduledAt) && hasZeroFreshPreview(draft)) {
       return 'Cannot schedule a campaign with zero recipients.';
     }
     return null;

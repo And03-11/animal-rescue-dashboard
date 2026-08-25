@@ -32,3 +32,10 @@ Only the Task 7 state module, focused Node tests, and this report are intended f
 - GREEN after implementation: Task 7 suite passed 15/15, covering direct audience/segment mutation, normalized ordering identity, invalidation clearing, and blank schedule canonicalization.
 - GREEN verification: Task 6 passed 4/4; isolated TypeScript passed; focused ESLint passed; npm run build exited 0 and Vite completed production output.
 - The build retained the existing advisory for chunks larger than 600 kB.
+
+## Review round 2
+
+- RED CSV regression: a CSV draft retaining an old fresh zero Airtable preview was rejected at Step 1 despite a real schedule.
+- GREEN after implementation: the zero-recipient schedule guard is Airtable-only; Task 7 passed 16/16, and CSV validation/payload ignored retained Airtable preview identity while preserving the real schedule.
+- GREEN verification: Task 6 passed 4/4; isolated TypeScript passed; focused ESLint passed; npm run build exited 0 and Vite completed production output.
+- The build retained the existing advisory for chunks larger than 600 kB.

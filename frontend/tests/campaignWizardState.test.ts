@@ -132,6 +132,26 @@ test('blank scheduled timestamps are Draft-valid and payload-null', () => {
   assert.equal(wizardState.buildCampaignPayload(draft).scheduled_at, null);
 });
 
+test('CSV source ignores retained Airtable zero preview state', () => {
+  assert.ok(wizardState, 'campaign wizard state module is missing');
+  const csvFile = { name: 'recipients.csv' } as unknown as File;
+  const draft = {
+    ...baseDraft(),
+    sourceType: 'csv' as const,
+    csvFile,
+    audiencePreview: { branches: [], total_unique: 0 },
+    audiencePreviewStale: false,
+    audiencePreviewKey: 'old-airtable-preview',
+    scheduledAt: '2026-08-25T12:00:00.000Z',
+  };
+  assert.equal(wizardState.validateWizardStep(0, draft), null);
+  assert.equal(wizardState.validateWizardStep(1, draft), null);
+  const payload = wizardState.buildCampaignPayload(draft);
+  assert.equal(payload.scheduled_at, '2026-08-25T12:00:00.000Z');
+  assert.equal('audiences' in payload, false);
+  assert.equal('segment' in payload, false);
+});
+
 test('body step requires HTML content', () => {
   assert.ok(wizardState, 'campaign wizard state module is missing');
   assert.equal(wizardState.validateWizardStep(2, {
