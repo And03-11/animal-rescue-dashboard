@@ -23,6 +23,7 @@ from backend.app.services.email_sender_service import get_email_sender_service
 from backend.app.services.campaign_storage import (
     CampaignFileStorage,
     CampaignMutationLockedError,
+    InvalidCampaignIdError,
 )
 
 
@@ -826,21 +827,28 @@ def get_campaign_details(
     ]
     return {"details": campaign_details, "contacts": contact_list_with_status}
 
-@router.put("/sender/campaigns/{campaign_id}", response_model=Dict[str, Any])
+@router.put("/sender/campaigns/{campaign_id:path}", response_model=Dict[str, Any])
 def update_campaign(
     campaign_id: str,
     req: CampaignUpdateRequest,
     current_user: str = Depends(get_current_user),
 ):
     """Actualiza la configuración de una campaña existente."""
-    campaign_file_path = os.path.join(CAMPAIGN_DATA_DIR, f"{campaign_id}.json")
-    if not os.path.exists(campaign_file_path):
-        raise HTTPException(status_code=404, detail="Campaign not found")
-
     storage = _get_campaign_storage()
+    owner_id = None
     try:
-        with open(campaign_file_path, "r") as campaign_file:
-            config = json.load(campaign_file)
+        storage.validate_campaign_id(campaign_id)
+        if not storage.campaign_exists(campaign_id):
+            raise HTTPException(status_code=404, detail="Campaign not found")
+
+        owner_id = storage.acquire_launch_lock(campaign_id)
+        if owner_id is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Campaign is currently active or being updated.",
+            )
+
+        config = storage.load_campaign(campaign_id)
 
         request_fields = req.model_fields_set
         update_data = req.model_dump(exclude_unset=True, exclude={"audiences"})
@@ -921,7 +929,10 @@ def update_campaign(
         if resolution is not None:
             try:
                 storage.commit_audience_update(
-                    campaign_id, config, resolution.contacts
+                    campaign_id,
+                    config,
+                    resolution.contacts,
+                    owner_id=owner_id,
                 )
             except CampaignMutationLockedError as error:
                 raise HTTPException(
@@ -929,8 +940,7 @@ def update_campaign(
                     detail="Campaign is currently active or being updated.",
                 ) from error
         else:
-            with open(campaign_file_path, "w") as campaign_file:
-                json.dump(config, campaign_file, indent=4, default=str)
+            storage.save_campaign(campaign_id, config, serialize_unknown=True)
 
         try:
             service = get_email_sender_service()
@@ -955,6 +965,10 @@ def update_campaign(
             print(f"Supabase update error: {error}")
 
         return config
+    except InvalidCampaignIdError as error:
+        raise HTTPException(
+            status_code=422, detail="Invalid campaign ID."
+        ) from error
     except HTTPException:
         raise
     except Exception:
@@ -963,6 +977,9 @@ def update_campaign(
             status_code=500,
             detail="Unable to update campaign. Try again.",
         )
+    finally:
+        if owner_id is not None:
+            storage.release_launch_lock(campaign_id, owner_id)
 
 @router.post("/sender/campaigns/{campaign_id}/launch")
 def launch_campaign(

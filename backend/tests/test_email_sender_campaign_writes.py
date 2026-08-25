@@ -1,5 +1,6 @@
 import json
 import logging
+import threading
 from pathlib import Path
 
 import pytest
@@ -678,3 +679,331 @@ def test_update_campaign_logs_unexpected_failure_and_returns_stable_500(
         campaign_id in record.getMessage() and record.exc_info
         for record in caplog.records
     )
+
+
+def test_plain_update_holds_shared_lock_before_read_when_interleaved(
+    write_environment, monkeypatch
+):
+    campaign_data, sent_logs, targets, remote_service = write_environment
+    campaign_id = "Campaign_interleaved_update"
+    config_path = campaign_data / f"{campaign_id}.json"
+    target_path = targets / f"target_{campaign_id}.csv"
+    original = {
+        "id": campaign_id,
+        "source_type": "airtable",
+        "campaign_name": "Original",
+        "subject": "Old subject",
+        "html_body": "x",
+        "sender_config": "all",
+        "status": "Draft",
+        "audiences": [{"region": "EUR", "is_bounced": False}],
+        "region": "EUR",
+        "is_bounced": False,
+        "segment": "standard",
+        "target_count": 1,
+    }
+    config_path.write_text(json.dumps(original), encoding="utf-8")
+    target_path.write_text("Email\nold@example.org\n", encoding="utf-8")
+
+    plain_loaded = threading.Event()
+    release_plain = threading.Event()
+
+    class BlockingStorage(campaign_storage.CampaignFileStorage):
+        def load_campaign(self, requested_campaign_id):
+            config = super().load_campaign(requested_campaign_id)
+            if threading.current_thread().name == "plain-update":
+                plain_loaded.set()
+                if not release_plain.wait(timeout=5):
+                    raise AssertionError("plain update was not released")
+            return config
+
+    storage = BlockingStorage(campaign_data, sent_logs, targets)
+    monkeypatch.setattr(email_sender, "_get_campaign_storage", lambda: storage)
+
+    class UpdatedAirtableService(FakeAirtableService):
+        resolution = AudienceResolution(
+            contacts=({"Email": "new@example.org", "Name": "New"},),
+            branches=(AudienceCount(region="USA", is_bounced=True, count=1),),
+        )
+
+    monkeypatch.setattr(email_sender, "AirtableService", UpdatedAirtableService)
+    plain_result = {}
+
+    def run_plain_update():
+        try:
+            plain_result["config"] = email_sender.update_campaign(
+                campaign_id,
+                email_sender.CampaignUpdateRequest(subject="New subject"),
+                "admin@example.com",
+            )
+        except Exception as error:  # pragma: no cover - asserted below
+            plain_result["error"] = error
+
+    plain_thread = threading.Thread(target=run_plain_update, name="plain-update")
+    plain_thread.start()
+    assert plain_loaded.wait(timeout=5)
+
+    try:
+        with pytest.raises(email_sender.HTTPException) as locked:
+            email_sender.update_campaign(
+                campaign_id,
+                email_sender.CampaignUpdateRequest(
+                    audiences=[{"region": "USA", "is_bounced": True}]
+                ),
+                "admin@example.com",
+            )
+        assert locked.value.status_code == 409
+    finally:
+        release_plain.set()
+        plain_thread.join(timeout=5)
+
+    assert not plain_thread.is_alive()
+    assert "error" not in plain_result
+    assert plain_result["config"]["subject"] == "New subject"
+    stored = json.loads(config_path.read_text(encoding="utf-8"))
+    assert stored["subject"] == "New subject"
+    assert stored["audiences"] == original["audiences"]
+    assert target_path.read_text(encoding="utf-8").splitlines() == [
+        "Email",
+        "old@example.org",
+    ]
+    assert len(remote_service.updated) == 1
+
+
+def test_update_campaign_releases_lock_when_target_backup_read_fails(
+    write_environment, monkeypatch
+):
+    campaign_data, _sent_logs, targets, remote_service = write_environment
+    campaign_id = "Campaign_backup_read_failure"
+    config_path = campaign_data / f"{campaign_id}.json"
+    target_path = targets / f"target_{campaign_id}.csv"
+    original = {
+        "id": campaign_id,
+        "source_type": "airtable",
+        "status": "Draft",
+        "audiences": [{"region": "EUR", "is_bounced": False}],
+        "region": "EUR",
+        "is_bounced": False,
+        "segment": "standard",
+        "target_count": 1,
+    }
+    config_path.write_text(json.dumps(original), encoding="utf-8")
+    target_path.write_text("Email\nold@example.org\n", encoding="utf-8")
+    real_read_bytes = Path.read_bytes
+
+    def fail_target_backup(path):
+        if path == target_path:
+            raise OSError("simulated target backup read failure")
+        return real_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", fail_target_backup)
+    response = client.put(
+        f"/api/v1/sender/campaigns/{campaign_id}",
+        json={"audiences": [{"region": "USA", "is_bounced": True}]},
+    )
+
+    assert response.status_code == 500
+    assert not email_sender._get_campaign_storage().is_launch_locked(campaign_id)
+    assert json.loads(config_path.read_text(encoding="utf-8")) == original
+    assert target_path.read_text(encoding="utf-8").splitlines() == [
+        "Email",
+        "old@example.org",
+    ]
+    assert remote_service.updated == []
+
+
+def test_update_campaign_releases_lock_when_target_directory_creation_fails(
+    write_environment, monkeypatch
+):
+    campaign_data, _sent_logs, targets, remote_service = write_environment
+    campaign_id = "Campaign_directory_failure"
+    config_path = campaign_data / f"{campaign_id}.json"
+    original = {
+        "id": campaign_id,
+        "source_type": "airtable",
+        "status": "Draft",
+        "audiences": [{"region": "EUR", "is_bounced": False}],
+        "region": "EUR",
+        "is_bounced": False,
+        "segment": "standard",
+        "target_count": 1,
+    }
+    config_path.write_text(json.dumps(original), encoding="utf-8")
+    real_mkdir = Path.mkdir
+
+    def fail_target_directory(path, *args, **kwargs):
+        if path == targets:
+            raise OSError("simulated target directory creation failure")
+        return real_mkdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", fail_target_directory)
+    response = client.put(
+        f"/api/v1/sender/campaigns/{campaign_id}",
+        json={"audiences": [{"region": "USA", "is_bounced": True}]},
+    )
+
+    assert response.status_code == 500
+    assert not email_sender._get_campaign_storage().is_launch_locked(campaign_id)
+    assert json.loads(config_path.read_text(encoding="utf-8")) == original
+    assert remote_service.updated == []
+
+
+def test_update_campaign_logs_cleanup_failure_and_releases_lock(
+    write_environment, monkeypatch, caplog
+):
+    campaign_data, _sent_logs, targets, remote_service = write_environment
+    campaign_id = "Campaign_cleanup_failure"
+    config_path = campaign_data / f"{campaign_id}.json"
+    target_path = targets / f"target_{campaign_id}.csv"
+    config_path.write_text(
+        json.dumps(
+            {
+                "id": campaign_id,
+                "source_type": "airtable",
+                "status": "Draft",
+                "audiences": [{"region": "EUR", "is_bounced": False}],
+                "region": "EUR",
+                "is_bounced": False,
+                "segment": "standard",
+                "target_count": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+    target_path.write_text("Email\nold@example.org\n", encoding="utf-8")
+    real_unlink = Path.unlink
+
+    def fail_temporary_cleanup(path, *args, **kwargs):
+        if path.name.endswith(".tmp"):
+            raise OSError("simulated temporary cleanup failure")
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_temporary_cleanup)
+    with caplog.at_level(
+        logging.WARNING,
+        logger="backend.app.services.campaign_storage",
+    ):
+        response = client.put(
+            f"/api/v1/sender/campaigns/{campaign_id}",
+            json={"audiences": [{"region": "USA", "is_bounced": True}]},
+        )
+
+    assert response.status_code == 200
+    assert not email_sender._get_campaign_storage().is_launch_locked(campaign_id)
+    assert response.json()["audiences"] == [
+        {"region": "USA", "is_bounced": True}
+    ]
+    assert target_path.read_text(encoding="utf-8").splitlines() == [
+        "Email",
+        "one@example.org",
+        "two@example.org",
+    ]
+    assert len(remote_service.updated) == 1
+    assert any(
+        campaign_id in record.getMessage()
+        and "temporary" in record.getMessage().lower()
+        for record in caplog.records
+    )
+
+
+@pytest.mark.parametrize(
+    "campaign_id",
+    [
+        "../escaped",
+        "..\\escaped",
+        "Campaign_bad/child",
+        "Campaign_bad\\child",
+        "Campaign bad",
+        "not-a-campaign",
+    ],
+)
+def test_campaign_storage_rejects_invalid_ids_before_path_access(
+    tmp_path, campaign_id
+):
+    storage = campaign_storage.CampaignFileStorage(
+        tmp_path / "campaign_data",
+        tmp_path / "sent_logs",
+        tmp_path / "campaign_targets",
+    )
+
+    for path_method in (
+        storage.campaign_path,
+        storage.target_path,
+        storage.sent_log_path,
+        storage.launch_lock_path,
+    ):
+        with pytest.raises(ValueError, match="Invalid campaign ID"):
+            path_method(campaign_id)
+
+
+def test_campaign_storage_preserves_canonical_campaign_id_paths(tmp_path):
+    campaign_data = tmp_path / "campaign_data"
+    sent_logs = tmp_path / "sent_logs"
+    targets = tmp_path / "campaign_targets"
+    storage = campaign_storage.CampaignFileStorage(
+        campaign_data, sent_logs, targets
+    )
+    campaign_id = "Campaign_2026-08-25_12-34-56_deadbeef"
+
+    assert storage.campaign_path(campaign_id) == (
+        campaign_data.resolve() / f"{campaign_id}.json"
+    )
+    assert storage.target_path(campaign_id) == (
+        targets.resolve() / f"target_{campaign_id}.csv"
+    )
+    assert storage.sent_log_path(campaign_id) == (
+        sent_logs.resolve() / f"sent_{campaign_id}.csv"
+    )
+    assert storage.launch_lock_path(campaign_id) == (
+        campaign_data.resolve() / f"{campaign_id}.launch.lock"
+    )
+
+
+@pytest.mark.parametrize(
+    "encoded_campaign_id",
+    ["%2E%2E%5Cescaped", "%2E%2E%2Fescaped"],
+)
+def test_update_campaign_rejects_encoded_path_traversal(
+    write_environment, encoded_campaign_id
+):
+    campaign_data, _sent_logs, _targets, remote_service = write_environment
+    escaped_path = campaign_data.parent / "escaped.json"
+    original = {
+        "id": "escaped",
+        "source_type": "csv",
+        "status": "Draft",
+        "subject": "Outside",
+    }
+    escaped_path.write_text(json.dumps(original), encoding="utf-8")
+
+    response = client.put(
+        f"/api/v1/sender/campaigns/{encoded_campaign_id}",
+        json={"subject": "Compromised"},
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Invalid campaign ID."}
+    assert json.loads(escaped_path.read_text(encoding="utf-8")) == original
+    assert remote_service.updated == []
+
+
+def test_update_campaign_rejects_direct_invalid_id(write_environment):
+    campaign_data, _sent_logs, _targets, remote_service = write_environment
+    invalid_path = campaign_data / "Campaign bad.json"
+    original = {
+        "id": "Campaign bad",
+        "source_type": "csv",
+        "status": "Draft",
+        "subject": "Original",
+    }
+    invalid_path.write_text(json.dumps(original), encoding="utf-8")
+
+    response = client.put(
+        "/api/v1/sender/campaigns/Campaign%20bad",
+        json={"subject": "Compromised"},
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Invalid campaign ID."}
+    assert json.loads(invalid_path.read_text(encoding="utf-8")) == original
+    assert remote_service.updated == []
