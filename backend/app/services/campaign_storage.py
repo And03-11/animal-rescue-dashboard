@@ -33,6 +33,14 @@ CAMPAIGN_SUMMARY_FIELDS = frozenset(
     }
 )
 
+def summarize_campaign(campaign_data: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in campaign_data.items()
+        if key in CAMPAIGN_SUMMARY_FIELDS
+    }
+
+
 
 class InvalidCampaignIdError(ValueError):
     """Raised before a non-canonical campaign ID reaches filesystem paths."""

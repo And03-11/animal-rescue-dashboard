@@ -24,6 +24,7 @@ from backend.app.services.campaign_storage import (
     CampaignFileStorage,
     CampaignMutationLockedError,
     InvalidCampaignIdError,
+    summarize_campaign,
 )
 
 
@@ -775,12 +776,13 @@ def list_campaigns(current_user: str = Depends(get_current_user)):
                 except pd.errors.EmptyDataError:
                     sent_count = 0
             percentage = (sent_count / total_contacts * 100) if total_contacts > 0 else 0
-            campaign_data['progress'] = {
+            campaign_summary = summarize_campaign(campaign_data)
+            campaign_summary["progress"] = {
                 "sent": sent_count,
                 "total": total_contacts,
                 "percentage": round(percentage, 2)
             }
-            campaigns.append(campaign_data)
+            campaigns.append(campaign_summary)
         except Exception as e:
             print(f"ERROR al procesar {filename}: {e}")
             continue
