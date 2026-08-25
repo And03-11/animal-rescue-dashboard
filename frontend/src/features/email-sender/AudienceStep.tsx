@@ -28,6 +28,7 @@ import {
 } from './audienceSelection';
 import type { AudienceShortcut } from './audienceSelection';
 import type { CampaignWizardDraft } from './campaignWizardState';
+import { WIZARD_FOCUS_TARGET_IDS } from './campaignWizardFocus';
 import type {
   CampaignSource,
   CsvColumnMapping,
@@ -274,7 +275,14 @@ export function AudienceStep({
         </Typography>
       </Box>
 
-      {error && <Alert severity="error">{error}</Alert>}
+      {error && (
+        <Alert
+          id={WIZARD_FOCUS_TARGET_IDS.errorAlert}
+          role="alert"
+          tabIndex={-1}
+          severity="error"
+        >{error}</Alert>
+      )}
 
       <FormControl component="fieldset" fullWidth>
         <Typography component="legend" variant="subtitle2" sx={{ mb: 1 }}>
@@ -317,7 +325,12 @@ export function AudienceStep({
             </ToggleButtonGroup>
           </FormControl>
 
-          <Box component="fieldset" sx={{ m: 0, p: 0, border: 0, minWidth: 0 }}>
+          <Box
+            component="fieldset"
+            id={WIZARD_FOCUS_TARGET_IDS.audienceMatrix}
+            tabIndex={-1}
+            sx={{ m: 0, p: 0, border: 0, minWidth: 0 }}
+          >
             <Typography component="legend" variant="subtitle2" sx={{ mb: 1 }}>
               Airtable audiences
             </Typography>
@@ -451,7 +464,11 @@ export function AudienceStep({
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, mb: 2 }}>
               {draft.csvFile?.name ?? (draft.campaignId ? 'Keep the existing upload or choose a replacement.' : 'Choose a file to preview and map its columns.')}
             </Typography>
-            <Button component="label" variant="outlined">
+            <Button
+              component="label"
+              id={WIZARD_FOCUS_TARGET_IDS.csvFile}
+              variant="outlined"
+            >
               {draft.csvFile ? 'Change file' : 'Browse files'}
               <Input
                 type="file"
@@ -507,6 +524,7 @@ export function AudienceStep({
                 <FormControl fullWidth required>
                   <InputLabel id="csv-email-column-label">Email column</InputLabel>
                   <Select
+                    id={WIZARD_FOCUS_TARGET_IDS.csvEmailColumn}
                     labelId="csv-email-column-label"
                     label="Email column"
                     value={csvMapping.email}
@@ -526,6 +544,7 @@ export function AudienceStep({
                 <FormControl fullWidth required>
                   <InputLabel id="csv-name-column-label">Name column</InputLabel>
                   <Select
+                    id={WIZARD_FOCUS_TARGET_IDS.csvNameColumn}
                     labelId="csv-name-column-label"
                     label="Name column"
                     value={csvMapping.name}

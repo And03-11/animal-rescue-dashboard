@@ -24,6 +24,7 @@ import type {
   CampaignSenderMode,
   CampaignWizardDraft,
 } from './campaignWizardState';
+import { WIZARD_FOCUS_TARGET_IDS } from './campaignWizardFocus';
 import type { SenderOptions } from './types';
 
 export interface CampaignSetupStepProps {
@@ -82,6 +83,8 @@ export function CampaignSetupStep({
         ) : (
           <>
             <ToggleButtonGroup
+              id={WIZARD_FOCUS_TARGET_IDS.senderMode}
+              tabIndex={-1}
               value={draft.senderMode}
               exclusive
               fullWidth
@@ -116,6 +119,7 @@ export function CampaignSetupStep({
               <FormControl fullWidth required sx={{ mt: 2, maxWidth: 520 }}>
                 <InputLabel id="sender-group-label">Sender group</InputLabel>
                 <Select
+                  id={WIZARD_FOCUS_TARGET_IDS.senderGroup}
                   labelId="sender-group-label"
                   label="Sender group"
                   value={draft.selectedGroup}
@@ -153,6 +157,7 @@ export function CampaignSetupStep({
                 renderInput={(params) => (
                   <TextField
                     {...params}
+                    id={WIZARD_FOCUS_TARGET_IDS.senderAccounts}
                     required
                     label="Specific sender accounts"
                     placeholder="Search accounts"
@@ -171,6 +176,7 @@ export function CampaignSetupStep({
         </Typography>
         <Stack spacing={2}>
           <TextField
+            id={WIZARD_FOCUS_TARGET_IDS.campaignName}
             fullWidth
             required
             label="Campaign name"
@@ -179,6 +185,7 @@ export function CampaignSetupStep({
             inputProps={{ maxLength: 160 }}
           />
           <TextField
+            id={WIZARD_FOCUS_TARGET_IDS.subject}
             fullWidth
             required
             label="Email subject"
@@ -189,7 +196,12 @@ export function CampaignSetupStep({
         </Stack>
       </Box>
 
-      <Box component="fieldset" sx={{ m: 0, p: 0, border: 0, minWidth: 0 }}>
+      <Box
+        component="fieldset"
+        id={WIZARD_FOCUS_TARGET_IDS.schedule}
+        tabIndex={-1}
+        sx={{ m: 0, p: 0, border: 0, minWidth: 0 }}
+      >
         <Typography component="legend" variant="subtitle2" sx={{ mb: 1 }}>
           Delivery
         </Typography>

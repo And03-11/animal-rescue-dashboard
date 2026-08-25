@@ -35,6 +35,16 @@ import type {
   CampaignWizardStep,
 } from './campaignWizardState';
 import {
+  focusTargetForStep,
+  focusTargetForValidationError,
+  scheduleWizardFocus,
+  WIZARD_FOCUS_TARGET_IDS,
+} from './campaignWizardFocus';
+import type {
+  WizardFocusScheduler,
+  WizardFocusTarget,
+} from './campaignWizardFocus';
+import {
   AudienceStep,
   createSuggestedCsvMapping,
   isCsvColumnMapping,
@@ -152,6 +162,8 @@ export function CampaignWizard({
   const sessionLifecycleRef = useRef(new WizardSessionLifecycle());
   const activeSessionRef = useRef<WizardSessionHandle | null>(null);
   const activeSessionCampaignIdRef = useRef<string | null | undefined>(undefined);
+  const dialogPaperRef = useRef<HTMLDivElement | null>(null);
+  const cancelPendingFocusRef = useRef<() => void>(() => {});
   const draftRef = useRef(draft);
   draftRef.current = draft;
 
@@ -164,15 +176,68 @@ export function CampaignWizard({
     return session && sessionLifecycleRef.current.isCurrent(session) ? session : null;
   }, []);
 
+  const cancelPendingFocus = useCallback(() => {
+    cancelPendingFocusRef.current();
+    cancelPendingFocusRef.current = () => {};
+  }, []);
+
+  const requestFocus = useCallback((
+    target: WizardFocusTarget,
+    expectedSession?: WizardSessionHandle | null,
+  ) => {
+    cancelPendingFocus();
+    const session = expectedSession ?? getActiveSession();
+    if (!session || typeof window === 'undefined') return;
+
+    const scheduler: WizardFocusScheduler = {
+      request: (callback) => window.requestAnimationFrame(callback),
+      cancel: (handle) => window.cancelAnimationFrame(handle as number),
+    };
+    cancelPendingFocusRef.current = scheduleWizardFocus({
+      scheduler,
+      getRoot: () => dialogPaperRef.current,
+      target,
+      isCurrent: () => sessionLifecycleRef.current.isCurrent(session),
+    });
+  }, [cancelPendingFocus, getActiveSession]);
+
+  const showValidationError = useCallback((
+    message: string,
+    session?: WizardSessionHandle | null,
+  ) => {
+    setError(message);
+    requestFocus(focusTargetForValidationError(message), session);
+  }, [requestFocus]);
+
+  const showAsyncError = useCallback((
+    message: string,
+    session?: WizardSessionHandle | null,
+  ) => {
+    setError(message);
+    requestFocus('errorAlert', session);
+  }, [requestFocus]);
+
+  const transitionToStep = useCallback((
+    step: CampaignWizardStep,
+    session?: WizardSessionHandle | null,
+  ) => {
+    setActiveStep(step);
+    requestFocus(focusTargetForStep(step), session);
+  }, [requestFocus]);
+
+  useEffect(() => cancelPendingFocus, [cancelPendingFocus]);
+
   useEffect(() => {
     const lifecycle = sessionLifecycleRef.current;
     if (!open) {
+      cancelPendingFocus();
       lifecycle.abort();
       activeSessionRef.current = null;
       activeSessionCampaignIdRef.current = undefined;
       return;
     }
 
+    cancelPendingFocus();
     const session = lifecycle.begin();
     activeSessionRef.current = session;
     const isCurrent = () => lifecycle.isCurrent(session);
@@ -220,6 +285,7 @@ export function CampaignWizard({
     if (!campaignId) {
       setLoadingCampaign(false);
       return () => {
+        cancelPendingFocus();
         if (lifecycle.isCurrent(session)) lifecycle.abort();
       };
     }
@@ -242,7 +308,10 @@ export function CampaignWizard({
           if (isCurrent()) csvPreview = previewResponse.data;
         } catch (requestError: unknown) {
           if (isCurrent() && !isAbortError(requestError)) {
-            setError(getApiErrorMessage(requestError, 'Failed to load the existing CSV preview.'));
+            showAsyncError(
+              getApiErrorMessage(requestError, 'Failed to load the existing CSV preview.'),
+              session,
+            );
           }
         } finally {
           if (isCurrent()) setCsvPreviewLoading(false);
@@ -262,35 +331,40 @@ export function CampaignWizard({
       setHydrationError(null);
     }).catch((requestError: unknown) => {
       if (!isCurrent() || isAbortError(requestError)) return;
-      setHydrationError(getApiErrorMessage(requestError, 'Campaign details could not be loaded.'));
+      const message = getApiErrorMessage(requestError, 'Campaign details could not be loaded.');
+      setHydrationError(message);
       setHydrationStatus('failed');
       setError(null);
+      requestFocus('hydrationAlert', session);
     }).finally(() => {
       if (isCurrent()) setLoadingCampaign(false);
     });
 
     return () => {
+      cancelPendingFocus();
       if (lifecycle.isCurrent(session)) lifecycle.abort();
     };
-  }, [initialCampaignId, loadAttempt, open]);
+  }, [cancelPendingFocus, initialCampaignId, loadAttempt, open, requestFocus, showAsyncError]);
 
   const handleClose = useCallback(() => {
+    cancelPendingFocus();
     sessionLifecycleRef.current.abort();
     activeSessionRef.current = null;
     activeSessionCampaignIdRef.current = undefined;
     setHydrationStatus('idle');
     onClose();
-  }, [onClose]);
+  }, [cancelPendingFocus, onClose]);
 
   const handleRetryHydration = useCallback(() => {
     sessionLifecycleRef.current.abort();
+    cancelPendingFocus();
     activeSessionRef.current = null;
     activeSessionCampaignIdRef.current = undefined;
     setHydrationError(null);
     setHydrationStatus('loading');
     setLoadingCampaign(true);
     setLoadAttempt((attempt) => attempt + 1);
-  }, []);
+  }, [cancelPendingFocus]);
   useEffect(() => {
     if (loadingSenders || senderOptions.accounts.length === 0) return;
     setDraft((current) => {
@@ -335,7 +409,7 @@ export function CampaignWizard({
       audiencePreviewKey: requestedKey,
     });
     if (selectionError) {
-      setError(selectionError);
+      showValidationError(selectionError, session);
       return;
     }
     setPreviewLoading(true);
@@ -349,7 +423,10 @@ export function CampaignWizard({
       if (!isSessionCurrent(session)) return;
       const current = draftRef.current;
       if (computeAudiencePreviewKey(current.audiences, current.segment) !== requestedKey) {
-        setError('The audience changed while the preview was loading. Continue again to refresh it.');
+        showAsyncError(
+          'The audience changed while the preview was loading. Continue again to refresh it.',
+          session,
+        );
         return;
       }
       setDraft((currentDraft) => ({
@@ -358,10 +435,13 @@ export function CampaignWizard({
         audiencePreviewStale: false,
         audiencePreviewKey: requestedKey,
       }));
-      setActiveStep(1);
+      transitionToStep(1, session);
     } catch (requestError: unknown) {
       if (isSessionCurrent(session) && !isAbortError(requestError)) {
-        setError(getApiErrorMessage(requestError, 'Failed to preview the Airtable audience.'));
+        showAsyncError(
+          getApiErrorMessage(requestError, 'Failed to preview the Airtable audience.'),
+          session,
+        );
       }
     } finally {
       if (isSessionCurrent(session)) setPreviewLoading(false);
@@ -377,26 +457,26 @@ export function CampaignWizard({
       }
       const validationError = validateWizardStep(0, draft) ?? csvMappingError(draft, csvPreviewLoading);
       if (validationError) {
-        setError(validationError);
+        showValidationError(validationError);
         return;
       }
-      setActiveStep(1);
+      transitionToStep(1);
       return;
     }
 
     const validationError = validateWizardStep(activeStep, draft);
     if (validationError) {
-      setError(validationError);
+      showValidationError(validationError);
       return;
     }
-    setActiveStep((activeStep + 1) as CampaignWizardStep);
+    transitionToStep((activeStep + 1) as CampaignWizardStep);
   };
 
   const handleSave = async () => {
     if (hydrationStatus !== 'ready') return;
     const validationError = validateWizardStep(2, draft);
     if (validationError) {
-      setError(validationError);
+      showValidationError(validationError);
       return;
     }
 
@@ -411,7 +491,10 @@ export function CampaignWizard({
       await onSave(buildCampaignPayload(draft), mapping, session.signal);
     } catch (saveError: unknown) {
       if (isSessionCurrent(session) && !isAbortError(saveError)) {
-        setError(getApiErrorMessage(saveError, 'Failed to save campaign.'));
+        showAsyncError(
+          getApiErrorMessage(saveError, 'Failed to save campaign.'),
+          session,
+        );
       }
     } finally {
       if (isSessionCurrent(session)) setSaving(false);
@@ -443,7 +526,10 @@ export function CampaignWizard({
       });
     }).catch((requestError: unknown) => {
       if (isSessionCurrent(session) && !isAbortError(requestError)) {
-        setError(getApiErrorMessage(requestError, 'Failed to load template content.'));
+        showAsyncError(
+          getApiErrorMessage(requestError, 'Failed to load template content.'),
+          session,
+        );
       }
     });
   };
@@ -522,6 +608,7 @@ export function CampaignWizard({
         aria-labelledby="campaign-wizard-title"
         slotProps={{
           paper: {
+            ref: dialogPaperRef,
             sx: {
               maxHeight: fullScreen ? '100%' : 'min(880px, calc(100% - 32px))',
               minWidth: 0,
@@ -569,6 +656,9 @@ export function CampaignWizard({
           ) : hydrationStatus === 'failed' ? (
             <Box sx={{ minHeight: 240, display: 'grid', placeItems: 'center' }}>
               <Alert
+                id={WIZARD_FOCUS_TARGET_IDS.hydrationAlert}
+                role="alert"
+                tabIndex={-1}
                 severity="error"
                 action={(
                   <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
@@ -586,38 +676,84 @@ export function CampaignWizard({
             </Box>
           ) : (
             <>
-              {activeStep > 0 && error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
+              {activeStep > 0 && error && (
+                <Alert
+                  id={WIZARD_FOCUS_TARGET_IDS.errorAlert}
+                  role="alert"
+                  tabIndex={-1}
+                  severity="error"
+                  sx={{ mb: 3 }}
+                >
+                  {error}
+                </Alert>
+              )}
               {activeStep === 0 && (
-                <AudienceStep
-                  draft={draft}
-                  previewLoading={previewLoading}
-                  csvPreviewLoading={csvPreviewLoading}
-                  error={error}
-                  onDraftChange={patchAudienceDraft}
-                  onErrorChange={setError}
-                  onCsvPreviewLoadingChange={setCsvPreviewLoading}
-                />
+                <Box
+                  component="section"
+                  id={WIZARD_FOCUS_TARGET_IDS.stepAudience}
+                  tabIndex={-1}
+                  aria-label={STEPS[activeStep]}
+                  sx={{
+                    minWidth: 0,
+                    outline: 'none',
+                    '&:focus-visible': { outline: '2px solid', outlineColor: 'primary.main', outlineOffset: 4 },
+                  }}
+                >
+                  <AudienceStep
+                    draft={draft}
+                    previewLoading={previewLoading}
+                    csvPreviewLoading={csvPreviewLoading}
+                    error={error}
+                    onDraftChange={patchAudienceDraft}
+                    onErrorChange={setError}
+                    onCsvPreviewLoadingChange={setCsvPreviewLoading}
+                  />
+                </Box>
               )}
               {activeStep === 1 && (
-                <CampaignSetupStep
-                  draft={draft}
-                  senderOptions={senderOptions}
-                  loadingSenders={loadingSenders}
-                  onDraftChange={patchDraft}
-                />
+                <Box
+                  component="section"
+                  id={WIZARD_FOCUS_TARGET_IDS.stepSetup}
+                  tabIndex={-1}
+                  aria-label={STEPS[activeStep]}
+                  sx={{
+                    minWidth: 0,
+                    outline: 'none',
+                    '&:focus-visible': { outline: '2px solid', outlineColor: 'primary.main', outlineOffset: 4 },
+                  }}
+                >
+                  <CampaignSetupStep
+                    draft={draft}
+                    senderOptions={senderOptions}
+                    loadingSenders={loadingSenders}
+                    onDraftChange={patchDraft}
+                  />
+                </Box>
               )}
               {activeStep === 2 && hydrationReady && (
-                <ContentReviewStep
-                  draft={draft}
-                  templates={templates}
-                  viewMode={viewMode}
-                  sendingTest={sendingTest}
-                  onDraftChange={patchDraft}
-                  onViewModeChange={setViewMode}
-                  onLoadTemplate={handleLoadTemplate}
-                  onSaveTemplate={handleSaveTemplate}
-                  onSendTest={handleSendTest}
-                />
+                <Box
+                  component="section"
+                  id={WIZARD_FOCUS_TARGET_IDS.stepContent}
+                  tabIndex={-1}
+                  aria-label={STEPS[activeStep]}
+                  sx={{
+                    minWidth: 0,
+                    outline: 'none',
+                    '&:focus-visible': { outline: '2px solid', outlineColor: 'primary.main', outlineOffset: 4 },
+                  }}
+                >
+                  <ContentReviewStep
+                    draft={draft}
+                    templates={templates}
+                    viewMode={viewMode}
+                    sendingTest={sendingTest}
+                    onDraftChange={patchDraft}
+                    onViewModeChange={setViewMode}
+                    onLoadTemplate={handleLoadTemplate}
+                    onSaveTemplate={handleSaveTemplate}
+                    onSendTest={handleSendTest}
+                  />
+                </Box>
               )}
             </>
           )}
@@ -660,7 +796,7 @@ export function CampaignWizard({
               <Button
                 onClick={() => {
                   setError(null);
-                  setActiveStep((activeStep - 1) as CampaignWizardStep);
+                  transitionToStep((activeStep - 1) as CampaignWizardStep);
                 }}
                 disabled={!hydrationReady || isBusy || sendingTest}
               >

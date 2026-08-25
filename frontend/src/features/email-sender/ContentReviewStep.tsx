@@ -26,6 +26,7 @@ import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
 import { EmailPreview } from '../../components/EmailPreview';
 import { summarizeAudienceSelection } from './audienceSelection';
 import type { CampaignWizardDraft } from './campaignWizardState';
+import { WIZARD_FOCUS_TARGET_IDS } from './campaignWizardFocus';
 import type { EmailTemplate } from './types';
 
 export interface ContentReviewStepProps {
@@ -218,6 +219,7 @@ export function ContentReviewStep({
 
       {viewMode === 'code' ? (
         <TextField
+          id={WIZARD_FOCUS_TARGET_IDS.emailBody}
           fullWidth
           required
           multiline
