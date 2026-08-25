@@ -9,12 +9,13 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, File
 from pydantic import BaseModel, Field
 import pandas as pd
 from datetime import datetime
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, Literal
 import threading
 import queue
 
 
-from backend.app.services.airtable_service import AirtableService
+from backend.app.services.airtable_service import AirtableCampaignQueryError, AirtableService
+from backend.app.services.campaign_audiences import normalize_audiences, serialize_audiences
 from backend.app.services.gmail_service import GmailService
 from backend.app.services.credentials_manager import credentials_manager_instance
 from backend.app.services.email_sender_service import get_email_sender_service
@@ -68,6 +69,51 @@ class CSVMappingPayload(BaseModel):
 
 router = APIRouter()
 
+
+class AudienceBranchRequest(BaseModel):
+    region: Literal["USA", "EUR"]
+    is_bounced: bool
+
+
+class AudiencePreviewRequest(BaseModel):
+    audiences: list[AudienceBranchRequest] = Field(min_length=1, max_length=4)
+    segment: Literal["standard", "dnr"] = "standard"
+
+
+@router.post("/sender/audience-preview", response_model=Dict[str, Any])
+def preview_audience(
+    req: AudiencePreviewRequest,
+    current_user: str = Depends(get_current_user),
+):
+    try:
+        audiences = normalize_audiences(
+            [audience.model_dump() for audience in req.audiences]
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    try:
+        resolution = AirtableService().resolve_campaign_audiences(
+            audiences, req.segment
+        )
+    except AirtableCampaignQueryError as error:
+        raise HTTPException(
+            status_code=502,
+            detail="Unable to load Airtable audience. Try again.",
+        ) from error
+
+    return {
+        "branches": [
+            {
+                "region": branch.region,
+                "is_bounced": branch.is_bounced,
+                "count": branch.count,
+            }
+            for branch in resolution.branches
+        ],
+        "total_unique": resolution.total_unique,
+    }
+
 CAMPAIGN_DATA_DIR = "campaign_data"
 SENT_LOGS_DIR = "sent_logs"
 TARGETS_DIR = "campaign_targets"
@@ -78,31 +124,43 @@ os.makedirs(SENT_LOGS_DIR, exist_ok=True)
 os.makedirs(TARGETS_DIR, exist_ok=True)
 
 class CampaignRequest(BaseModel):
-    source_type: str # 'airtable' o 'csv'
+    source_type: Literal["airtable", "csv"]
     subject: str
     html_body: str
-    campaign_name: str = Field(..., min_length=1)
-    # Campos específicos para Airtable (opcionales)
-    region: Optional[str] = None
-    is_bounced: Optional[bool] = None
-    # Configuración de remitente
-    sender_config: Union[str, List[str]] = Field(default="all", description="Grupo o lista de IDs de cuenta.")
-    # ✅ Campo para programar envío
-    scheduled_at: Optional[datetime] = Field(default=None, description="Fecha/hora para envío programado. Si es None, la campaña queda en Draft.")
-    # ✅ Nuevo campo para Segmento (Standard vs DNR)
-    segment: Optional[str] = Field(default="standard", description="Segmento de la campaña: 'standard' o 'dnr'.")
+    campaign_name: str = Field(min_length=1)
+    audiences: list[AudienceBranchRequest] | None = None
+    region: str | None = None
+    is_bounced: bool | None = None
+    sender_config: str | list[str] = "all"
+    scheduled_at: datetime | None = None
+    segment: Literal["standard", "dnr"] = "standard"
+
 
 class CampaignUpdateRequest(BaseModel):
-    campaign_name: Optional[str] = None
-    subject: Optional[str] = None
-    html_body: Optional[str] = None
-    sender_config: Optional[Union[str, List[str]]] = None
-    scheduled_at: Optional[datetime] = None
-    region: Optional[str] = None
-    is_bounced: Optional[bool] = None
-    segment: Optional[str] = None
+    campaign_name: str | None = None
+    subject: str | None = None
+    html_body: str | None = None
+    sender_config: str | list[str] | None = None
+    scheduled_at: datetime | None = None
+    audiences: list[AudienceBranchRequest] | None = None
+    region: str | None = None
+    is_bounced: bool | None = None
+    segment: Literal["standard", "dnr"] | None = None
 
 
+def _request_audiences(
+    req: CampaignRequest | CampaignUpdateRequest,
+):
+    raw_audiences = (
+        [audience.model_dump() for audience in req.audiences]
+        if req.audiences is not None
+        else None
+    )
+    return normalize_audiences(
+        raw_audiences,
+        legacy_region=req.region,
+        legacy_is_bounced=req.is_bounced,
+    )
 
 # --- REEMPLAZA esta función completa ---
 def run_campaign_task(campaign_id: str):
@@ -593,76 +651,87 @@ def run_campaign_task(campaign_id: str):
 # --- Reemplaza la función create_campaign existente ---
 @router.post("/sender/campaigns", status_code=201, response_model=Dict[str, Any])
 def create_campaign(
-    req: CampaignRequest, # Usa el nuevo modelo
-    current_user: str = Depends(get_current_user)
-    ):
+    req: CampaignRequest,
+    current_user: str = Depends(get_current_user),
+):
     """
     Crea una campaña: Define la fuente de contactos (Airtable o CSV)
     y guarda la configuración inicial. Si es Airtable, obtiene los contactos.
     """
-    airtable_service = AirtableService() # Instancia local
-
+    airtable_service = AirtableService()
     campaign_id = f"Campaign_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
-    target_contacts_list = [] # Inicializa lista vacía
+    target_contacts_list = []
     total_contacts = 0
+    campaign_config = req.model_dump(exclude={"audiences"})
 
-    # --- Lógica Condicional para obtener contactos ---
-    if req.source_type == 'airtable':
-        # Valida que los campos requeridos para Airtable estén presentes
-        if req.region is None or req.is_bounced is None:
-            raise HTTPException(
-                status_code=400,
-                detail="Region and is_bounced are required for Airtable source type."
+    if req.source_type == "airtable":
+        try:
+            branches = _request_audiences(req)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+        try:
+            resolution = airtable_service.resolve_campaign_audiences(
+                branches, req.segment
             )
-        print(f"Fetching contacts from Airtable for campaign {campaign_id} (Region: {req.region}, Bounced: {req.is_bounced}, Segment: {req.segment})")
-        # Llama a la función actualizada que ya incluye el filtro 'Stage'
-        target_contacts_list = airtable_service.get_campaign_contacts(
-            region=req.region,
-            is_bounced=req.is_bounced,
-            segment=req.segment or "standard" # ✅ Pasa el segmento
+        except AirtableCampaignQueryError as error:
+            raise HTTPException(
+                status_code=502,
+                detail="Unable to load Airtable audience. Try again.",
+            ) from error
+
+        if req.scheduled_at is not None and resolution.total_unique == 0:
+            raise HTTPException(
+                status_code=422,
+                detail="Scheduled campaigns require at least one eligible recipient.",
+            )
+
+        target_contacts_list = list(resolution.contacts)
+        total_contacts = resolution.total_unique
+        campaign_config.update(
+            {
+                "audiences": serialize_audiences(branches),
+                "region": branches[0].region if len(branches) == 1 else None,
+                "is_bounced": (
+                    branches[0].is_bounced if len(branches) == 1 else None
+                ),
+            }
         )
-        total_contacts = len(target_contacts_list)
-    elif req.source_type == 'csv':
-        # Por ahora, solo preparamos. La lógica de carga y mapeo vendrá después.
-        print(f"Campaign {campaign_id} created with CSV source type. Contact list will be processed later.")
-        total_contacts = 0 # Se actualizará cuando se suba y procese el CSV
     else:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid source_type. Must be 'airtable' or 'csv'."
+        print(
+            f"Campaign {campaign_id} created with CSV source type. "
+            "Contact list will be processed later."
         )
-    # --- Fin Lógica Condicional ---
 
-    # Guarda la lista de emails (si existe) en el archivo de targets
     target_list_path = os.path.join(TARGETS_DIR, f"target_{campaign_id}.csv")
-    # Asegurarnos de que target_contacts_list sea una lista de dicts con 'Email'
-    df_data = [{'Email': contact.get('Email')} for contact in target_contacts_list if contact.get('Email')]
-    pd.DataFrame(df_data).to_csv(target_list_path, index=False)
+    df_data = [
+        {"Email": contact.get("Email")}
+        for contact in target_contacts_list
+        if contact.get("Email")
+    ]
+    pd.DataFrame(df_data, columns=["Email"]).to_csv(target_list_path, index=False)
 
-    # Guarda la configuración completa de la campaña
-    # Determinar estado basado en scheduled_at
-    initial_status = 'Scheduled' if req.scheduled_at else 'Draft'
-    campaign_config = req.model_dump() # Guarda todo lo recibido
-    campaign_config.update({
-        'id': campaign_id,
-        'status': initial_status,
-        'createdAt': datetime.now().isoformat(),
-        'target_count': total_contacts
-    })
+    initial_status = "Scheduled" if req.scheduled_at else "Draft"
+    campaign_config.update(
+        {
+            "id": campaign_id,
+            "status": initial_status,
+            "createdAt": datetime.now().isoformat(),
+            "target_count": total_contacts,
+        }
+    )
     file_path = os.path.join(CAMPAIGN_DATA_DIR, f"{campaign_id}.json")
-    with open(file_path, 'w') as f:
-        json.dump(campaign_config, f, indent=4, default=str)
+    with open(file_path, "w") as campaign_file:
+        json.dump(campaign_config, campaign_file, indent=4, default=str)
 
-    # Guardar en Supabase para scheduling
     try:
         service = get_email_sender_service()
         service.create_campaign(campaign_config)
         print(f"[{campaign_id}] Saved to Supabase (status: {initial_status})")
-    except Exception as e:
-        print(f"[{campaign_id}] Supabase save warning: {e}")
+    except Exception as error:
+        print(f"[{campaign_id}] Supabase save warning: {error}")
 
     return campaign_config
-
 @router.get("/sender/campaigns", response_model=List[Dict[str, Any]])
 def list_campaigns(current_user: str = Depends(get_current_user)):
     """
@@ -743,51 +812,124 @@ def get_campaign_details(
 def update_campaign(
     campaign_id: str,
     req: CampaignUpdateRequest,
-    current_user: str = Depends(get_current_user)
+    current_user: str = Depends(get_current_user),
 ):
-    """
-    Actualiza la configuración de una campaña existente.
-    """
+    """Actualiza la configuración de una campaña existente."""
     campaign_file_path = os.path.join(CAMPAIGN_DATA_DIR, f"{campaign_id}.json")
     if not os.path.exists(campaign_file_path):
         raise HTTPException(status_code=404, detail="Campaign not found")
 
     try:
-        with open(campaign_file_path, 'r') as f:
-            config = json.load(f)
-            
-        update_data = req.model_dump(exclude_unset=True)
+        with open(campaign_file_path, "r") as campaign_file:
+            config = json.load(campaign_file)
+
+        update_data = req.model_dump(exclude_unset=True, exclude={"audiences"})
         for key, value in update_data.items():
-            if value is not None or key == 'scheduled_at':
-                if key == 'scheduled_at':
-                    config[key] = value.isoformat() if value else None
+            if value is not None or key == "scheduled_at":
+                config[key] = (
+                    value.isoformat() if key == "scheduled_at" and value else value
+                )
+
+        audience_fields = {"audiences", "region", "is_bounced", "segment"}
+        filters_changed = bool(audience_fields & req.model_fields_set)
+        if config.get("source_type") == "airtable" and filters_changed:
+            try:
+                if req.audiences is not None:
+                    branches = _request_audiences(req)
+                elif config.get("audiences") is not None:
+                    branches = normalize_audiences(config["audiences"])
                 else:
-                    config[key] = value
-                    
-        config['last_updated'] = datetime.now().isoformat()
-        
-        # update status based on scheduled_at if status was Draft or Scheduled or Ready
-        if config.get('status') in ['Draft', 'Scheduled', 'Ready']:
-            if config.get('mapping') and config.get('source_type') == 'csv':
-                 config['status'] = 'Scheduled' if config.get('scheduled_at') else 'Ready'
-            elif config.get('source_type') == 'airtable':
-                 config['status'] = 'Scheduled' if config.get('scheduled_at') else 'Ready'
-                 
-        with open(campaign_file_path, 'w') as f:
-            json.dump(config, f, indent=4, default=str)
-            
-        # Intentar actualizar supabase
+                    branches = normalize_audiences(
+                        None,
+                        legacy_region=config.get("region"),
+                        legacy_is_bounced=config.get("is_bounced"),
+                    )
+            except ValueError as error:
+                raise HTTPException(status_code=422, detail=str(error)) from error
+
+            segment = config.get("segment") or "standard"
+            try:
+                resolution = AirtableService().resolve_campaign_audiences(
+                    branches, segment
+                )
+            except AirtableCampaignQueryError as error:
+                raise HTTPException(
+                    status_code=502,
+                    detail="Unable to load Airtable audience. Try again.",
+                ) from error
+
+            if config.get("scheduled_at") is not None and resolution.total_unique == 0:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Scheduled campaigns require at least one eligible recipient.",
+                )
+
+            config.update(
+                {
+                    "audiences": serialize_audiences(branches),
+                    "target_count": resolution.total_unique,
+                    "region": branches[0].region if len(branches) == 1 else None,
+                    "is_bounced": (
+                        branches[0].is_bounced if len(branches) == 1 else None
+                    ),
+                    "segment": segment,
+                }
+            )
+            target_list_path = os.path.join(
+                TARGETS_DIR, f"target_{campaign_id}.csv"
+            )
+            df_data = [
+                {"Email": contact.get("Email")}
+                for contact in resolution.contacts
+                if contact.get("Email")
+            ]
+            pd.DataFrame(df_data, columns=["Email"]).to_csv(
+                target_list_path, index=False
+            )
+
+        config["last_updated"] = datetime.now().isoformat()
+        if config.get("status") in ["Draft", "Scheduled", "Ready"]:
+            if config.get("mapping") and config.get("source_type") == "csv":
+                config["status"] = (
+                    "Scheduled" if config.get("scheduled_at") else "Ready"
+                )
+            elif config.get("source_type") == "airtable":
+                config["status"] = (
+                    "Scheduled" if config.get("scheduled_at") else "Ready"
+                )
+
+        with open(campaign_file_path, "w") as campaign_file:
+            json.dump(config, campaign_file, indent=4, default=str)
+
         try:
             service = get_email_sender_service()
-            supabase_update = {k: v for k, v in config.items() if k in ['campaign_name', 'subject', 'html_body', 'sender_config', 'scheduled_at', 'status', 'region', 'is_bounced', 'segment']}
-            service.update_campaign(campaign_id, supabase_update)
-        except Exception as e:
-            print(f"Supabase update error: {e}")
-            
-        return config
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error updating campaign: {e}")
+            remote_fields = {
+                "campaign_name",
+                "subject",
+                "html_body",
+                "sender_config",
+                "scheduled_at",
+                "status",
+                "region",
+                "is_bounced",
+                "segment",
+                "audiences",
+                "target_count",
+            }
+            service.update_campaign(
+                campaign_id,
+                {key: value for key, value in config.items() if key in remote_fields},
+            )
+        except Exception as error:
+            print(f"Supabase update error: {error}")
 
+        return config
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(
+            status_code=500, detail=f"Error updating campaign: {error}"
+        ) from error
 
 @router.post("/sender/campaigns/{campaign_id}/launch")
 def launch_campaign(
