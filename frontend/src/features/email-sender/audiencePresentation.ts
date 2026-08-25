@@ -28,3 +28,20 @@ export function buildAudiencePresentation(campaign: EmailCampaign): AudiencePres
       .join(', '),
   };
 }
+export interface AudienceTooltipProps {
+  'aria-label': string;
+  tabIndex: 0;
+}
+
+export function buildAudienceTooltipProps(
+  presentation: AudiencePresentation,
+): AudienceTooltipProps | null {
+  if (!presentation.tooltip || presentation.tooltip === presentation.label) {
+    return null;
+  }
+
+  return {
+    'aria-label': 'Audience branches: ' + presentation.tooltip,
+    tabIndex: 0,
+  };
+}

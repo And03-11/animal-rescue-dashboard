@@ -20,6 +20,17 @@ function cloneAudience(audience: AirtableAudience): AirtableAudience {
   return { region: audience.region, is_bounced: audience.is_bounced };
 }
 
+function isValidAudience(audience: unknown): audience is AirtableAudience {
+  if (!audience || typeof audience !== 'object') {
+    return false;
+  }
+  const candidate = audience as Record<string, unknown>;
+  return (
+    (candidate.region === 'USA' || candidate.region === 'EUR')
+    && typeof candidate.is_bounced === 'boolean'
+  );
+}
+
 /** Remove duplicate branches and apply the stable USA/EUR, valid/bounced order. */
 export function normalizeAudienceSelection(
   selection: readonly AirtableAudience[],
@@ -71,7 +82,7 @@ export function toggleAudience(
 }
 
 export interface LegacyAudienceSelection {
-  audiences?: readonly AirtableAudience[];
+  audiences?: readonly unknown[] | null;
   region?: string;
   is_bounced?: boolean;
 }
@@ -81,7 +92,10 @@ export function hydrateAudienceSelection(
   campaign: LegacyAudienceSelection,
 ): AirtableAudience[] {
   if (campaign.audiences !== undefined) {
-    return normalizeAudienceSelection(campaign.audiences);
+    if (!Array.isArray(campaign.audiences)) {
+      return [];
+    }
+    return normalizeAudienceSelection(campaign.audiences.filter(isValidAudience));
   }
 
   if (

@@ -35,7 +35,7 @@ import {
 import { alpha } from '@mui/material/styles';
 import { Link as RouterLink } from 'react-router-dom';
 
-import { buildAudiencePresentation } from './audiencePresentation';
+import { buildAudiencePresentation, buildAudienceTooltipProps } from './audiencePresentation';
 import { buildCampaignPresentation } from './campaignPresentation';
 import { campaignColumnPercentages } from './campaignTableLayout';
 import type { EmailCampaign } from './types';
@@ -162,8 +162,9 @@ export function CampaignTable({
             {campaigns.map((campaign) => {
               const presentation = buildCampaignPresentation(campaign);
               const audiencePresentation = buildAudiencePresentation(campaign);
-              const hasAudienceTooltip = campaign.source_type === 'airtable'
-                && audiencePresentation.tooltip !== audiencePresentation.label;
+              const audienceTooltipProps = campaign.source_type === 'airtable'
+                ? buildAudienceTooltipProps(audiencePresentation)
+                : null;
               const deliveryPercentage = presentation.total > 0
                 ? Math.min(100, Math.max(0, (presentation.delivered / presentation.total) * 100))
                 : 0;
@@ -253,23 +254,27 @@ export function CampaignTable({
                         variant="outlined"
                         sx={{ height: 24, fontSize: '0.68rem' }}
                       />
-                      {hasAudienceTooltip ? (
-                        <Tooltip title={audiencePresentation.tooltip}>
-                          <Typography
-                            variant="body2"
-                            sx={{ fontWeight: 600 }}
-                            noWrap
-                            title={audiencePresentation.tooltip}
+                      {audienceTooltipProps ? (
+                        <Tooltip title={audiencePresentation.tooltip} describeChild>
+                          <Box
+                            component="span"
+                            {...audienceTooltipProps}
+                            sx={{ display: 'block', maxWidth: '100%' }}
                           >
-                            {audiencePresentation.label}
-                          </Typography>
+                            <Typography
+                              variant="body2"
+                              sx={{ fontWeight: 600 }}
+                              noWrap
+                            >
+                              {audiencePresentation.label}
+                            </Typography>
+                          </Box>
                         </Tooltip>
                       ) : (
                         <Typography
                           variant="body2"
                           sx={{ fontWeight: 600 }}
                           noWrap
-                          title={audiencePresentation.tooltip}
                         >
                           {audiencePresentation.label}
                         </Typography>

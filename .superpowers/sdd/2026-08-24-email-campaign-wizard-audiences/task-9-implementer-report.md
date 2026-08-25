@@ -35,3 +35,22 @@ Complete. Base was `dd5a097fa2e6976c9d3a4299f88e5d3a2f11bbfa`; intended commit: 
 ## Concerns
 
 - No DOM component-test runtime is installed; Tooltip/accessibility integration was verified by source inspection, focused lint, TypeScript, and production build. Browser visual checks remain Task 10 scope.
+## Review round 1 — RED/GREEN and self-contained snapshot
+
+- P1 RED: the review identified that the committed table imported uncommitted `campaignPresentation.ts` and `campaignTableLayout.ts`; both direct helpers and their focused tests are included in this fix commit unchanged so a clean checkout builds independently.
+- P1 RED: new tests reproduced null audiences throwing `selection is not iterable` and malformed entries throwing on `region`. GREEN: `hydrateAudienceSelection` now treats absent audiences as the only legacy-fallback case, returns an empty selection for null/non-array values, and filters runtime entries to valid USA/EUR boolean branches before normalization. Valid mixed entries remain deterministic; invalid-only data yields `No Airtable audiences` and an empty tooltip.
+- P2 RED: the multi-branch Tooltip wrapped non-focusable text. GREEN: `buildAudienceTooltipProps` supplies an `aria-label` and `tabIndex: 0` only for multi-branch detail; the table uses a focusable span trigger with MUI `describeChild`, while single/empty rows retain no extra tab stop.
+
+## Review round 1 verification
+
+- RED: `node --test tests/audiencePresentation.test.ts` — 6 prior tests passed; null, malformed, and accessibility tests failed for the expected missing behavior.
+- GREEN: `node --test tests/audienceSelection.test.ts tests/audiencePresentation.test.ts tests/campaignPresentation.test.ts tests/campaignTableLayout.test.ts` — exit 0, 17/17 passed.
+- Focused ESLint over `audienceSelection.ts`, `audiencePresentation.ts`, `CampaignTableWorkspace.tsx`, `campaignPresentation.ts`, and `campaignTableLayout.ts` — exit 0.
+- Populated-worktree `npm run build` — exit 0; TypeScript and Vite completed with the existing large-chunk advisory only.
+- Cached diff check — exit 0. Exact clean-snapshot verification is recorded after the fix commit below.
+
+## Review round 1 scope / concerns
+
+- Staged only the shared hydration fix, presentation/accessibility helper and table integration, direct table dependencies, their focused tests, and this report. Unrelated dirty and untracked work remains unstaged.
+- No new dependency was added. No DOM test runtime is installed; accessibility is covered by the pure helper contract and source integration, with browser visual checks remaining Task 10 scope.
+- Exact clean archive of commit `750bb0a` (`tmp/task9-clean-750bb0a`, with only a junction to installed `node_modules`) — Task 6/9 tests exit 0, 17/17 passed; focused ESLint exit 0; `npm run build` exit 0 with `tsc -b`, 13,171 transformed modules, and Vite production output. This confirms the direct table helpers are present in the committed snapshot.
