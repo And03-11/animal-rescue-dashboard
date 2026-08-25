@@ -1,10 +1,13 @@
 import json
+import logging
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from backend.app.api.v1.endpoints import email_sender
 from backend.app.core.security import get_current_user
+from backend.app.services import campaign_storage
 from backend.app.main import app
 from backend.app.services.airtable_service import AirtableCampaignQueryError
 from backend.app.services.campaign_audiences import AudienceCount, AudienceResolution
@@ -373,3 +376,305 @@ def test_update_campaign_replaces_normalized_audiences_and_targets(
     assert remote_service.updated[-1][1]["audiences"] == updated["audiences"]
     assert remote_service.updated[-1][1]["target_count"] == 1
     assert remote_service.updated[-1][1]["segment"] == "standard"
+
+
+def test_update_campaign_legacy_filters_override_stored_audiences(
+    write_environment, monkeypatch
+):
+    campaign_data, _sent_logs, targets, remote_service = write_environment
+    campaign_id = "Campaign_legacy_audience_update"
+    (campaign_data / f"{campaign_id}.json").write_text(
+        json.dumps(
+            {
+                "id": campaign_id,
+                "source_type": "airtable",
+                "campaign_name": "Original",
+                "subject": "Old",
+                "html_body": "x",
+                "sender_config": "all",
+                "status": "Draft",
+                "audiences": [{"region": "EUR", "is_bounced": False}],
+                "region": "EUR",
+                "is_bounced": False,
+                "segment": "standard",
+                "target_count": 2,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (targets / f"target_{campaign_id}.csv").write_text(
+        "Email\nold@example.org\n", encoding="utf-8"
+    )
+
+    class CapturingAirtableService(FakeAirtableService):
+        received = []
+        resolution = AudienceResolution(
+            contacts=({"Email": "usa@example.org", "Name": "USA"},),
+            branches=(AudienceCount(region="USA", is_bounced=True, count=1),),
+        )
+
+        def resolve_campaign_audiences(self, audiences, segment):
+            self.received.append(
+                ([(branch.region, branch.is_bounced) for branch in audiences], segment)
+            )
+            return self.resolution
+
+    monkeypatch.setattr(
+        email_sender, "AirtableService", CapturingAirtableService
+    )
+    response = client.put(
+        f"/api/v1/sender/campaigns/{campaign_id}",
+        json={"region": "USA", "is_bounced": True},
+    )
+
+    assert response.status_code == 200
+    updated = response.json()
+    assert CapturingAirtableService.received == [([("USA", True)], "standard")]
+    assert updated["audiences"] == [{"region": "USA", "is_bounced": True}]
+    assert updated["region"] == "USA"
+    assert updated["is_bounced"] is True
+    assert updated["target_count"] == 1
+    assert (targets / f"target_{campaign_id}.csv").read_text(
+        encoding="utf-8"
+    ).splitlines() == ["Email", "usa@example.org"]
+    assert remote_service.updated[-1][1]["audiences"] == updated["audiences"]
+    assert remote_service.updated[-1][1]["target_count"] == 1
+
+
+INVALID_EXPLICIT_AUDIENCES = [
+    [],
+    [{"region": "USA", "is_bounced": False}] * 5,
+    [
+        {"region": "USA", "is_bounced": True},
+        {"region": "USA", "is_bounced": True},
+    ],
+]
+
+
+@pytest.mark.parametrize("audiences", INVALID_EXPLICIT_AUDIENCES)
+def test_create_rejects_invalid_explicit_audiences_without_legacy_fallback(
+    write_environment, audiences
+):
+    response = client.post(
+        "/api/v1/sender/campaigns",
+        json={
+            "source_type": "airtable",
+            "subject": "Invalid",
+            "html_body": "x",
+            "campaign_name": "Invalid audiences",
+            "audiences": audiences,
+            "region": "EUR",
+            "is_bounced": False,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("audiences", INVALID_EXPLICIT_AUDIENCES)
+def test_update_rejects_invalid_explicit_audiences_without_legacy_fallback(
+    write_environment, audiences
+):
+    campaign_data, _sent_logs, _targets, remote_service = write_environment
+    campaign_id = "Campaign_invalid_audiences"
+    config_path = campaign_data / f"{campaign_id}.json"
+    original = {
+        "id": campaign_id,
+        "source_type": "airtable",
+        "campaign_name": "Original",
+        "subject": "Old",
+        "html_body": "x",
+        "sender_config": "all",
+        "status": "Draft",
+        "audiences": [{"region": "EUR", "is_bounced": False}],
+        "region": "EUR",
+        "is_bounced": False,
+        "segment": "standard",
+        "target_count": 2,
+    }
+    config_path.write_text(json.dumps(original), encoding="utf-8")
+
+    response = client.put(
+        f"/api/v1/sender/campaigns/{campaign_id}",
+        json={
+            "audiences": audiences,
+            "region": "USA",
+            "is_bounced": True,
+        },
+    )
+
+    assert response.status_code == 422
+    assert json.loads(config_path.read_text(encoding="utf-8")) == original
+    assert remote_service.updated == []
+
+
+@pytest.mark.parametrize(
+    "target_fields",
+    [{"target_count": 0}, {}],
+    ids=["zero", "missing"],
+)
+def test_schedule_only_update_rejects_empty_airtable_campaign_without_resolving(
+    write_environment, monkeypatch, target_fields
+):
+    campaign_data, _sent_logs, _targets, remote_service = write_environment
+    campaign_id = "Campaign_schedule_empty"
+    config_path = campaign_data / f"{campaign_id}.json"
+    original = {
+        "id": campaign_id,
+        "source_type": "airtable",
+        "campaign_name": "Empty",
+        "subject": "Empty",
+        "html_body": "x",
+        "sender_config": "all",
+        "status": "Draft",
+        "audiences": [{"region": "USA", "is_bounced": False}],
+        "region": "USA",
+        "is_bounced": False,
+        "segment": "standard",
+        **target_fields,
+    }
+    config_path.write_text(json.dumps(original), encoding="utf-8")
+
+    class UnexpectedResolver(FakeAirtableService):
+        def resolve_campaign_audiences(self, audiences, segment):
+            raise AssertionError("schedule-only updates must not resolve audiences")
+
+    monkeypatch.setattr(email_sender, "AirtableService", UnexpectedResolver)
+    response = client.put(
+        f"/api/v1/sender/campaigns/{campaign_id}",
+        json={"scheduled_at": "2026-07-15T12:00:00"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == (
+        "Scheduled campaigns require at least one eligible recipient."
+    )
+    assert json.loads(config_path.read_text(encoding="utf-8")) == original
+    assert remote_service.updated == []
+
+
+def test_update_campaign_rolls_back_targets_when_config_commit_fails(
+    write_environment, monkeypatch
+):
+    campaign_data, _sent_logs, targets, remote_service = write_environment
+    campaign_id = "Campaign_atomic_failure"
+    config_path = campaign_data / f"{campaign_id}.json"
+    target_path = targets / f"target_{campaign_id}.csv"
+    original = {
+        "id": campaign_id,
+        "source_type": "airtable",
+        "campaign_name": "Original",
+        "subject": "Old",
+        "html_body": "x",
+        "sender_config": "all",
+        "status": "Draft",
+        "audiences": [{"region": "EUR", "is_bounced": False}],
+        "region": "EUR",
+        "is_bounced": False,
+        "segment": "standard",
+        "target_count": 1,
+    }
+    config_path.write_text(json.dumps(original), encoding="utf-8")
+    target_path.write_text("Email\nold@example.org\n", encoding="utf-8")
+
+    class UpdatedAirtableService(FakeAirtableService):
+        resolution = AudienceResolution(
+            contacts=({"Email": "new@example.org", "Name": "New"},),
+            branches=(AudienceCount(region="USA", is_bounced=True, count=1),),
+        )
+
+    monkeypatch.setattr(email_sender, "AirtableService", UpdatedAirtableService)
+    real_replace = campaign_storage.os.replace
+
+    def fail_config_commit(source, destination):
+        if Path(destination) == config_path:
+            raise OSError("simulated config commit failure")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(campaign_storage.os, "replace", fail_config_commit)
+    response = client.put(
+        f"/api/v1/sender/campaigns/{campaign_id}",
+        json={"audiences": [{"region": "USA", "is_bounced": True}]},
+    )
+
+    assert response.status_code == 500
+    assert json.loads(config_path.read_text(encoding="utf-8")) == original
+    assert target_path.read_text(encoding="utf-8").splitlines() == [
+        "Email",
+        "old@example.org",
+    ]
+    assert remote_service.updated == []
+    assert not email_sender._get_campaign_storage().is_launch_locked(campaign_id)
+
+
+def test_update_campaign_does_not_mutate_while_campaign_lock_is_held(
+    write_environment
+):
+    campaign_data, _sent_logs, targets, remote_service = write_environment
+    campaign_id = "Campaign_locked_update"
+    config_path = campaign_data / f"{campaign_id}.json"
+    target_path = targets / f"target_{campaign_id}.csv"
+    original = {
+        "id": campaign_id,
+        "source_type": "airtable",
+        "campaign_name": "Original",
+        "subject": "Old",
+        "html_body": "x",
+        "sender_config": "all",
+        "status": "Draft",
+        "audiences": [{"region": "EUR", "is_bounced": False}],
+        "region": "EUR",
+        "is_bounced": False,
+        "segment": "standard",
+        "target_count": 1,
+    }
+    config_path.write_text(json.dumps(original), encoding="utf-8")
+    target_path.write_text("Email\nold@example.org\n", encoding="utf-8")
+    storage = email_sender._get_campaign_storage()
+    owner_id = storage.acquire_launch_lock(campaign_id, "existing-owner")
+    assert owner_id == "existing-owner"
+
+    try:
+        response = client.put(
+            f"/api/v1/sender/campaigns/{campaign_id}",
+            json={"audiences": [{"region": "USA", "is_bounced": True}]},
+        )
+
+        assert response.status_code == 409
+        assert storage.owns_launch_lock(campaign_id, "existing-owner")
+        assert json.loads(config_path.read_text(encoding="utf-8")) == original
+        assert target_path.read_text(encoding="utf-8").splitlines() == [
+            "Email",
+            "old@example.org",
+        ]
+        assert remote_service.updated == []
+    finally:
+        storage.release_launch_lock(campaign_id, "existing-owner")
+
+
+def test_update_campaign_logs_unexpected_failure_and_returns_stable_500(
+    write_environment, caplog
+):
+    campaign_data, _sent_logs, _targets, remote_service = write_environment
+    campaign_id = "Campaign_broken_json"
+    config_path = campaign_data / f"{campaign_id}.json"
+    config_path.write_text('{"broken":', encoding="utf-8")
+
+    with caplog.at_level(
+        logging.ERROR,
+        logger="backend.app.api.v1.endpoints.email_sender",
+    ):
+        response = client.put(
+            f"/api/v1/sender/campaigns/{campaign_id}",
+            json={"subject": "Updated"},
+        )
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "detail": "Unable to update campaign. Try again."
+    }
+    assert remote_service.updated == []
+    assert any(
+        campaign_id in record.getMessage() and record.exc_info
+        for record in caplog.records
+    )

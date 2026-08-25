@@ -1,5 +1,6 @@
 # --- Archivo: backend/app/api/v1/endpoints/email_sender.py ---
 import csv
+import logging
 import os
 import time
 import random
@@ -19,6 +20,10 @@ from backend.app.services.campaign_audiences import normalize_audiences, seriali
 from backend.app.services.gmail_service import GmailService
 from backend.app.services.credentials_manager import credentials_manager_instance
 from backend.app.services.email_sender_service import get_email_sender_service
+from backend.app.services.campaign_storage import (
+    CampaignFileStorage,
+    CampaignMutationLockedError,
+)
 
 
 from fastapi import Depends, status
@@ -26,6 +31,8 @@ from backend.app.core.security import get_current_user
 
 import shutil
 
+
+logger = logging.getLogger(__name__)
 
 def _update_campaign_status(campaign_id: str, new_status: str) -> Dict[str, Any]:
     """Lee el config de la campaña, actualiza el estado y guarda el archivo."""
@@ -123,12 +130,21 @@ os.makedirs(CAMPAIGN_DATA_DIR, exist_ok=True)
 os.makedirs(SENT_LOGS_DIR, exist_ok=True)
 os.makedirs(TARGETS_DIR, exist_ok=True)
 
+def _get_campaign_storage() -> CampaignFileStorage:
+    return CampaignFileStorage(
+        CAMPAIGN_DATA_DIR,
+        SENT_LOGS_DIR,
+        TARGETS_DIR,
+    )
+
 class CampaignRequest(BaseModel):
     source_type: Literal["airtable", "csv"]
     subject: str
     html_body: str
     campaign_name: str = Field(min_length=1)
-    audiences: list[AudienceBranchRequest] | None = None
+    audiences: list[AudienceBranchRequest] | None = Field(
+        default=None, min_length=1, max_length=4
+    )
     region: str | None = None
     is_bounced: bool | None = None
     sender_config: str | list[str] = "all"
@@ -142,7 +158,9 @@ class CampaignUpdateRequest(BaseModel):
     html_body: str | None = None
     sender_config: str | list[str] | None = None
     scheduled_at: datetime | None = None
-    audiences: list[AudienceBranchRequest] | None = None
+    audiences: list[AudienceBranchRequest] | None = Field(
+        default=None, min_length=1, max_length=4
+    )
     region: str | None = None
     is_bounced: bool | None = None
     segment: Literal["standard", "dnr"] | None = None
@@ -819,10 +837,12 @@ def update_campaign(
     if not os.path.exists(campaign_file_path):
         raise HTTPException(status_code=404, detail="Campaign not found")
 
+    storage = _get_campaign_storage()
     try:
         with open(campaign_file_path, "r") as campaign_file:
             config = json.load(campaign_file)
 
+        request_fields = req.model_fields_set
         update_data = req.model_dump(exclude_unset=True, exclude={"audiences"})
         for key, value in update_data.items():
             if value is not None or key == "scheduled_at":
@@ -831,11 +851,18 @@ def update_campaign(
                 )
 
         audience_fields = {"audiences", "region", "is_bounced", "segment"}
-        filters_changed = bool(audience_fields & req.model_fields_set)
+        filters_changed = bool(audience_fields & request_fields)
+        resolution = None
         if config.get("source_type") == "airtable" and filters_changed:
             try:
                 if req.audiences is not None:
                     branches = _request_audiences(req)
+                elif {"region", "is_bounced"} & request_fields:
+                    branches = normalize_audiences(
+                        None,
+                        legacy_region=config.get("region"),
+                        legacy_is_bounced=config.get("is_bounced"),
+                    )
                 elif config.get("audiences") is not None:
                     branches = normalize_audiences(config["audiences"])
                 else:
@@ -858,12 +885,6 @@ def update_campaign(
                     detail="Unable to load Airtable audience. Try again.",
                 ) from error
 
-            if config.get("scheduled_at") is not None and resolution.total_unique == 0:
-                raise HTTPException(
-                    status_code=422,
-                    detail="Scheduled campaigns require at least one eligible recipient.",
-                )
-
             config.update(
                 {
                     "audiences": serialize_audiences(branches),
@@ -875,16 +896,15 @@ def update_campaign(
                     "segment": segment,
                 }
             )
-            target_list_path = os.path.join(
-                TARGETS_DIR, f"target_{campaign_id}.csv"
-            )
-            df_data = [
-                {"Email": contact.get("Email")}
-                for contact in resolution.contacts
-                if contact.get("Email")
-            ]
-            pd.DataFrame(df_data, columns=["Email"]).to_csv(
-                target_list_path, index=False
+
+        if (
+            config.get("source_type") == "airtable"
+            and config.get("scheduled_at") is not None
+            and not config.get("target_count")
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="Scheduled campaigns require at least one eligible recipient.",
             )
 
         config["last_updated"] = datetime.now().isoformat()
@@ -898,8 +918,19 @@ def update_campaign(
                     "Scheduled" if config.get("scheduled_at") else "Ready"
                 )
 
-        with open(campaign_file_path, "w") as campaign_file:
-            json.dump(config, campaign_file, indent=4, default=str)
+        if resolution is not None:
+            try:
+                storage.commit_audience_update(
+                    campaign_id, config, resolution.contacts
+                )
+            except CampaignMutationLockedError as error:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Campaign is currently active or being updated.",
+                ) from error
+        else:
+            with open(campaign_file_path, "w") as campaign_file:
+                json.dump(config, campaign_file, indent=4, default=str)
 
         try:
             service = get_email_sender_service()
@@ -926,10 +957,12 @@ def update_campaign(
         return config
     except HTTPException:
         raise
-    except Exception as error:
+    except Exception:
+        logger.exception("Campaign update failed for %s", campaign_id)
         raise HTTPException(
-            status_code=500, detail=f"Error updating campaign: {error}"
-        ) from error
+            status_code=500,
+            detail="Unable to update campaign. Try again.",
+        )
 
 @router.post("/sender/campaigns/{campaign_id}/launch")
 def launch_campaign(

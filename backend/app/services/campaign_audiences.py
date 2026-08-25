@@ -57,9 +57,14 @@ def normalize_audiences(
     as one branch when both are present.
     """
 
-    source = list(raw_audiences or [])
-    if not source and legacy_region is not None and legacy_is_bounced is not None:
-        source = [{"region": legacy_region, "is_bounced": legacy_is_bounced}]
+    if raw_audiences is None:
+        source = []
+        if legacy_region is not None and legacy_is_bounced is not None:
+            source = [
+                {"region": legacy_region, "is_bounced": legacy_is_bounced}
+            ]
+    else:
+        source = list(raw_audiences)
 
     if not 1 <= len(source) <= 4:
         raise ValueError("Airtable campaigns require between 1 and 4 audience branches")
