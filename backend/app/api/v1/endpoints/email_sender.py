@@ -191,7 +191,10 @@ def _refresh_airtable_campaign_contacts(
 
 
 def prepare_campaign_launch(
-    campaign_id: str, *, refresh_airtable: bool = True
+    campaign_id: str,
+    *,
+    refresh_airtable: bool = True,
+    rollback_config: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Reserve and transition a campaign before a background task is queued."""
     storage = _get_campaign_storage()
@@ -242,6 +245,10 @@ def prepare_campaign_launch(
                         "Recalculate the audience before launching."
                     ),
                 )
+
+        if rollback_config is not None:
+            rollback_config.clear()
+            rollback_config.update(config)
 
         config["status"] = "Launching"
         config["launch_id"] = owner_id
@@ -1120,19 +1127,17 @@ def launch_campaign(
     Lanza la tarea de envío para una campaña.
     """
     storage = _get_campaign_storage()
-    previous_status = None
-    if storage.campaign_exists(campaign_id):
-        previous_status = storage.load_campaign(campaign_id).get("status")
-    launch_id = prepare_campaign_launch(campaign_id)
+    rollback_config: Dict[str, Any] = {}
+    launch_id = prepare_campaign_launch(
+        campaign_id, rollback_config=rollback_config
+    )
     try:
         background_tasks.add_task(run_campaign_task, campaign_id, launch_id)
     except Exception:
         try:
-            config = storage.load_campaign(campaign_id)
-            config["status"] = previous_status or "Interrupted"
-            config.pop("launch_id", None)
-            config["last_updated"] = datetime.now().isoformat()
-            storage.save_campaign(campaign_id, config, serialize_unknown=True)
+            storage.save_campaign(
+                campaign_id, rollback_config, serialize_unknown=True
+            )
         finally:
             storage.release_launch_lock(campaign_id, launch_id)
         raise

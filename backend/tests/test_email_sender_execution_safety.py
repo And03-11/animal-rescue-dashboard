@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import threading
 
 import pytest
 from fastapi import HTTPException
@@ -585,6 +586,87 @@ def test_manual_queue_failure_restores_prior_status_before_releasing_lock(
 
     stored = json.loads(config_path.read_text(encoding="utf-8"))
     assert stored["status"] == "Ready"
+    assert "launch_id" not in stored
+    assert not email_sender._get_campaign_storage().is_launch_locked(campaign_id)
+
+
+def test_manual_queue_failure_preserves_scheduling_update_completed_before_lock(
+    campaign_directories, monkeypatch
+):
+    campaign_data, _sent_logs, _targets = campaign_directories
+    campaign_id = "Campaign_manual_queue_schedule_race"
+    config_path = campaign_data / f"{campaign_id}.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "id": campaign_id,
+                "source_type": "csv",
+                "status": "Ready",
+                "scheduled_at": None,
+                "target_count": 1,
+                "mapping": {
+                    "email": "Email",
+                    "name": "Name",
+                    "has_header": True,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class ThrowingBackgroundTasks:
+        def add_task(self, *_args, **_kwargs):
+            raise RuntimeError("queue unavailable after schedule")
+
+    real_prepare = email_sender.prepare_campaign_launch
+    launch_waiting = threading.Event()
+    scheduling_complete = threading.Event()
+
+    def wait_before_reserving(*args, **kwargs):
+        launch_waiting.set()
+        assert scheduling_complete.wait(timeout=2)
+        return real_prepare(*args, **kwargs)
+
+    monkeypatch.setattr(email_sender, "prepare_campaign_launch", wait_before_reserving)
+    monkeypatch.setattr(
+        email_sender,
+        "get_email_sender_service",
+        lambda: RecordingRemoteService(),
+    )
+    launch_errors = []
+
+    def launch():
+        try:
+            email_sender.launch_campaign(
+                campaign_id,
+                background_tasks=ThrowingBackgroundTasks(),
+                current_user="admin@example.org",
+            )
+        except Exception as error:
+            launch_errors.append(error)
+
+    launch_thread = threading.Thread(target=launch)
+    launch_thread.start()
+    assert launch_waiting.wait(timeout=2)
+    try:
+        updated = email_sender.update_campaign(
+            campaign_id,
+            email_sender.CampaignUpdateRequest(
+                scheduled_at="2026-09-01T12:00:00"
+            ),
+            current_user="admin@example.org",
+        )
+        assert updated["status"] == "Scheduled"
+    finally:
+        scheduling_complete.set()
+        launch_thread.join(timeout=2)
+
+    assert not launch_thread.is_alive()
+    assert len(launch_errors) == 1
+    assert isinstance(launch_errors[0], RuntimeError)
+    stored = json.loads(config_path.read_text(encoding="utf-8"))
+    assert stored["status"] == "Scheduled"
+    assert stored["scheduled_at"] == "2026-09-01T12:00:00"
     assert "launch_id" not in stored
     assert not email_sender._get_campaign_storage().is_launch_locked(campaign_id)
 
