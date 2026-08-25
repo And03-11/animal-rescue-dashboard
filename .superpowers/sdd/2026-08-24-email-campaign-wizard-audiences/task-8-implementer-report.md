@@ -86,3 +86,44 @@ Complete. Base was `5585fcba7306cb5fbcc4c6a97be911b4718df045`; the intended impl
 - No component-test DOM runtime is installed. The save/session contracts are covered by dependency-free tests; fatal hydration and FileReader callback gating were verified through focused lint, TypeScript, exact diff review, and production build. Browser interaction remains part of Task 10.
 - Cancel intentionally remains enabled while preview/save work is active; it synchronously aborts and invalidates the session before delegating close.
 - Existing unrelated dirty and untracked files are preserved and excluded from the index.
+
+## Review round 2 — parent ID/session coupling
+
+### RED / root cause
+
+- The exact committed page assigned the create response to `campaignId` and immediately called `setEditingCampaignId(campaignId)` before `upload-csv` and `save-mapping`. That parent state changed `CampaignWizard.initialCampaignId`; the wizard correctly treated it as a new identity, aborted the signal used by the same save, and rehydrated the incomplete server campaign.
+- The integration regression was added before the executor. `node --test tests/campaignWizardOrchestration.test.ts` exited 1: the four prior tests passed and all three new parent-publisher tests failed because `executeCampaignSavePlan` was missing.
+
+### GREEN / architecture and behavior preservation
+
+- `executeCampaignSavePlan` now owns the complete ordered operation sequence and keeps a newly returned ID inside its local execution scope. An optional ID publisher runs only after every operation succeeds; the page intentionally supplies no publisher because success immediately closes the wizard.
+- `EmailSenderPage` no longer calls `setEditingCampaignId` after create. It passes the same wizard signal through create, upload, and mapping, receives the final ID only after the plan completes, then shows success, closes, clears the parent ID, and refreshes campaigns.
+- Upload or mapping rejection occurs before publication. The page leaves the parent ID unchanged (`null` for a new campaign), keeps the same open wizard generation and CSV file/preview/mapping draft, clears transient snackbar copy, and rethrows so the existing inline actionable error remains visible.
+- Existing CSV edits still execute `update-campaign -> save-mapping`; new CSV campaigns still execute `create-campaign -> upload-csv -> save-mapping`; Airtable remains one create/update operation. No sender, template, editor, send-test, schedule, preview, hydration, pagination, launch, edit, or delete behavior changed.
+
+### Regression coverage
+
+- The success integration test creates a real `WizardSessionLifecycle`/`AbortController`, simulates a parent ID publisher by beginning a new session, and asserts the ID stays unpublished and the original signal stays live during create, upload, and mapping. Publication and the resulting abort occur only after the final mapping completes.
+- Separate upload and mapping failure cases assert rejection, exact operation cutoff, no ID publication, no signal abort, and continued current-session identity.
+
+### Files and commit scope
+
+- Modified `campaignWizardOrchestration.ts` with the dependency-free atomic executor.
+- Extended `campaignWizardOrchestration.test.ts` with three integration-level parent-session regressions.
+- Staged only the precise `EmailSenderPage.tsx` import/save-handler changes through exact base-derived blob `010ca6757609baabeadf27e85fba3004f5a08c3a`; unrelated dirty page/table/pagination work remains unstaged.
+- This report update plus those three implementation/test paths are the complete intended scope of `fix: keep CSV creation in one wizard session`.
+
+### Exact-snapshot verification
+
+- Exact staged source tree: `d7586bb72657fb8e06532dabf4a826df35ce5e91`.
+- Task 6/7/8 Node command — exit 0, 27/27 passed.
+- Mandated five-file ESLint — exit 0; orchestration helper/test ESLint — exit 0, using the committed configuration.
+- `tsc -p tsconfig.app.json --noEmit` — exit 0.
+- `npm run build -- --logLevel silent` — exit 0; `tsc -b` and Vite completed.
+- `git diff --cached --check` is required again immediately before commit.
+
+### Self-review / concerns
+
+- No DOM component-test runtime is installed; the parent-ID effect is covered at the dependency-free executor/session boundary and the real page consumes that same executor.
+- If create succeeds but upload or mapping fails, the backend may retain its pre-existing incomplete draft. This fix deliberately does not publish or hydrate that ID; cleanup/reuse would require a separate backend contract. The user-facing wizard session and local CSV state remain recoverable.
+- No dependency, package, lockfile, ESLint configuration, plan, specification, or ledger change is included.

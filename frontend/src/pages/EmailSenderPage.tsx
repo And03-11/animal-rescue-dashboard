@@ -39,7 +39,10 @@ import PauseCircleOutlineIcon from '@mui/icons-material/PauseCircleOutline';
 import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
 import apiClient from '../api/axiosConfig';
 import { CampaignWizard } from '../features/email-sender/CampaignWizard';
-import { planCampaignSave } from '../features/email-sender/campaignWizardOrchestration';
+import {
+  executeCampaignSavePlan,
+  planCampaignSave,
+} from '../features/email-sender/campaignWizardOrchestration';
 import type {
   CampaignFormData,
   CampaignLaunchResponse,
@@ -145,44 +148,58 @@ export const EmailSenderPage = () => {
       hasCsvFile: Boolean(csvFile),
       hasMapping: Boolean(mapping),
     });
-    let campaignId = editingCampaignId;
+    const saveSignal = signal ?? new AbortController().signal;
 
     setError(null);
     setSnackbarMessage(null);
 
     try {
-      for (const operation of operations) {
-        if (operation === 'create-campaign') {
-          setSnackbarMessage('Saving campaign configuration…');
-          const response = await apiClient.post<CreateCampaignResponse>(
-            '/sender/campaigns',
-            campaignBaseData,
-            { signal },
-          );
-          campaignId = response.data.id;
-          setEditingCampaignId(campaignId);
-          continue;
-        }
+      const campaignId = await executeCampaignSavePlan({
+        operations,
+        initialCampaignId: editingCampaignId,
+        signal: saveSignal,
+        runOperation: async ({ operation, campaignId: currentCampaignId, signal: operationSignal }) => {
+          if (operation === 'create-campaign') {
+            setSnackbarMessage('Saving campaign configuration…');
+            const response = await apiClient.post<CreateCampaignResponse>(
+              '/sender/campaigns',
+              campaignBaseData,
+              { signal: operationSignal },
+            );
+            return response.data.id;
+          }
 
-        if (!campaignId) throw new Error('Campaign ID is required to complete this save.');
+          if (!currentCampaignId) throw new Error('Campaign ID is required to complete this save.');
 
-        if (operation === 'update-campaign') {
-          setSnackbarMessage('Updating campaign configuration…');
-          await apiClient.put(`/sender/campaigns/${campaignId}`, campaignBaseData, { signal });
-        } else if (operation === 'upload-csv') {
-          if (!csvFile) throw new Error('CSV file is required for upload.');
-          setSnackbarMessage('Uploading CSV file…');
-          const formData = new FormData();
-          formData.append('csv_file', csvFile, csvFile.name);
-          await apiClient.post(`/sender/campaigns/${campaignId}/upload-csv`, formData, { signal });
-        } else if (operation === 'save-mapping') {
-          if (!mapping) throw new Error('CSV mapping is required to complete this save.');
-          setSnackbarMessage('Saving column mapping…');
-          await apiClient.post(`/sender/campaigns/${campaignId}/save-mapping`, mapping, { signal });
-        }
-      }
+          if (operation === 'update-campaign') {
+            setSnackbarMessage('Updating campaign configuration…');
+            await apiClient.put(
+              `/sender/campaigns/${currentCampaignId}`,
+              campaignBaseData,
+              { signal: operationSignal },
+            );
+          } else if (operation === 'upload-csv') {
+            if (!csvFile) throw new Error('CSV file is required for upload.');
+            setSnackbarMessage('Uploading CSV file…');
+            const formData = new FormData();
+            formData.append('csv_file', csvFile, csvFile.name);
+            await apiClient.post(
+              `/sender/campaigns/${currentCampaignId}/upload-csv`,
+              formData,
+              { signal: operationSignal },
+            );
+          } else if (operation === 'save-mapping') {
+            if (!mapping) throw new Error('CSV mapping is required to complete this save.');
+            setSnackbarMessage('Saving column mapping…');
+            await apiClient.post(
+              `/sender/campaigns/${currentCampaignId}/save-mapping`,
+              mapping,
+              { signal: operationSignal },
+            );
+          }
+        },
+      });
 
-      if (!campaignId) throw new Error('Campaign ID was not returned by the server.');
       setSnackbarMessage(
         sourceType === 'csv'
           ? 'CSV campaign saved successfully!'
@@ -196,7 +213,6 @@ export const EmailSenderPage = () => {
       console.error('Error saving campaign:', err);
       setError(getCampaignSaveErrorMessage(err));
       setSnackbarMessage(null);
-      if (!campaignId) setEditingCampaignId(null);
       throw err;
     }
   };
