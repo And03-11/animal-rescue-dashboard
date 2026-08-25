@@ -1,0 +1,598 @@
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
+import {
+  Alert,
+  Box,
+  Button,
+  CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Snackbar,
+  Step,
+  StepLabel,
+  Stepper,
+  Typography,
+  useMediaQuery,
+  useTheme,
+} from '@mui/material';
+import axios from 'axios';
+import apiClient from '../../api/axiosConfig';
+import {
+  buildCampaignPayload,
+  computeAudiencePreviewKey,
+  hydrateCampaignWizardDraft,
+  invalidateAudiencePreview,
+  validateWizardStep,
+} from './campaignWizardState';
+import type {
+  CampaignWizardDraft,
+  CampaignWizardStep,
+} from './campaignWizardState';
+import {
+  AudienceStep,
+  createSuggestedCsvMapping,
+  isCsvColumnMapping,
+  isCsvPreview,
+} from './AudienceStep';
+import { CampaignSetupStep } from './CampaignSetupStep';
+import { ContentReviewStep } from './ContentReviewStep';
+import type {
+  AudiencePreview,
+  CampaignFormData,
+  CsvColumnMapping,
+  CsvPreview,
+  EmailTemplate,
+  SenderOptions,
+} from './types';
+
+const DEFAULT_HTML = '<h1>New Campaign</h1>\n<p>Write your content here.</p>';
+const STEPS = ['Audience', 'Campaign setup', 'Content & review'];
+
+function isAbortError(error: unknown): boolean {
+  return axios.isCancel(error)
+    || (axios.isAxiosError(error) && error.code === 'ERR_CANCELED')
+    || (error instanceof DOMException && error.name === 'AbortError');
+}
+
+function getApiErrorMessage(error: unknown, fallback: string): string {
+  if (axios.isAxiosError(error)) {
+    const data: unknown = error.response?.data;
+    if (typeof data === 'string' && data.trim()) return data;
+    if (data && typeof data === 'object') {
+      const detail = 'detail' in data ? data.detail : undefined;
+      const message = 'message' in data ? data.message : undefined;
+      if (typeof detail === 'string' && detail.trim()) return detail;
+      if (typeof message === 'string' && message.trim()) return message;
+    }
+  }
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
+interface CampaignDetailsEnvelope {
+  details: Partial<CampaignFormData> & {
+    id?: string;
+    mapping?: unknown;
+    target_count?: number;
+  };
+}
+
+export interface CampaignWizardProps {
+  open: boolean;
+  initialCampaignId?: string | null;
+  onClose: () => void;
+  onSave: (campaign: CampaignFormData, mapping?: CsvColumnMapping) => Promise<void> | void;
+}
+
+function createInitialDraft(campaignId?: string | null): CampaignWizardDraft {
+  return hydrateCampaignWizardDraft({
+    campaignId: campaignId ?? null,
+    source_type: 'airtable',
+    audiences: [{ region: 'USA', is_bounced: false }],
+    segment: 'standard',
+    sender_config: 'all',
+    campaign_name: '',
+    subject: '',
+    html_body: DEFAULT_HTML,
+    scheduled_at: null,
+    csvFile: null,
+  });
+}
+
+function csvMappingError(draft: CampaignWizardDraft, csvPreviewLoading: boolean): string | null {
+  if (draft.sourceType !== 'csv') return null;
+  if (csvPreviewLoading) return 'Wait for the CSV preview to finish loading.';
+
+  const preview = isCsvPreview(draft.csvPreview) ? draft.csvPreview : null;
+  const mapping = isCsvColumnMapping(draft.csvMapping) ? draft.csvMapping : null;
+  if (!preview) {
+    return draft.campaignId ? null : 'The CSV must be previewed before continuing.';
+  }
+  if (!mapping?.email) return 'Select the column containing email addresses.';
+  if (!mapping.name) return 'Select the column containing recipient names.';
+  if (mapping.email === mapping.name) return 'Email and name must be mapped to different columns.';
+  return null;
+}
+
+export function CampaignWizard({
+  open,
+  initialCampaignId = null,
+  onClose,
+  onSave,
+}: CampaignWizardProps) {
+  const theme = useTheme();
+  const fullScreen = useMediaQuery(theme.breakpoints.down('sm'));
+  const [activeStep, setActiveStep] = useState<CampaignWizardStep>(0);
+  const [draft, setDraft] = useState<CampaignWizardDraft>(() => createInitialDraft(initialCampaignId));
+  const [senderOptions, setSenderOptions] = useState<SenderOptions>({ groups: [], accounts: [] });
+  const [loadingSenders, setLoadingSenders] = useState(true);
+  const [templates, setTemplates] = useState<EmailTemplate[]>([]);
+  const [viewMode, setViewMode] = useState<'code' | 'preview'>('code');
+  const [loadingCampaign, setLoadingCampaign] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [csvPreviewLoading, setCsvPreviewLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [sendingTest, setSendingTest] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+
+  useEffect(() => {
+    if (!open) return;
+
+    const controller = new AbortController();
+    const campaignId = initialCampaignId ?? null;
+    setDraft(createInitialDraft(campaignId));
+    setActiveStep(0);
+    setViewMode('code');
+    setError(null);
+    setSuccessMessage(null);
+    setTemplates([]);
+    setSenderOptions({ groups: [], accounts: [] });
+    setCsvPreviewLoading(false);
+
+    setLoadingSenders(true);
+    void apiClient.get<SenderOptions>('/sender/credentials', {
+      signal: controller.signal,
+      timeout: 15_000,
+    }).then((response) => {
+      setSenderOptions(response.data);
+    }).catch((requestError: unknown) => {
+      if (!isAbortError(requestError)) {
+        setError(getApiErrorMessage(requestError, 'Failed to load sender account options.'));
+      }
+    }).finally(() => {
+      if (!controller.signal.aborted) setLoadingSenders(false);
+    });
+
+    void apiClient.get<EmailTemplate[]>('/templates', {
+      signal: controller.signal,
+      timeout: 15_000,
+    }).then((response) => {
+      setTemplates(response.data);
+    }).catch((requestError: unknown) => {
+      if (!isAbortError(requestError)) {
+        setError(getApiErrorMessage(requestError, 'Failed to load email templates.'));
+      }
+    });
+
+    if (!campaignId) {
+      setLoadingCampaign(false);
+      return () => controller.abort();
+    }
+
+    setLoadingCampaign(true);
+    void apiClient.get<CampaignDetailsEnvelope>(`/sender/campaigns/${campaignId}/details`, {
+      signal: controller.signal,
+      timeout: 15_000,
+    }).then(async (response) => {
+      const details = response.data.details;
+      let csvPreview: CsvPreview | undefined;
+      if (details.source_type === 'csv') {
+        setCsvPreviewLoading(true);
+        try {
+          const previewResponse = await apiClient.get<CsvPreview>(
+            `/sender/campaigns/${campaignId}/csv-preview`,
+            { signal: controller.signal, timeout: 15_000 },
+          );
+          csvPreview = previewResponse.data;
+        } catch (requestError: unknown) {
+          if (!isAbortError(requestError)) {
+            setError(getApiErrorMessage(requestError, 'Failed to load the existing CSV preview.'));
+          }
+        } finally {
+          if (!controller.signal.aborted) setCsvPreviewLoading(false);
+        }
+      }
+
+      if (controller.signal.aborted) return;
+      setDraft(hydrateCampaignWizardDraft({
+        ...details,
+        campaignId,
+        csvPreview,
+        csvMapping: isCsvColumnMapping(details.mapping)
+          ? details.mapping
+          : csvPreview ? createSuggestedCsvMapping(csvPreview) : undefined,
+      }));
+    }).catch((requestError: unknown) => {
+      if (!isAbortError(requestError)) {
+        setError(getApiErrorMessage(requestError, 'Failed to load campaign details.'));
+      }
+    }).finally(() => {
+      if (!controller.signal.aborted) setLoadingCampaign(false);
+    });
+
+    return () => controller.abort();
+  }, [initialCampaignId, open]);
+
+  useEffect(() => {
+    if (loadingSenders || senderOptions.accounts.length === 0) return;
+    setDraft((current) => {
+      if (current.senderMode !== 'manual' || current.selectedAccounts.length === 0) return current;
+      let changed = false;
+      const selectedAccounts = current.selectedAccounts.map((account) => {
+        if (account.group && account.group !== 'Unknown') return account;
+        const matchingAccount = senderOptions.accounts.find((option) => option.id === account.id);
+        if (!matchingAccount) return account;
+        changed = true;
+        return matchingAccount;
+      });
+      return changed ? { ...current, selectedAccounts } : current;
+    });
+  }, [loadingSenders, senderOptions.accounts]);
+
+  const patchDraft = useCallback((patch: Partial<CampaignWizardDraft>) => {
+    setError(null);
+    setDraft((current) => ({ ...current, ...patch }));
+  }, []);
+
+  const patchAudienceDraft = useCallback((patch: Partial<CampaignWizardDraft>) => {
+    setError(null);
+    setDraft((current) => {
+      const next = { ...current, ...patch };
+      const mutatesAirtableSelection = Object.prototype.hasOwnProperty.call(patch, 'audiences')
+        || Object.prototype.hasOwnProperty.call(patch, 'segment')
+        || (Object.prototype.hasOwnProperty.call(patch, 'sourceType') && next.sourceType === 'airtable');
+      if (mutatesAirtableSelection) return invalidateAudiencePreview(next);
+      return next;
+    });
+  }, []);
+
+  const requestAudiencePreview = async () => {
+    const requestedKey = computeAudiencePreviewKey(draft.audiences, draft.segment);
+    const selectionError = validateWizardStep(0, {
+      ...draft,
+      audiencePreview: draft.audiencePreview ?? { branches: [], total_unique: 0 },
+      audiencePreviewStale: false,
+      audiencePreviewKey: requestedKey,
+    });
+    if (selectionError) {
+      setError(selectionError);
+      return;
+    }
+    setPreviewLoading(true);
+    setError(null);
+    try {
+      const response = await apiClient.post<AudiencePreview>(
+        '/sender/audience-preview',
+        { audiences: draft.audiences, segment: draft.segment },
+        { timeout: 15_000 },
+      );
+      const current = draftRef.current;
+      if (computeAudiencePreviewKey(current.audiences, current.segment) !== requestedKey) {
+        setError('The audience changed while the preview was loading. Continue again to refresh it.');
+        return;
+      }
+      setDraft((currentDraft) => ({
+        ...currentDraft,
+        audiencePreview: response.data,
+        audiencePreviewStale: false,
+        audiencePreviewKey: requestedKey,
+      }));
+      setActiveStep(1);
+    } catch (requestError: unknown) {
+      setError(getApiErrorMessage(requestError, 'Failed to preview the Airtable audience.'));
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handleContinue = async () => {
+    setError(null);
+    if (activeStep === 0) {
+      if (draft.sourceType === 'airtable') {
+        await requestAudiencePreview();
+        return;
+      }
+      const validationError = validateWizardStep(0, draft) ?? csvMappingError(draft, csvPreviewLoading);
+      if (validationError) {
+        setError(validationError);
+        return;
+      }
+      setActiveStep(1);
+      return;
+    }
+
+    const validationError = validateWizardStep(activeStep, draft);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+    setActiveStep((activeStep + 1) as CampaignWizardStep);
+  };
+
+  const handleSave = async () => {
+    const validationError = validateWizardStep(2, draft);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    const mapping = draft.sourceType === 'csv' && isCsvColumnMapping(draft.csvMapping)
+      ? draft.csvMapping
+      : undefined;
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave(buildCampaignPayload(draft), mapping);
+    } catch (saveError: unknown) {
+      setError(getApiErrorMessage(saveError, 'Failed to save campaign.'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleLoadTemplate = (templateId: string) => {
+    if (!templateId) {
+      patchDraft({ htmlBody: DEFAULT_HTML, templateId: null });
+      return;
+    }
+    const template = templates.find((item) => item.id === Number(templateId));
+    if (template?.content) {
+      patchDraft({ htmlBody: template.content, templateId: template.id, template });
+      return;
+    }
+
+    patchDraft({ templateId: Number(templateId) });
+    void apiClient.get<EmailTemplate>(`/templates/${templateId}`, { timeout: 15_000 })
+      .then((response) => {
+        patchDraft({
+          htmlBody: response.data.content,
+          templateId: response.data.id,
+          template: response.data,
+        });
+      })
+      .catch((requestError: unknown) => {
+        setError(getApiErrorMessage(requestError, 'Failed to load template content.'));
+      });
+  };
+
+  const handleSaveTemplate = async (name: string) => {
+    setError(null);
+    try {
+      const response = await apiClient.post<EmailTemplate>('/templates', {
+        name,
+        content: draftRef.current.htmlBody,
+      }, { timeout: 15_000 });
+      setTemplates((current) => [response.data, ...current]);
+      setSuccessMessage(`Template “${response.data.name}” saved.`);
+    } catch (requestError: unknown) {
+      setError(getApiErrorMessage(requestError, 'Failed to save template.'));
+      throw requestError;
+    }
+  };
+
+  const handleSendTest = async (emails: string[]) => {
+    const current = draftRef.current;
+    const senderConfig = buildCampaignPayload(current).sender_config;
+    setSendingTest(true);
+    setError(null);
+    try {
+      const payload = {
+        emails,
+        subject: current.subject,
+        html_body: current.htmlBody,
+        sender_config: senderConfig,
+      };
+      await apiClient.post(
+        current.campaignId
+          ? `/sender/campaigns/${current.campaignId}/send-test`
+          : '/sender/send-test-adhoc',
+        payload,
+        { timeout: 30_000 },
+      );
+      setSuccessMessage(`Test email sent to ${emails.length} recipient${emails.length === 1 ? '' : 's'}.`);
+    } catch (requestError: unknown) {
+      setError(getApiErrorMessage(requestError, 'Failed to send test emails.'));
+      throw requestError;
+    } finally {
+      setSendingTest(false);
+    }
+  };
+
+  const isBusy = loadingCampaign || previewLoading || saving;
+  const finalActionLabel = draft.scheduledAt ? 'Schedule campaign' : 'Save draft';
+  const finalActionHint = draft.scheduledAt
+    ? `Delivery will be scheduled for ${new Date(draft.scheduledAt).toLocaleString()}.`
+    : draft.sourceType === 'airtable' && draft.audiencePreview?.total_unique === 0
+      ? 'No eligible recipients. Save as Draft or go back and change the audience.'
+      : 'The campaign will remain a Draft until you launch it.';
+
+  return (
+    <>
+      <Dialog
+        open={open}
+        onClose={onClose}
+        fullWidth
+        fullScreen={fullScreen}
+        maxWidth="lg"
+        scroll="paper"
+        aria-labelledby="campaign-wizard-title"
+        slotProps={{
+          paper: {
+            sx: {
+              maxHeight: fullScreen ? '100%' : 'min(880px, calc(100% - 32px))',
+              minWidth: 0,
+              m: fullScreen ? 0 : undefined,
+            },
+          },
+        }}
+      >
+        <DialogTitle
+          id="campaign-wizard-title"
+          component="div"
+          sx={{ flex: '0 0 auto', borderBottom: '1px solid', borderColor: 'divider', pb: 2 }}
+        >
+          <Typography variant="h5" component="h1">
+            {initialCampaignId ? 'Edit campaign' : 'Create campaign'}
+          </Typography>
+          <Stepper
+            activeStep={activeStep}
+            orientation={fullScreen ? 'vertical' : 'horizontal'}
+            sx={{
+              mt: 2,
+              minWidth: 0,
+              '& .MuiStepLabel-label': { whiteSpace: 'normal' },
+              '& .MuiStep-root': { minWidth: 0 },
+            }}
+          >
+            {STEPS.map((label) => (
+              <Step key={label}>
+                <StepLabel>{label}</StepLabel>
+              </Step>
+            ))}
+          </Stepper>
+        </DialogTitle>
+
+        <DialogContent sx={{ overflowY: 'auto', minWidth: 0, px: { xs: 2, sm: 3 }, py: 3 }}>
+          {loadingCampaign ? (
+            <Box sx={{ minHeight: 280, display: 'grid', placeItems: 'center' }}>
+              <Box sx={{ textAlign: 'center' }}>
+                <CircularProgress size={32} />
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
+                  Loading campaign…
+                </Typography>
+              </Box>
+            </Box>
+          ) : (
+            <>
+              {activeStep > 0 && error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
+              {activeStep === 0 && (
+                <AudienceStep
+                  draft={draft}
+                  previewLoading={previewLoading}
+                  csvPreviewLoading={csvPreviewLoading}
+                  error={error}
+                  onDraftChange={patchAudienceDraft}
+                  onErrorChange={setError}
+                  onCsvPreviewLoadingChange={setCsvPreviewLoading}
+                />
+              )}
+              {activeStep === 1 && (
+                <CampaignSetupStep
+                  draft={draft}
+                  senderOptions={senderOptions}
+                  loadingSenders={loadingSenders}
+                  onDraftChange={patchDraft}
+                />
+              )}
+              {activeStep === 2 && (
+                <ContentReviewStep
+                  draft={draft}
+                  templates={templates}
+                  viewMode={viewMode}
+                  sendingTest={sendingTest}
+                  onDraftChange={patchDraft}
+                  onViewModeChange={setViewMode}
+                  onLoadTemplate={handleLoadTemplate}
+                  onSaveTemplate={handleSaveTemplate}
+                  onSendTest={handleSendTest}
+                />
+              )}
+            </>
+          )}
+        </DialogContent>
+
+        <DialogActions
+          sx={{
+            flex: '0 0 auto',
+            borderTop: '1px solid',
+            borderColor: 'divider',
+            px: { xs: 2, sm: 3 },
+            py: 2,
+            gap: 1,
+            alignItems: { xs: 'stretch', sm: 'center' },
+            flexDirection: { xs: 'column', sm: 'row' },
+            '& > :not(style) ~ :not(style)': { ml: 0 },
+          }}
+        >
+          {activeStep === 2 && (
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ mr: { sm: 'auto' }, minWidth: 0, overflowWrap: 'anywhere' }}
+            >
+              {finalActionHint}
+            </Typography>
+          )}
+          <Box
+            sx={{
+              display: 'flex',
+              gap: 1,
+              flexWrap: 'wrap',
+              justifyContent: { xs: 'stretch', sm: 'flex-end' },
+              ml: activeStep === 2 ? 0 : { sm: 'auto' },
+              '& > button': { flex: { xs: '1 1 auto', sm: '0 0 auto' } },
+            }}
+          >
+            <Button onClick={onClose} disabled={saving}>Cancel</Button>
+            {activeStep > 0 && (
+              <Button
+                onClick={() => {
+                  setError(null);
+                  setActiveStep((activeStep - 1) as CampaignWizardStep);
+                }}
+                disabled={isBusy || sendingTest}
+              >
+                Back
+              </Button>
+            )}
+            {activeStep < 2 ? (
+              <Button
+                variant="contained"
+                onClick={() => void handleContinue()}
+                disabled={isBusy || csvPreviewLoading || (activeStep === 1 && loadingSenders)}
+                startIcon={previewLoading ? <CircularProgress size={16} color="inherit" /> : undefined}
+              >
+                {previewLoading ? 'Checking audience…' : 'Continue'}
+              </Button>
+            ) : (
+              <Button
+                variant="contained"
+                onClick={() => void handleSave()}
+                disabled={saving || sendingTest}
+                startIcon={saving ? <CircularProgress size={16} color="inherit" /> : undefined}
+              >
+                {saving ? 'Saving…' : finalActionLabel}
+              </Button>
+            )}
+          </Box>
+        </DialogActions>
+      </Dialog>
+
+      <Snackbar
+        open={Boolean(successMessage)}
+        autoHideDuration={6000}
+        onClose={() => setSuccessMessage(null)}
+        message={successMessage}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      />
+    </>
+  );
+}
