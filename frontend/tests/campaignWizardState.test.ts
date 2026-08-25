@@ -43,6 +43,48 @@ test('audience step rejects stale previews after a selection change', () => {
   }), 'Refresh the Airtable audience preview before continuing.');
 });
 
+test('audience preview identity rejects direct audience mutation', () => {
+  assert.ok(wizardState, 'campaign wizard state module is missing');
+  const originalAudiences = baseDraft().audiences;
+  const previewKey = wizardState.computeAudiencePreviewKey(originalAudiences, 'standard');
+  assert.equal(wizardState.validateWizardStep(0, {
+    ...baseDraft(),
+    audiences: [{ region: 'EUR', is_bounced: false }],
+    audiencePreviewKey: previewKey,
+  }), 'Refresh the Airtable audience preview before continuing.');
+});
+
+test('audience preview identity rejects direct segment mutation', () => {
+  assert.ok(wizardState, 'campaign wizard state module is missing');
+  const previewKey = wizardState.computeAudiencePreviewKey(baseDraft().audiences, 'standard');
+  assert.equal(wizardState.validateWizardStep(0, {
+    ...baseDraft(),
+    segment: 'dnr',
+    audiencePreviewKey: previewKey,
+  }), 'Refresh the Airtable audience preview before continuing.');
+});
+
+test('matching preview identity accepts fresh preview and ignores branch ordering', () => {
+  assert.ok(wizardState, 'campaign wizard state module is missing');
+  const previewKey = wizardState.computeAudiencePreviewKey([
+    { region: 'EUR', is_bounced: true },
+    { region: 'USA', is_bounced: false },
+  ], 'dnr');
+  assert.equal(previewKey, wizardState.computeAudiencePreviewKey([
+    { region: 'USA', is_bounced: false },
+    { region: 'EUR', is_bounced: true },
+  ], 'dnr'));
+  assert.equal(wizardState.validateWizardStep(0, {
+    ...baseDraft(),
+    audiences: [
+      { region: 'EUR', is_bounced: true },
+      { region: 'USA', is_bounced: false },
+    ],
+    segment: 'dnr',
+    audiencePreviewKey: previewKey,
+  }), null);
+});
+
 test('sender step validates group and manual selections', () => {
   assert.ok(wizardState, 'campaign wizard state module is missing');
   assert.equal(wizardState.validateWizardStep(1, {
@@ -77,6 +119,17 @@ test('sender step validates campaign name, subject, and zero-recipient schedulin
     audiencePreview: { branches: [], total_unique: 0 },
     scheduledAt: null,
   }), null);
+});
+
+test('blank scheduled timestamps are Draft-valid and payload-null', () => {
+  assert.ok(wizardState, 'campaign wizard state module is missing');
+  const draft = {
+    ...baseDraft(),
+    audiencePreview: { branches: [], total_unique: 0 },
+    scheduledAt: '   ',
+  };
+  assert.equal(wizardState.validateWizardStep(1, draft), null);
+  assert.equal(wizardState.buildCampaignPayload(draft).scheduled_at, null);
 });
 
 test('body step requires HTML content', () => {
@@ -160,9 +213,13 @@ test('CSV payload is source-specific and only includes a new upload', () => {
 
 test('audience preview invalidation is immutable', () => {
   assert.ok(wizardState, 'campaign wizard state module is missing');
-  const draft = baseDraft();
+  const draft = {
+    ...baseDraft(),
+    audiencePreviewKey: wizardState.computeAudiencePreviewKey(baseDraft().audiences, 'standard'),
+  };
   const invalidated = wizardState.invalidateAudiencePreview(draft);
   assert.equal(invalidated.audiencePreview, null);
+  assert.equal(invalidated.audiencePreviewKey, null);
   assert.equal(invalidated.audiencePreviewStale, true);
   assert.equal(draft.audiencePreviewStale, false);
   assert.notStrictEqual(invalidated, draft);

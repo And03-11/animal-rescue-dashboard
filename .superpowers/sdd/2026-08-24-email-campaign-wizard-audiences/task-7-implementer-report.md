@@ -25,3 +25,10 @@ Only the Task 7 state module, focused Node tests, and this report are intended f
 
 - The new module uses explicit `.ts` extensions for local imports so the requested Node test command can load it directly; the configured TypeScript bundler accepts these extensions.
 - The build completed successfully with Vite’s warning about chunks larger than 600 kB.
+
+## Review round 1
+
+- RED preview-identity regression: 4 failures because the exported helper was missing; existing 10 tests remained green.
+- GREEN after implementation: Task 7 suite passed 15/15, covering direct audience/segment mutation, normalized ordering identity, invalidation clearing, and blank schedule canonicalization.
+- GREEN verification: Task 6 passed 4/4; isolated TypeScript passed; focused ESLint passed; npm run build exited 0 and Vite completed production output.
+- The build retained the existing advisory for chunks larger than 600 kB.

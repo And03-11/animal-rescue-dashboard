@@ -20,6 +20,7 @@ export interface CampaignWizardDraft {
   segment: AudienceSegment;
   audiencePreview: AudiencePreview | null;
   audiencePreviewStale: boolean;
+  audiencePreviewKey?: string | null;
   senderMode: CampaignSenderMode;
   selectedGroup: string;
   selectedAccounts: SelectedAccount[];
@@ -59,6 +60,8 @@ type HydrationInput = Partial<CampaignFormData> & {
   audience_preview?: AudiencePreview | null;
   audiencePreviewStale?: boolean;
   audience_preview_stale?: boolean;
+  audiencePreviewKey?: string | null;
+  audience_preview_key?: string | null;
   templateId?: string | number | null;
   template_id?: string | number | null;
   template?: unknown;
@@ -81,6 +84,19 @@ function senderConfigForDraft(draft: CampaignWizardDraft): string | string[] {
   }
 }
 
+/** Compute the deterministic identity of the normalized Airtable selection and segment. */
+export function computeAudiencePreviewKey(
+  audiences: readonly AirtableAudience[],
+  segment: AudienceSegment,
+): string {
+  const normalized = normalizeAudienceSelection(audiences);
+  return JSON.stringify({ audiences: normalized, segment });
+}
+
+function normalizeScheduledAt(value: string | null): string | null {
+  return value?.trim() ? value : null;
+}
+
 function hasZeroFreshPreview(draft: CampaignWizardDraft): boolean {
   return draft.audiencePreview?.total_unique === 0 && !draft.audiencePreviewStale;
 }
@@ -99,7 +115,11 @@ export function validateWizardStep(
       if (audiences.length > 4) {
         return 'Select no more than four Airtable audiences.';
       }
-      if (!draft.audiencePreview || draft.audiencePreviewStale) {
+      if (
+        !draft.audiencePreview
+        || draft.audiencePreviewStale
+        || draft.audiencePreviewKey !== computeAudiencePreviewKey(audiences, draft.segment)
+      ) {
         return 'Refresh the Airtable audience preview before continuing.';
       }
       return null;
@@ -127,7 +147,7 @@ export function validateWizardStep(
     if (!draft.subject.trim()) {
       return 'Email subject is required.';
     }
-    if (draft.scheduledAt && hasZeroFreshPreview(draft)) {
+    if (normalizeScheduledAt(draft.scheduledAt) && hasZeroFreshPreview(draft)) {
       return 'Cannot schedule a campaign with zero recipients.';
     }
     return null;
@@ -146,6 +166,7 @@ export function invalidateAudiencePreview(draft: CampaignWizardDraft): CampaignW
     audiences: normalizeAudienceSelection(draft.audiences),
     selectedAccounts: cloneAccounts(draft.selectedAccounts),
     audiencePreview: null,
+    audiencePreviewKey: null,
     audiencePreviewStale: true,
   };
 }
@@ -158,7 +179,7 @@ export function buildCampaignPayload(draft: CampaignWizardDraft): CampaignWizard
     subject: draft.subject,
     html_body: draft.htmlBody,
     sender_config: senderConfigForDraft(draft),
-    scheduled_at: draft.scheduledAt,
+    scheduled_at: normalizeScheduledAt(draft.scheduledAt),
   };
 
   if (draft.sourceType === 'airtable') {
@@ -219,13 +240,14 @@ export function hydrateCampaignWizardDraft(input: HydrationInput): CampaignWizar
     audiencePreviewStale: input.audiencePreviewStale
       ?? input.audience_preview_stale
       ?? (sourceType === 'airtable' && audiencePreview === null),
+    audiencePreviewKey: input.audiencePreviewKey ?? input.audience_preview_key ?? null,
     senderMode: sender.senderMode,
     selectedGroup: sender.selectedGroup,
     selectedAccounts: sender.selectedAccounts,
     campaignName: input.campaignName ?? input.campaign_name ?? '',
     subject: input.subject ?? '',
     htmlBody: input.htmlBody ?? input.html_body ?? '',
-    scheduledAt: input.scheduledAt ?? input.scheduled_at ?? null,
+    scheduledAt: normalizeScheduledAt(input.scheduledAt ?? input.scheduled_at ?? null),
     csvFile: input.csvFile ?? null,
   };
 
