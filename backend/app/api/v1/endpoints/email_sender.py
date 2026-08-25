@@ -139,6 +139,140 @@ def _get_campaign_storage() -> CampaignFileStorage:
         TARGETS_DIR,
     )
 
+_ACTIVE_CAMPAIGN_STATUSES = {"Launching", "Sending", "Paused"}
+_TERMINAL_CAMPAIGN_STATUSES = {
+    "Cancelled",
+    "Completed",
+    "Completed - No Contacts",
+    "Completed - No Valid Contacts to Send",
+}
+
+
+def _sync_remote_campaign_status(campaign_id: str, status_value: str) -> None:
+    try:
+        get_email_sender_service().update_campaign(
+            campaign_id, {"status": status_value}
+        )
+    except Exception as error:
+        print(f"[{campaign_id}] Remote status sync warning: {error}")
+
+
+def _refresh_airtable_campaign_contacts(
+    campaign_id: str,
+    config: Dict[str, Any],
+    storage: CampaignFileStorage,
+    *,
+    owner_id: str,
+) -> List[Dict[str, Any]]:
+    """Resolve and atomically persist the Airtable audience under the launch lock."""
+    branches = normalize_audiences(
+        config.get("audiences") or None,
+        legacy_region=config.get("region"),
+        legacy_is_bounced=config.get("is_bounced"),
+    )
+    resolution = AirtableService().resolve_campaign_audiences(
+        branches, config.get("segment") or "standard"
+    )
+    contact_data = list(resolution.contacts)
+    config["audiences"] = serialize_audiences(branches)
+    config["target_count"] = resolution.total_unique
+    config["contacts_fetched_at"] = datetime.now().isoformat()
+    storage.commit_audience_update(
+        campaign_id,
+        config,
+        contact_data,
+        owner_id=owner_id,
+    )
+    return contact_data
+
+
+def prepare_campaign_launch(
+    campaign_id: str, *, refresh_airtable: bool = True
+) -> str:
+    """Reserve and transition a campaign before a background task is queued."""
+    storage = _get_campaign_storage()
+    if not storage.campaign_exists(campaign_id):
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    owner_id = storage.acquire_launch_lock(campaign_id)
+    if owner_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Campaign is already running or queued for launch",
+        )
+
+    try:
+        config = storage.load_campaign(campaign_id)
+        current_status = config.get("status", "Unknown")
+        if current_status in _ACTIVE_CAMPAIGN_STATUSES:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Campaign cannot be launched from status '{current_status}'",
+            )
+        if current_status in _TERMINAL_CAMPAIGN_STATUSES:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Campaign is already {current_status}",
+            )
+
+        if refresh_airtable and config.get("source_type") == "airtable":
+            try:
+                contact_data = _refresh_airtable_campaign_contacts(
+                    campaign_id,
+                    config,
+                    storage,
+                    owner_id=owner_id,
+                )
+            except AirtableCampaignQueryError as error:
+                raise HTTPException(
+                    status_code=502,
+                    detail="Unable to load Airtable audience. Try again.",
+                ) from error
+            except ValueError as error:
+                raise HTTPException(status_code=422, detail=str(error)) from error
+            if not contact_data:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Campaign has no eligible recipients. "
+                        "Recalculate the audience before launching."
+                    ),
+                )
+
+        config["status"] = "Launching"
+        config["launch_id"] = owner_id
+        config["last_updated"] = datetime.now().isoformat()
+        storage.save_campaign(campaign_id, config, serialize_unknown=True)
+        return owner_id
+    except Exception:
+        storage.release_launch_lock(campaign_id, owner_id)
+        raise
+
+
+def recover_interrupted_campaigns() -> list[str]:
+    return _get_campaign_storage().recover_interrupted_campaigns()
+
+
+def _select_unique_pending_contacts(
+    contact_data: List[Dict[str, Any]], sent_emails: set[str]
+) -> List[Dict[str, Any]]:
+    pending: List[Dict[str, Any]] = []
+    queued_email_addresses: set[str] = set()
+    normalized_sent = {email.strip().lower() for email in sent_emails}
+    for contact in contact_data:
+        email = contact.get("Email")
+        if not isinstance(email, str) or not email.strip():
+            continue
+        normalized_email = email.strip().lower()
+        if (
+            normalized_email in normalized_sent
+            or normalized_email in queued_email_addresses
+        ):
+            continue
+        queued_email_addresses.add(normalized_email)
+        pending.append({**contact, "Email": email.strip()})
+    return pending
+
 class CampaignRequest(BaseModel):
     source_type: Literal["airtable", "csv"]
     subject: str
@@ -183,7 +317,7 @@ def _request_audiences(
     )
 
 # --- REEMPLAZA esta función completa ---
-def run_campaign_task(campaign_id: str):
+def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
     """
     Tarea en segundo plano: Lee la configuración, obtiene los contactos
     (de Airtable o CSV según source_type) y envía los emails.
@@ -215,18 +349,41 @@ def run_campaign_task(campaign_id: str):
             pass
         return
 
+    storage = _get_campaign_storage()
+    contact_data: List[Dict[str, Any]] = []
+    source_type = config.get('source_type')
+
+    # Airtable campaigns must refresh and persist their audience before sender
+    # setup or any send-loop work. The wrapper already owns this launch lock.
+    if source_type == 'airtable':
+        print(f"[{campaign_id}] Refreshing contacts from Airtable...")
+        try:
+            contact_data = _refresh_airtable_campaign_contacts(
+                campaign_id,
+                config,
+                storage,
+                owner_id=launch_id,
+            )
+        except Exception as error:
+            print(f"[{campaign_id}] ERROR: Failed to refresh Airtable contacts: {error}")
+            config['status'] = 'Error - Airtable Fetch Failed'
+            storage.save_campaign(campaign_id, config, serialize_unknown=True)
+            _sync_remote_campaign_status(campaign_id, config['status'])
+            return
+
+        if not contact_data:
+            config['status'] = 'Error - No Airtable Recipients'
+            storage.save_campaign(campaign_id, config, serialize_unknown=True)
+            _sync_remote_campaign_status(campaign_id, config['status'])
+            return
+
     # --- Actualizar Estado a 'Sending' ---
     config['status'] = 'Sending'
     try:
-        with open(campaign_file_path, 'w') as f:
-            json.dump(config, f, indent=4)
+        storage.save_campaign(campaign_id, config, serialize_unknown=True)
     except Exception as e:
         print(f"[{campaign_id}] WARNING: Could not update status to 'Sending': {e}")
         # Continuamos igualmente, pero el frontend no verá el cambio inmediato
-
-    # --- 2. Obtener Lista de Contactos (Email, Nombre) ---
-    contact_data = [] # Lista de diccionarios {'Email': ..., 'Name': ...}
-    source_type = config.get('source_type')
 
     # --- INICIO: NUEVO BLOQUE para cargar Servicios de Gmail ---
     sender_config = config.get('sender_config', 'all') # 'all' por defecto si no está
@@ -259,50 +416,7 @@ def run_campaign_task(campaign_id: str):
     # --- FIN: NUEVO BLOQUE ---
 
     if source_type == 'airtable':
-        print(f"[{campaign_id}] Fetching contacts from Airtable...")
-        try:
-            # Instanciamos AirtableService aquí, dentro de la tarea
-            airtable_service = AirtableService()
-            # Usamos los filtros guardados en la config
-            airtable_contacts_raw = airtable_service.get_campaign_contacts(
-                region=config.get('region'),
-                is_bounced=config.get('is_bounced', False), # Usa False si no está definido
-                segment=config.get('segment', 'standard')   # ✅ Usa el segmento guardado
-            )
-            # Necesitamos adaptar esto si get_campaign_contacts no devuelve nombres
-            # Ahora get_campaign_contacts devuelve {'Email': ..., 'Name': ...}
-            contact_data = [{'Email': c.get('Email'), 'Name': c.get('Name', 'Valued Supporter')}
-                            for c in airtable_contacts_raw if c.get('Email')]
-            print(f"[{campaign_id}] Found {len(contact_data)} contacts in Airtable.")
-            
-            # --- NUEVO: Actualizar target_count con el conteo real al momento de enviar ---
-            config['target_count'] = len(contact_data)
-            config['contacts_fetched_at'] = datetime.now().isoformat()
-            try:
-                with open(campaign_file_path, 'w') as f:
-                    json.dump(config, f, indent=4)
-                print(f"[{campaign_id}] Updated target_count to {len(contact_data)} (fresh from Airtable)")
-            except Exception as e_save:
-                print(f"[{campaign_id}] WARNING: Could not save updated target_count: {e_save}")
-            
-            # --- NUEVO: Regenerar el archivo CSV de targets con los contactos frescos ---
-            try:
-                df_data = [{'Email': contact.get('Email')} for contact in contact_data if contact.get('Email')]
-                pd.DataFrame(df_data).to_csv(target_csv_path, index=False)
-                print(f"[{campaign_id}] Regenerated target CSV with {len(df_data)} contacts")
-            except Exception as e_csv:
-                print(f"[{campaign_id}] WARNING: Could not regenerate target CSV: {e_csv}")
-            # --- FIN NUEVO ---
-            
-        except Exception as e:
-            print(f"[{campaign_id}] ERROR: Failed to get contacts from Airtable: {e}")
-            config['status'] = 'Error - Airtable Fetch Failed' # Actualiza estado a error
-            try:
-                with open(campaign_file_path, 'w') as f: json.dump(config, f, indent=4)
-                service = get_email_sender_service()
-                service.update_campaign(campaign_id, {'status': config['status']})
-            except Exception: pass
-            return # Detiene la tarea
+        print(f"[{campaign_id}] Using freshly resolved Airtable contacts.")
 
     elif source_type == 'csv':
         print(f"[{campaign_id}] Processing contacts from CSV...")
@@ -461,6 +575,9 @@ def run_campaign_task(campaign_id: str):
     total_contacts_to_send = len(contacts_to_send)
     print(f"[{campaign_id}] Emails pending in this run: {total_contacts_to_send}")
     
+    sent_count_this_run = 0
+    failed_contacts = []
+
     if total_contacts_to_send == 0:
         print(f"[{campaign_id}] No new contacts to send. Finishing.")
     else:
@@ -480,9 +597,7 @@ def run_campaign_task(campaign_id: str):
         stop_event = threading.Event()
         
         # Counters
-        sent_count_this_run = 0
         sent_count_lock = threading.Lock()
-        failed_contacts = []
         failed_contacts_lock = threading.Lock()
         
         processed_count = 0
@@ -665,6 +780,36 @@ def run_campaign_task(campaign_id: str):
     # (El estado ya se actualizó correctamente en el bloque anterior)
     print(f"[{campaign_id}] Campaign finished. Sent {sent_count_this_run} emails in this run. Total sent (cumulative): {final_sent_count}/{len(contact_data)}")
 
+
+def run_campaign_task(campaign_id: str, launch_id: Optional[str] = None):
+    """Run one reserved campaign execution and always release its launch lock."""
+    storage = _get_campaign_storage()
+    if launch_id is None:
+        try:
+            launch_id = prepare_campaign_launch(
+                campaign_id, refresh_airtable=False
+            )
+        except HTTPException as error:
+            print(f"[{campaign_id}] Launch skipped: {error.detail}")
+            return
+    elif not storage.owns_launch_lock(campaign_id, launch_id):
+        print(f"[{campaign_id}] Launch skipped: execution lock is not owned.")
+        return
+
+    try:
+        _run_campaign_task_unlocked(campaign_id, launch_id)
+    except Exception as error:
+        print(f"[{campaign_id}] Unexpected campaign failure: {error}")
+        try:
+            config = storage.load_campaign(campaign_id)
+            config["status"] = "Interrupted"
+            config["interrupted_at"] = datetime.now().isoformat()
+            storage.save_campaign(campaign_id, config, serialize_unknown=True)
+            _sync_remote_campaign_status(campaign_id, "Interrupted")
+        except Exception as recovery_error:
+            print(f"[{campaign_id}] Could not persist interrupted state: {recovery_error}")
+    finally:
+        storage.release_launch_lock(campaign_id, launch_id)
 
 # --- Fin función ---
 
@@ -991,11 +1136,16 @@ def launch_campaign(
     """
     Lanza la tarea de envío para una campaña.
     """
-    campaign_file_path = os.path.join(CAMPAIGN_DATA_DIR, f"{campaign_id}.json")
-    if not os.path.exists(campaign_file_path):
-        raise HTTPException(status_code=404, detail="Campaign not found")
-    background_tasks.add_task(run_campaign_task, campaign_id)
-    return {"message": f"Campaign '{campaign_id}' has been launched."}
+    launch_id = prepare_campaign_launch(campaign_id)
+    try:
+        background_tasks.add_task(run_campaign_task, campaign_id, launch_id)
+    except Exception:
+        _get_campaign_storage().release_launch_lock(campaign_id, launch_id)
+        raise
+    return {
+        "message": f"Campaign '{campaign_id}' has been queued for launch.",
+        "status": "Launching",
+    }
 
 
 
@@ -1592,6 +1742,15 @@ def pause_campaign(
     Sets the campaign status to 'Paused'.
     The background task should check this status and temporarily stop sending.
     """
+    storage = _get_campaign_storage()
+    if not storage.campaign_exists(campaign_id):
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    current_status = storage.load_campaign(campaign_id).get("status", "Unknown")
+    if current_status not in {"Launching", "Sending"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Campaign cannot be paused from status '{current_status}'",
+        )
     # Aquí podríamos añadir lógica para verificar que la campaña esté realmente 'Sending'
     print(f"[{campaign_id}] Solicitud de pausa recibida.")
     updated_config = _update_campaign_status(campaign_id, "Paused")
@@ -1603,6 +1762,7 @@ def pause_campaign(
              summary="Resume a paused campaign")
 def resume_campaign(
     campaign_id: str,
+    background_tasks: BackgroundTasks,
     current_user: str = Depends(get_current_user)
 ):
     """
@@ -1610,13 +1770,12 @@ def resume_campaign(
     The background task should detect this change and resume sending.
     """
     # Aquí verificamos que venga de 'Paused' para evitar reanudar campañas completadas o en error.
-    campaign_file_path = os.path.join(CAMPAIGN_DATA_DIR, f"{campaign_id}.json")
+    storage = _get_campaign_storage()
     current_status = 'Unknown'
-    if os.path.exists(campaign_file_path):
+    if storage.campaign_exists(campaign_id):
         try:
-            with open(campaign_file_path, 'r') as f:
-                config = json.load(f)
-                current_status = config.get('status', 'Unknown')
+            config = storage.load_campaign(campaign_id)
+            current_status = config.get('status', 'Unknown')
         except Exception:
             pass # Si no se puede leer, la función _update_campaign_status lanzará error
 
@@ -1625,7 +1784,24 @@ def resume_campaign(
 
     print(f"[{campaign_id}] Solicitud de reanudación recibida.")
     # Vuelve al estado 'Sending' para que la tarea continúe
-    updated_config = _update_campaign_status(campaign_id, "Sending")
+    launch_id = None
+    can_restart_worker = config.get("source_type") in {"airtable", "csv"}
+    if not storage.is_launch_locked(campaign_id) and can_restart_worker:
+        launch_id = storage.acquire_launch_lock(campaign_id)
+        if launch_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Campaign resume is already in progress",
+            )
+
+    try:
+        updated_config = _update_campaign_status(campaign_id, "Sending")
+        if launch_id is not None:
+            background_tasks.add_task(run_campaign_task, campaign_id, launch_id)
+    except Exception:
+        if launch_id is not None:
+            storage.release_launch_lock(campaign_id, launch_id)
+        raise
     return updated_config
 
 @router.post("/sender/campaigns/{campaign_id}/cancel",
