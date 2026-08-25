@@ -35,7 +35,11 @@ import {
 import { alpha } from '@mui/material/styles';
 import { Link as RouterLink } from 'react-router-dom';
 
-import { buildAudiencePresentation, buildAudienceTooltipProps } from './audiencePresentation';
+import {
+  buildAudienceLabelProps,
+  buildAudiencePresentation,
+  buildAudienceTooltipProps,
+} from './audiencePresentation';
 import { buildCampaignPresentation } from './campaignPresentation';
 import { campaignColumnPercentages } from './campaignTableLayout';
 import type { EmailCampaign } from './types';
@@ -162,6 +166,7 @@ export function CampaignTable({
             {campaigns.map((campaign) => {
               const presentation = buildCampaignPresentation(campaign);
               const audiencePresentation = buildAudiencePresentation(campaign);
+              const audienceLabelProps = buildAudienceLabelProps(audiencePresentation);
               const audienceTooltipProps = campaign.source_type === 'airtable'
                 ? buildAudienceTooltipProps(audiencePresentation)
                 : null;
@@ -275,6 +280,7 @@ export function CampaignTable({
                           variant="body2"
                           sx={{ fontWeight: 600 }}
                           noWrap
+                          {...audienceLabelProps}
                         >
                           {audiencePresentation.label}
                         </Typography>

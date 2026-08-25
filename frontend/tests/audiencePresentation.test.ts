@@ -215,3 +215,32 @@ test('exposes a focusable tooltip trigger only for complete multi-branch detail'
   });
   assert.equal(buildAudienceTooltipProps(singleBranch), null);
 });
+
+test('provides full-text title props without adding a non-multi tab stop', async () => {
+  const {
+    buildAudiencePresentation,
+    buildAudienceLabelProps,
+    buildAudienceTooltipProps,
+  } = await import('../src/features/email-sender/audiencePresentation.ts');
+
+  const singleBranch = buildAudiencePresentation({
+    id: 'Campaign_title_single',
+    createdAt: '2026-08-24T12:00:00Z',
+    source_type: 'airtable',
+    status: 'Draft',
+    audiences: [{ region: 'EUR', is_bounced: false }],
+  });
+  const csv = buildAudiencePresentation({
+    id: 'Campaign_title_csv',
+    createdAt: '2026-08-24T12:00:00Z',
+    source_type: 'csv',
+    status: 'Completed',
+    csv_filename: 'a-very-long-donor-export-file-name.csv',
+  });
+
+  assert.deepEqual(buildAudienceLabelProps(singleBranch), { title: 'EUR · Valid' });
+  assert.deepEqual(buildAudienceLabelProps(csv), {
+    title: 'a-very-long-donor-export-file-name.csv',
+  });
+  assert.equal(buildAudienceTooltipProps(singleBranch), null);
+});

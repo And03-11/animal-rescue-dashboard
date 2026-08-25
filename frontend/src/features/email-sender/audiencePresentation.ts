@@ -45,3 +45,12 @@ export function buildAudienceTooltipProps(
     tabIndex: 0,
   };
 }
+export interface AudienceLabelProps {
+  title: string;
+}
+
+export function buildAudienceLabelProps(
+  presentation: AudiencePresentation,
+): AudienceLabelProps {
+  return { title: presentation.tooltip || presentation.label };
+}

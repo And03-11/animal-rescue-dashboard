@@ -54,3 +54,9 @@ Complete. Base was `dd5a097fa2e6976c9d3a4299f88e5d3a2f11bbfa`; intended commit: 
 - Staged only the shared hydration fix, presentation/accessibility helper and table integration, direct table dependencies, their focused tests, and this report. Unrelated dirty and untracked work remains unstaged.
 - No new dependency was added. No DOM test runtime is installed; accessibility is covered by the pure helper contract and source integration, with browser visual checks remaining Task 10 scope.
 - Exact clean archive of commit `750bb0a` (`tmp/task9-clean-750bb0a`, with only a junction to installed `node_modules`) — Task 6/9 tests exit 0, 17/17 passed; focused ESLint exit 0; `npm run build` exit 0 with `tsc -b`, 13,171 transformed modules, and Vite production output. This confirms the direct table helpers are present in the committed snapshot.
+
+## Review round 2 — full-text non-multi fallback
+
+- RED: the focused presentation test failed because non-multi rows exposed no full-text label props after the accessible multi-branch Tooltip fix.
+- GREEN: `buildAudienceLabelProps` now returns a native `title` from the complete tooltip/label text. The table applies it only to the non-focusable path, preserving zero extra tab stops for single/empty rows and leaving the multi-branch focusable Tooltip/aria behavior unchanged.
+- Verification: Task 6/9 presentation/layout suite passed 18/18; focused ESLint passed; `npm run build` passed; focused diff check passed.
