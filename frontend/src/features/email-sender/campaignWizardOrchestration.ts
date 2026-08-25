@@ -34,7 +34,43 @@ export interface CampaignSaveExecutionInput {
   initialCampaignId?: string | null;
   signal: AbortSignal;
   runOperation: (context: CampaignSaveExecutionContext) => Promise<string | void>;
+  retainCampaignId?: (campaignId: string) => void;
   publishCampaignId?: (campaignId: string) => void;
+}
+
+/** Keep an incomplete create private to one AbortSignal-backed wizard session. */
+export class CampaignSaveSessionState {
+  private signal: AbortSignal | null = null;
+  private pendingCampaignId: string | null = null;
+
+  private activate(signal: AbortSignal): void {
+    if (this.signal === signal) return;
+    this.signal = signal;
+    this.pendingCampaignId = null;
+  }
+
+  resolveCampaignId(signal: AbortSignal, publishedCampaignId?: string | null): string | null {
+    this.activate(signal);
+    return publishedCampaignId ?? this.pendingCampaignId;
+  }
+
+  retainCampaignId(signal: AbortSignal, campaignId: string): void {
+    this.activate(signal);
+    this.pendingCampaignId = campaignId;
+  }
+
+  peekCampaignId(signal: AbortSignal): string | null {
+    return this.signal === signal ? this.pendingCampaignId : null;
+  }
+
+  complete(signal: AbortSignal): void {
+    if (this.signal === signal) this.pendingCampaignId = null;
+  }
+
+  clear(): void {
+    this.signal = null;
+    this.pendingCampaignId = null;
+  }
 }
 
 function throwIfSaveAborted(signal: AbortSignal): void {
@@ -71,6 +107,7 @@ export async function executeCampaignSavePlan(
         throw new Error('Campaign save did not return an ID.');
       }
       campaignId = createdCampaignId;
+      input.retainCampaignId?.(campaignId);
     }
   }
 

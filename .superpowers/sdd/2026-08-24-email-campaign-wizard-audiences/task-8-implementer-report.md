@@ -127,3 +127,45 @@ Complete. Base was `5585fcba7306cb5fbcc4c6a97be911b4718df045`; the intended impl
 - No DOM component-test runtime is installed; the parent-ID effect is covered at the dependency-free executor/session boundary and the real page consumes that same executor.
 - If create succeeds but upload or mapping fails, the backend may retain its pre-existing incomplete draft. This fix deliberately does not publish or hydrate that ID; cleanup/reuse would require a separate backend contract. The user-facing wizard session and local CSV state remain recoverable.
 - No dependency, package, lockfile, ESLint configuration, plan, specification, or ledger change is included.
+
+## Review round 3 — resume incomplete CSV saves
+
+### RED / root cause
+
+- Round 2 kept the create response local through one invocation, but discarded it when upload or mapping rejected. The next click still planned from public `editingCampaignId === null`, so it created a second durable campaign.
+- The new two-attempt tests were added first. `node --test tests/campaignWizardOrchestration.test.ts` exited 1: seven prior tests passed and three new tests failed because private session state was absent.
+
+### GREEN / architecture and behavior preservation
+
+- `CampaignSaveSessionState` keeps one pending ID in non-rendering state keyed by the wizard's `AbortSignal`. It never publishes that ID through `initialCampaignId`, so retaining it cannot trigger hydration, a parent identity change, or session abort.
+- The executor reports a validated create ID through `retainCampaignId` immediately after create succeeds. Upload or mapping failure leaves that private ID intact in the same live signal/session.
+- Retry resolves the private ID before planning, producing `update-campaign -> upload-csv -> save-mapping` with zero new creates. The update uses the current wizard payload, so campaign name, subject, HTML, sender, schedule, source, and any other edits made after failure are persisted before retrying CSV work.
+- Pending state clears only after every planned operation succeeds, when the page observes a different public campaign identity/session, or synchronously when the wizard closes. Existing edit, Airtable, preview, hydration, sender, template, editor, send-test, pagination, launch, edit, and delete behavior remains unchanged.
+
+### Regression coverage
+
+- Upload-failure and mapping-failure cases each perform two saves. Both prove one total create, the same retained ID, a second-attempt `update -> upload -> mapping` order, changed subject data on every retry operation, live session signal, and pending-state cleanup only after mapping succeeds.
+- A separate lifecycle case proves a new AbortSignal discards the old pending ID and explicit close cleanup removes the current one.
+
+### Files and commit scope
+
+- Modified `campaignWizardOrchestration.ts` with private `CampaignSaveSessionState` and the executor retain callback.
+- Extended `campaignWizardOrchestration.test.ts` with two two-attempt regressions plus session-change/close cleanup coverage.
+- Staged only precise `EmailSenderPage.tsx` import/ref/planning/retain/complete/close hunks through exact base-derived blob `78217eb08882a5584d80e132055ea2446becf255`; unrelated dirty page/table/pagination work remains unstaged.
+- This report plus those three implementation/test paths are the complete intended scope of `fix: resume incomplete CSV campaign saves`.
+
+### Exact-snapshot verification
+
+- Exact staged source tree: `7153c131cce1b8f42221aa5e279e3744a30c8be1`.
+- Task 6/7/8 Node command — exit 0, 30/30 passed.
+- Mandated five-file ESLint — exit 0; orchestration helper/test ESLint — exit 0 under the committed configuration.
+- `tsc -p tsconfig.app.json --noEmit` — exit 0.
+- `npm run build -- --logLevel silent` — exit 0; `tsc -b` and Vite completed.
+- `git diff --cached --check` is required again immediately before commit.
+
+### Close/orphan behavior and concerns
+
+- If create succeeds and the user retries within the same open wizard, the retained ID is reused as described above.
+- If the user closes after create but before upload/mapping completes, the private ID is intentionally forgotten with that session. The already-created backend Draft may remain orphaned. This task does not delete it because no rollback/delete authorization or transactional backend contract was provided; cleanup can be handled separately.
+- No DOM component-test runtime is installed; the resumable behavior is covered at the dependency-free executor/session boundary used by the real page.
+- No dependency, package, lockfile, ESLint configuration, plan, specification, or ledger change is included.

@@ -1,5 +1,5 @@
 // src/pages/EmailSenderPage.tsx
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Box,
@@ -40,6 +40,7 @@ import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
 import apiClient from '../api/axiosConfig';
 import { CampaignWizard } from '../features/email-sender/CampaignWizard';
 import {
+  CampaignSaveSessionState,
   executeCampaignSavePlan,
   planCampaignSave,
 } from '../features/email-sender/campaignWizardOrchestration';
@@ -90,6 +91,15 @@ export const EmailSenderPage = () => {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false); // Controla el modal de confirmación
   const [deleting, setDeleting] = useState(false);
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
+  const campaignSaveSessionRef = useRef(new CampaignSaveSessionState());
+  const wizardCampaignIdRef = useRef<string | null>(editingCampaignId);
+
+  useEffect(() => {
+    if (!isModalOpen || wizardCampaignIdRef.current !== editingCampaignId) {
+      campaignSaveSessionRef.current.clear();
+    }
+    wizardCampaignIdRef.current = editingCampaignId;
+  }, [editingCampaignId, isModalOpen]);
 
   const fetchCampaigns = useCallback(async () => {
     // No mostramos spinner principal en refrescos automáticos
@@ -142,13 +152,15 @@ export const EmailSenderPage = () => {
   ) => {
     const { csvFile, ...campaignBaseData } = campaignDataFromForm;
     const sourceType = campaignBaseData.source_type;
+    const saveSignal = signal ?? new AbortController().signal;
+    const saveState = campaignSaveSessionRef.current;
+    const campaignIdForSave = saveState.resolveCampaignId(saveSignal, editingCampaignId);
     const operations = planCampaignSave({
-      existingCampaignId: editingCampaignId,
+      existingCampaignId: campaignIdForSave,
       sourceType,
       hasCsvFile: Boolean(csvFile),
       hasMapping: Boolean(mapping),
     });
-    const saveSignal = signal ?? new AbortController().signal;
 
     setError(null);
     setSnackbarMessage(null);
@@ -156,8 +168,11 @@ export const EmailSenderPage = () => {
     try {
       const campaignId = await executeCampaignSavePlan({
         operations,
-        initialCampaignId: editingCampaignId,
+        initialCampaignId: campaignIdForSave,
         signal: saveSignal,
+        retainCampaignId: (createdCampaignId) => {
+          saveState.retainCampaignId(saveSignal, createdCampaignId);
+        },
         runOperation: async ({ operation, campaignId: currentCampaignId, signal: operationSignal }) => {
           if (operation === 'create-campaign') {
             setSnackbarMessage('Saving campaign configuration…');
@@ -200,6 +215,7 @@ export const EmailSenderPage = () => {
         },
       });
 
+      saveState.complete(saveSignal);
       setSnackbarMessage(
         sourceType === 'csv'
           ? 'CSV campaign saved successfully!'
@@ -502,6 +518,7 @@ export const EmailSenderPage = () => {
         open={isModalOpen}
         initialCampaignId={editingCampaignId}
         onClose={() => {
+          campaignSaveSessionRef.current.clear();
           setIsModalOpen(false);
           setEditingCampaignId(null);
           setError(null);

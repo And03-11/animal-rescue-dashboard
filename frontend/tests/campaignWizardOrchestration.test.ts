@@ -154,3 +154,95 @@ for (const failedOperation of ['upload-csv', 'save-mapping'] as const) {
     assert.equal(lifecycle.isCurrent(session), true);
   });
 }
+
+for (const failedOperation of ['upload-csv', 'save-mapping'] as const) {
+  test(`new CSV retry resumes the pending campaign after ${failedOperation} failure`, async () => {
+    assert.ok(orchestration, 'campaign wizard orchestration module is missing');
+    assert.equal(
+      typeof orchestration.CampaignSaveSessionState,
+      'function',
+      'campaign save session state is missing',
+    );
+
+    const lifecycle = new orchestration.WizardSessionLifecycle();
+    const session = lifecycle.begin();
+    const saveState = new orchestration.CampaignSaveSessionState();
+    const calls: Array<[number, string, string | null, string]> = [];
+    let createCalls = 0;
+
+    const saveAttempt = async (attempt: number, subject: string) => {
+      const campaignId = saveState.resolveCampaignId(session.signal, null);
+      const operations = orchestration.planCampaignSave({
+        existingCampaignId: campaignId,
+        sourceType: 'csv',
+        hasCsvFile: true,
+        hasMapping: true,
+      });
+      const completedId = await orchestration.executeCampaignSavePlan({
+        operations,
+        initialCampaignId: campaignId,
+        signal: session.signal,
+        retainCampaignId: (createdCampaignId) => {
+          saveState.retainCampaignId(session.signal, createdCampaignId);
+        },
+        runOperation: async ({ operation, campaignId: currentCampaignId }) => {
+          calls.push([attempt, operation, currentCampaignId, subject]);
+          if (operation === 'create-campaign') {
+            createCalls += 1;
+            return 'campaign-pending';
+          }
+          if (attempt === 1 && operation === failedOperation) {
+            throw new Error(`${failedOperation} failed`);
+          }
+          if (attempt === 2 && operation === 'save-mapping') {
+            assert.equal(saveState.peekCampaignId(session.signal), 'campaign-pending');
+          }
+        },
+      });
+      saveState.complete(session.signal);
+      return completedId;
+    };
+
+    await assert.rejects(
+      () => saveAttempt(1, 'Original subject'),
+      new RegExp(`${failedOperation} failed`),
+    );
+    assert.equal(saveState.peekCampaignId(session.signal), 'campaign-pending');
+    assert.equal(session.signal.aborted, false);
+
+    const completedId = await saveAttempt(2, 'Changed before retry');
+
+    assert.equal(completedId, 'campaign-pending');
+    assert.equal(createCalls, 1, 'retry must not create a duplicate campaign');
+    assert.deepEqual(
+      calls.filter(([attempt]) => attempt === 2),
+      [
+        [2, 'update-campaign', 'campaign-pending', 'Changed before retry'],
+        [2, 'upload-csv', 'campaign-pending', 'Changed before retry'],
+        [2, 'save-mapping', 'campaign-pending', 'Changed before retry'],
+      ],
+    );
+    assert.equal(saveState.peekCampaignId(session.signal), null);
+    assert.equal(session.signal.aborted, false);
+  });
+}
+
+test('private pending campaign state clears on a different session or close', () => {
+  assert.ok(orchestration, 'campaign wizard orchestration module is missing');
+  assert.equal(
+    typeof orchestration.CampaignSaveSessionState,
+    'function',
+    'campaign save session state is missing',
+  );
+  const lifecycle = new orchestration.WizardSessionLifecycle();
+  const first = lifecycle.begin();
+  const state = new orchestration.CampaignSaveSessionState();
+  state.resolveCampaignId(first.signal, null);
+  state.retainCampaignId(first.signal, 'campaign-orphaned-on-close');
+
+  const second = lifecycle.begin();
+  assert.equal(state.resolveCampaignId(second.signal, null), null);
+  state.retainCampaignId(second.signal, 'campaign-second');
+  state.clear();
+  assert.equal(state.peekCampaignId(second.signal), null);
+});
