@@ -340,6 +340,22 @@ class CampaignFileStorage:
             and expected_generation == actual_generation
         )
 
+    def _assert_launch_lease_owned_unlocked(
+        self,
+        campaign_id: str,
+        lease: str,
+        *,
+        error_type: type[RuntimeError],
+    ) -> None:
+        """Assert one exact live fence while the mutation guard is held."""
+        current = self._read_lock_payload(self.launch_lock_path(campaign_id))
+        if (
+            current is None
+            or self._lock_is_expired(*current)
+            or not self._lease_matches(current[0], lease)
+        ):
+            raise error_type(campaign_id)
+
     def _reclaim_expired_lock(self, campaign_id: str) -> bool:
         lock_path = self.launch_lock_path(campaign_id)
         with self._lease_mutation_guard(campaign_id):
@@ -544,6 +560,17 @@ class CampaignFileStorage:
             target=target_path.read_bytes() if target_path.exists() else None,
         )
 
+    def _write_optional_bytes_unlocked(
+        self,
+        path: Path,
+        payload: bytes | None,
+        campaign_id: str,
+    ) -> None:
+        if payload is None:
+            path.unlink(missing_ok=True)
+        else:
+            self._atomic_write_bytes(path, payload, campaign_id)
+
     def restore_campaign_snapshot(
         self,
         campaign_id: str,
@@ -551,16 +578,42 @@ class CampaignFileStorage:
         *,
         owner_id: str,
     ) -> None:
-        if not self.owns_launch_lock(campaign_id, owner_id):
-            raise CampaignMutationLockedError(campaign_id)
-        for path, payload in (
-            (self.target_path(campaign_id), snapshot.target),
-            (self.campaign_path(campaign_id), snapshot.campaign),
-        ):
-            if payload is None:
-                path.unlink(missing_ok=True)
-            else:
-                self._atomic_write_bytes(path, payload, campaign_id)
+        target_path = self.target_path(campaign_id)
+        campaign_path = self.campaign_path(campaign_id)
+        with self._lease_mutation_guard(campaign_id):
+            self._assert_launch_lease_owned_unlocked(
+                campaign_id,
+                owner_id,
+                error_type=CampaignMutationLockedError,
+            )
+            previous = CampaignSnapshot(
+                campaign=(
+                    campaign_path.read_bytes() if campaign_path.exists() else None
+                ),
+                target=target_path.read_bytes() if target_path.exists() else None,
+            )
+            try:
+                self._write_optional_bytes_unlocked(
+                    target_path, snapshot.target, campaign_id
+                )
+                self._write_optional_bytes_unlocked(
+                    campaign_path, snapshot.campaign, campaign_id
+                )
+            except Exception:
+                for path, payload in (
+                    (target_path, previous.target),
+                    (campaign_path, previous.campaign),
+                ):
+                    try:
+                        self._write_optional_bytes_unlocked(
+                            path, payload, campaign_id
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Unable to roll back partial snapshot restore for %s",
+                            campaign_id,
+                        )
+                raise
 
     def save_uploaded_csv(self, campaign_id: str, content: bytes) -> Path:
         target_path = self.target_path(campaign_id)
@@ -736,13 +789,8 @@ class CampaignFileStorage:
         owner_id: str,
     ) -> None:
         """Atomically replace audience state using the caller-owned shared lock."""
-        if not self.owns_launch_lock(campaign_id, owner_id):
-            raise CampaignMutationLockedError(campaign_id)
-
         campaign_path = self.campaign_path(campaign_id)
         target_path = self.target_path(campaign_id)
-        campaign_path.parent.mkdir(parents=True, exist_ok=True)
-        target_path.parent.mkdir(parents=True, exist_ok=True)
         config_temporary_path = campaign_path.with_name(
             f".{campaign_path.name}.{uuid4().hex}.tmp"
         )
@@ -752,43 +800,54 @@ class CampaignFileStorage:
         rollback_target_path = target_path.with_name(
             f".{target_path.name}.{uuid4().hex}.rollback"
         )
-        previous_target = target_path.read_bytes() if target_path.exists() else None
-
-        try:
-            with config_temporary_path.open("w", encoding="utf-8") as campaign_file:
-                json.dump(config, campaign_file, indent=4, default=str)
-                campaign_file.flush()
-                os.fsync(campaign_file.fileno())
-
-            target_rows = [
-                {"Email": contact.get("Email")}
-                for contact in contacts
-                if contact.get("Email")
-            ]
-            target_csv = pd.DataFrame(
-                target_rows, columns=["Email"]
-            ).to_csv(index=False)
-            with target_temporary_path.open(
-                "w", encoding="utf-8", newline=""
-            ) as target_file:
-                target_file.write(target_csv)
-                target_file.flush()
-                os.fsync(target_file.fileno())
-
-            os.replace(target_temporary_path, target_path)
+        with self._lease_mutation_guard(campaign_id):
+            self._assert_launch_lease_owned_unlocked(
+                campaign_id,
+                owner_id,
+                error_type=CampaignMutationLockedError,
+            )
+            campaign_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            previous_target = (
+                target_path.read_bytes() if target_path.exists() else None
+            )
             try:
-                os.replace(config_temporary_path, campaign_path)
-            except Exception:
-                if previous_target is None:
-                    target_path.unlink(missing_ok=True)
-                else:
-                    with rollback_target_path.open("wb") as rollback_file:
-                        rollback_file.write(previous_target)
-                        rollback_file.flush()
-                        os.fsync(rollback_file.fileno())
-                    os.replace(rollback_target_path, target_path)
-                raise
-        finally:
-            self._cleanup_temporary_path(config_temporary_path, campaign_id)
-            self._cleanup_temporary_path(target_temporary_path, campaign_id)
-            self._cleanup_temporary_path(rollback_target_path, campaign_id)
+                with config_temporary_path.open(
+                    "w", encoding="utf-8"
+                ) as campaign_file:
+                    json.dump(config, campaign_file, indent=4, default=str)
+                    campaign_file.flush()
+                    os.fsync(campaign_file.fileno())
+
+                target_rows = [
+                    {"Email": contact.get("Email")}
+                    for contact in contacts
+                    if contact.get("Email")
+                ]
+                target_csv = pd.DataFrame(
+                    target_rows, columns=["Email"]
+                ).to_csv(index=False)
+                with target_temporary_path.open(
+                    "w", encoding="utf-8", newline=""
+                ) as target_file:
+                    target_file.write(target_csv)
+                    target_file.flush()
+                    os.fsync(target_file.fileno())
+
+                os.replace(target_temporary_path, target_path)
+                try:
+                    os.replace(config_temporary_path, campaign_path)
+                except Exception:
+                    if previous_target is None:
+                        target_path.unlink(missing_ok=True)
+                    else:
+                        with rollback_target_path.open("wb") as rollback_file:
+                            rollback_file.write(previous_target)
+                            rollback_file.flush()
+                            os.fsync(rollback_file.fileno())
+                        os.replace(rollback_target_path, target_path)
+                    raise
+            finally:
+                self._cleanup_temporary_path(config_temporary_path, campaign_id)
+                self._cleanup_temporary_path(target_temporary_path, campaign_id)
+                self._cleanup_temporary_path(rollback_target_path, campaign_id)

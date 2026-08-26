@@ -44,6 +44,7 @@ async def check_and_launch_scheduled_campaigns():
         
         for campaign in pending:
             campaign_id = campaign['id']
+            claimed = None
             try:
                 try:
                     campaign_exists = storage.campaign_exists(campaign_id)
@@ -80,6 +81,7 @@ async def check_and_launch_scheduled_campaigns():
                         )
                     finally:
                         storage.release_launch_lock(campaign_id, launch_id)
+                    continue
                 if not claimed:
                     storage.save_campaign_owned(
                         campaign_id,

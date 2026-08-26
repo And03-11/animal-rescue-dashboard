@@ -11,7 +11,10 @@ from fastapi import HTTPException
 from backend.app.api.v1.endpoints import email_sender
 from backend.app.core import scheduler_worker
 from backend.app.services import email_sender_service
-from backend.app.services.campaign_storage import CampaignFileStorage
+from backend.app.services.campaign_storage import (
+    CampaignFileStorage,
+    CampaignMutationLockedError,
+)
 from backend.app.services.email_sender_service import EmailSenderService
 
 
@@ -422,3 +425,274 @@ def test_scheduler_claim_failure_restores_local_state_and_releases_lease(
 
     assert json.loads(config_path.read_text(encoding="utf-8"))["status"] == "Scheduled"
     assert not email_sender._get_campaign_storage().is_launch_locked(campaign_id)
+
+
+def _pause_stale_mutation_at_target_path(
+    storage,
+    monkeypatch,
+    *,
+    thread_name,
+    reached_initial_point,
+    resume_stale_owner,
+):
+    original_target_path = storage.target_path
+
+    def paused_target_path(campaign_id):
+        path = original_target_path(campaign_id)
+        if (
+            threading.current_thread().name == thread_name
+            and not reached_initial_point.is_set()
+        ):
+            reached_initial_point.set()
+            assert resume_stale_owner.wait(timeout=3)
+        return path
+
+    monkeypatch.setattr(storage, "target_path", paused_target_path)
+
+
+def _publish_current_owner_state(storage, campaign_id, lease):
+    storage.commit_audience_update(
+        campaign_id,
+        {"id": campaign_id, "status": "B_CURRENT"},
+        ({"Email": "b-current@example.org"},),
+        owner_id=lease,
+    )
+    return (
+        storage.campaign_path(campaign_id).read_bytes(),
+        storage.target_path(campaign_id).read_bytes(),
+    )
+
+
+def test_stale_audience_commit_cannot_overwrite_reclaimer_after_initial_point(
+    tmp_path,
+    monkeypatch,
+):
+    now = [datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc)]
+    stale = _storage(tmp_path, now)
+    reclaimer = _storage(tmp_path, now)
+    campaign_id = "Campaign_grouped_commit_fence"
+    stale.save_campaign(campaign_id, {"id": campaign_id, "status": "A_START"})
+    stale.target_path(campaign_id).parent.mkdir(parents=True, exist_ok=True)
+    stale.target_path(campaign_id).write_text(
+        "Email\na-start@example.org\n", encoding="utf-8"
+    )
+    stale_lease = stale.acquire_launch_lock(campaign_id, "owner-a")
+    assert stale_lease is not None
+
+    reached_initial_point = threading.Event()
+    resume_stale_owner = threading.Event()
+    _pause_stale_mutation_at_target_path(
+        stale,
+        monkeypatch,
+        thread_name="stale-audience-commit",
+        reached_initial_point=reached_initial_point,
+        resume_stale_owner=resume_stale_owner,
+    )
+    stale_errors = []
+
+    def stale_commit():
+        try:
+            stale.commit_audience_update(
+                campaign_id,
+                {"id": campaign_id, "status": "STALE_WRITE"},
+                ({"Email": "stale@example.org"},),
+                owner_id=stale_lease,
+            )
+        except Exception as error:
+            stale_errors.append(error)
+
+    stale_thread = threading.Thread(
+        name="stale-audience-commit",
+        target=stale_commit,
+    )
+    stale_thread.start()
+    assert reached_initial_point.wait(timeout=3)
+
+    now[0] += timedelta(seconds=2)
+    current_lease = reclaimer.acquire_launch_lock(campaign_id, "owner-b")
+    assert current_lease is not None
+    expected_config, expected_target = _publish_current_owner_state(
+        reclaimer, campaign_id, current_lease
+    )
+    resume_stale_owner.set()
+    stale_thread.join(timeout=3)
+
+    assert not stale_thread.is_alive()
+    assert len(stale_errors) == 1
+    assert isinstance(stale_errors[0], CampaignMutationLockedError)
+    assert reclaimer.campaign_path(campaign_id).read_bytes() == expected_config
+    assert reclaimer.target_path(campaign_id).read_bytes() == expected_target
+    assert reclaimer.owns_launch_lock(campaign_id, current_lease)
+
+
+def test_stale_snapshot_restore_cannot_overwrite_reclaimer_after_initial_point(
+    tmp_path,
+    monkeypatch,
+):
+    now = [datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc)]
+    stale = _storage(tmp_path, now)
+    reclaimer = _storage(tmp_path, now)
+    campaign_id = "Campaign_snapshot_restore_fence"
+    stale.save_campaign(
+        campaign_id, {"id": campaign_id, "status": "STALE_SNAPSHOT"}
+    )
+    stale.target_path(campaign_id).parent.mkdir(parents=True, exist_ok=True)
+    stale.target_path(campaign_id).write_text(
+        "Email\nstale-snapshot@example.org\n", encoding="utf-8"
+    )
+    stale_snapshot = stale.snapshot_campaign_state(campaign_id)
+    stale.save_campaign(campaign_id, {"id": campaign_id, "status": "A_START"})
+    stale.target_path(campaign_id).write_text(
+        "Email\na-start@example.org\n", encoding="utf-8"
+    )
+    stale_lease = stale.acquire_launch_lock(campaign_id, "owner-a")
+    assert stale_lease is not None
+
+    reached_initial_point = threading.Event()
+    resume_stale_owner = threading.Event()
+    _pause_stale_mutation_at_target_path(
+        stale,
+        monkeypatch,
+        thread_name="stale-snapshot-restore",
+        reached_initial_point=reached_initial_point,
+        resume_stale_owner=resume_stale_owner,
+    )
+    stale_errors = []
+
+    def stale_restore():
+        try:
+            stale.restore_campaign_snapshot(
+                campaign_id,
+                stale_snapshot,
+                owner_id=stale_lease,
+            )
+        except Exception as error:
+            stale_errors.append(error)
+
+    stale_thread = threading.Thread(
+        name="stale-snapshot-restore",
+        target=stale_restore,
+    )
+    stale_thread.start()
+    assert reached_initial_point.wait(timeout=3)
+
+    now[0] += timedelta(seconds=2)
+    current_lease = reclaimer.acquire_launch_lock(campaign_id, "owner-b")
+    assert current_lease is not None
+    expected_config, expected_target = _publish_current_owner_state(
+        reclaimer, campaign_id, current_lease
+    )
+    resume_stale_owner.set()
+    stale_thread.join(timeout=3)
+
+    assert not stale_thread.is_alive()
+    assert len(stale_errors) == 1
+    assert isinstance(stale_errors[0], CampaignMutationLockedError)
+    assert reclaimer.campaign_path(campaign_id).read_bytes() == expected_config
+    assert reclaimer.target_path(campaign_id).read_bytes() == expected_target
+    assert reclaimer.owns_launch_lock(campaign_id, current_lease)
+
+
+def test_snapshot_restore_rolls_back_partial_target_change_on_config_failure(
+    tmp_path,
+    monkeypatch,
+):
+    now = [datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc)]
+    storage = _storage(tmp_path, now)
+    campaign_id = "Campaign_snapshot_partial_failure"
+    storage.save_campaign(
+        campaign_id, {"id": campaign_id, "status": "SNAPSHOT"}
+    )
+    storage.target_path(campaign_id).parent.mkdir(parents=True, exist_ok=True)
+    storage.target_path(campaign_id).write_text(
+        "Email\nsnapshot@example.org\n", encoding="utf-8"
+    )
+    snapshot = storage.snapshot_campaign_state(campaign_id)
+    storage.save_campaign(campaign_id, {"id": campaign_id, "status": "CURRENT"})
+    storage.target_path(campaign_id).write_text(
+        "Email\ncurrent@example.org\n", encoding="utf-8"
+    )
+    expected_config = storage.campaign_path(campaign_id).read_bytes()
+    expected_target = storage.target_path(campaign_id).read_bytes()
+    lease = storage.acquire_launch_lock(campaign_id, "owner-a")
+    assert lease is not None
+
+    original_atomic_write = storage._atomic_write_bytes
+    failed_once = False
+
+    def fail_first_config_restore(path, payload, requested_campaign_id):
+        nonlocal failed_once
+        if path == storage.campaign_path(campaign_id) and not failed_once:
+            failed_once = True
+            raise OSError("simulated snapshot config restore failure")
+        return original_atomic_write(path, payload, requested_campaign_id)
+
+    monkeypatch.setattr(storage, "_atomic_write_bytes", fail_first_config_restore)
+
+    with pytest.raises(OSError, match="snapshot config restore failure"):
+        storage.restore_campaign_snapshot(
+            campaign_id,
+            snapshot,
+            owner_id=lease,
+        )
+
+    assert storage.campaign_path(campaign_id).read_bytes() == expected_config
+    assert storage.target_path(campaign_id).read_bytes() == expected_target
+    assert storage.owns_launch_lock(campaign_id, lease)
+
+
+def test_scheduler_claim_exception_does_not_reuse_a_previous_claim(
+    tmp_path,
+    monkeypatch,
+):
+    campaign_data = tmp_path / "campaign_data"
+    targets = tmp_path / "campaign_targets"
+    sent_logs = tmp_path / "sent_logs"
+    campaign_data.mkdir()
+    targets.mkdir()
+    sent_logs.mkdir()
+    campaign_ids = ("Campaign_claim_ok", "Campaign_claim_error")
+    for campaign_id in campaign_ids:
+        (campaign_data / f"{campaign_id}.json").write_text(
+            json.dumps({
+                "id": campaign_id,
+                "source_type": "airtable",
+                "status": "Scheduled",
+                "target_count": 1,
+            }),
+            encoding="utf-8",
+        )
+    monkeypatch.setattr(email_sender, "CAMPAIGN_DATA_DIR", str(campaign_data))
+    monkeypatch.setattr(email_sender, "TARGETS_DIR", str(targets))
+    monkeypatch.setattr(email_sender, "SENT_LOGS_DIR", str(sent_logs))
+
+    class Remote:
+        def get_pending_scheduled_campaigns(self):
+            return [{"id": campaign_id} for campaign_id in campaign_ids]
+
+        def mark_campaign_launching(self, campaign_id):
+            if campaign_id == campaign_ids[0]:
+                return {"id": campaign_id, "status": "Launching"}
+            raise RuntimeError("database claim failed")
+
+    class RecordingLoop:
+        def __init__(self):
+            self.queued_campaigns = []
+
+        def run_in_executor(self, _executor, _function, campaign_id, _lease):
+            self.queued_campaigns.append(campaign_id)
+
+    remote = Remote()
+    loop = RecordingLoop()
+    monkeypatch.setattr(
+        email_sender_service, "get_email_sender_service", lambda: remote
+    )
+    monkeypatch.setattr(scheduler_worker.asyncio, "get_event_loop", lambda: loop)
+
+    asyncio.run(scheduler_worker.check_and_launch_scheduled_campaigns())
+
+    assert loop.queued_campaigns == [campaign_ids[0]]
+    assert json.loads(
+        (campaign_data / f"{campaign_ids[1]}.json").read_text(encoding="utf-8")
+    )["status"] == "Scheduled"
+    assert not email_sender._get_campaign_storage().is_launch_locked(campaign_ids[1])
