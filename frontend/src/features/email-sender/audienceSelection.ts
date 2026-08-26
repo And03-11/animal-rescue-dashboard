@@ -91,11 +91,16 @@ export interface LegacyAudienceSelection {
 export function hydrateAudienceSelection(
   campaign: LegacyAudienceSelection,
 ): AirtableAudience[] {
-  if (campaign.audiences !== undefined) {
+  if (campaign.audiences !== undefined && campaign.audiences !== null) {
     if (!Array.isArray(campaign.audiences)) {
       return [];
     }
-    return normalizeAudienceSelection(campaign.audiences.filter(isValidAudience));
+    const normalized = normalizeAudienceSelection(
+      campaign.audiences.filter(isValidAudience),
+    );
+    if (normalized.length > 0 || campaign.audiences.length > 0) {
+      return normalized;
+    }
   }
 
   if (

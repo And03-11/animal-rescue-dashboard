@@ -19,7 +19,9 @@ export function planCampaignSave(input: CampaignSavePlanInput): CampaignSaveOper
     input.existingCampaignId ? 'update-campaign' : 'create-campaign',
   ];
   if (input.sourceType === 'csv' && input.hasCsvFile) operations.push('upload-csv');
-  if (input.sourceType === 'csv' && input.hasMapping) operations.push('save-mapping');
+  if (input.sourceType === 'csv' && input.hasMapping
+    && (!input.existingCampaignId || input.hasCsvFile)) operations.push('save-mapping');
+
   return operations;
 }
 

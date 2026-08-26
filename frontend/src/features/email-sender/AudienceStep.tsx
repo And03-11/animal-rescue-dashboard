@@ -30,6 +30,7 @@ import type { AudienceShortcut } from './audienceSelection';
 import {
   CAMPAIGN_WIZARD_CSV_ERRORS,
   createSuggestedCsvMapping,
+  getCampaignEditSourcePolicy,
   isCsvColumnMapping,
   isCsvPreview,
   validateCsvContent,
@@ -145,6 +146,7 @@ export function AudienceStep({
   const csvMapping = isCsvColumnMapping(draft.csvMapping)
     ? draft.csvMapping
     : { ...EMPTY_MAPPING, has_header: csvPreview?.has_header ?? false };
+  const sourcePolicy = getCampaignEditSourcePolicy(draft.campaignId);
 
   useEffect(() => {
     if (draft.sourceType !== 'csv') {
@@ -162,7 +164,7 @@ export function AudienceStep({
   }, [draft.sourceType, onCsvPreviewLoadingChange]);
 
   const setSource = (sourceType: CampaignSource | null) => {
-    if (!sourceType || sourceType === draft.sourceType) return;
+    if (sourcePolicy.sourceLocked || !sourceType || sourceType === draft.sourceType) return;
     const shouldDiscardPendingCsv = sourceType !== 'csv' && readerRef.current !== null;
     if (sourceType !== 'csv') {
       readGenerationRef.current += 1;
@@ -263,6 +265,7 @@ export function AudienceStep({
           value={draft.sourceType}
           exclusive
           fullWidth
+          disabled={sourcePolicy.sourceLocked}
           onChange={(_event, value: CampaignSource | null) => setSource(value)}
           aria-label="Contact source"
           sx={{ maxWidth: 480 }}
@@ -271,6 +274,9 @@ export function AudienceStep({
           <ToggleButton value="csv">Upload CSV</ToggleButton>
         </ToggleButtonGroup>
       </FormControl>
+      {sourcePolicy.helperText && (
+        <Alert severity="info">{sourcePolicy.helperText}</Alert>
+      )}
 
       {draft.sourceType === 'airtable' ? (
         <Stack spacing={2.5}>
@@ -408,6 +414,7 @@ export function AudienceStep({
         </Stack>
       ) : (
         <Stack spacing={2}>
+          {sourcePolicy.csvUploadAllowed && (
           <Box
             id={WIZARD_FOCUS_TARGET_IDS.csvFile}
             role="group"
@@ -437,7 +444,7 @@ export function AudienceStep({
               {isDragging ? 'Drop CSV here' : 'Drag and drop a CSV'}
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, mb: 2 }}>
-              {draft.csvFile?.name ?? (draft.campaignId ? 'Keep the existing upload or choose a replacement.' : 'Choose a file to preview and map its columns.')}
+              {draft.csvFile?.name ?? 'Choose a file to preview and map its columns.'}
             </Typography>
             <Button
               component="label"
@@ -452,6 +459,7 @@ export function AudienceStep({
               />
             </Button>
           </Box>
+          )}
 
           {csvPreviewLoading ? (
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>

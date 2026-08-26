@@ -208,7 +208,7 @@ test('payload maps group and manual sender branches immutably', () => {
   assert.notStrictEqual(manual.sender_config, accounts);
 });
 
-test('CSV payload is source-specific and only includes a new upload', () => {
+test('CSV edit payload locks source and file while committing mapping in the PUT', () => {
   assert.ok(wizardState, 'campaign wizard state module is missing');
   const csvFile = { name: 'recipients.csv' } as unknown as File;
   const fresh = wizardState.buildCampaignPayload({
@@ -217,18 +217,74 @@ test('CSV payload is source-specific and only includes a new upload', () => {
     csvFile,
     campaignId: null,
   });
+  assert.equal(fresh.source_type, 'csv');
   assert.equal(fresh.csvFile, csvFile);
   assert.equal('audiences' in fresh, false);
   assert.equal('segment' in fresh, false);
+  const mapping = { email: 'Email', name: 'Name', has_header: true };
   const edit = wizardState.buildCampaignPayload({
     ...baseDraft(),
     sourceType: 'csv',
     csvFile,
     campaignId: 'campaign-1',
+    csvMapping: mapping,
   });
+  assert.equal('source_type' in edit, false);
   assert.equal('csvFile' in edit, false);
   assert.equal('audiences' in edit, false);
   assert.equal('segment' in edit, false);
+  assert.deepEqual(edit.mapping, mapping);
+});
+
+test('edit source policy disables conversion and CSV replacement with concise guidance', () => {
+  assert.ok(wizardState, 'campaign wizard state module is missing');
+  assert.deepEqual(wizardState.getCampaignEditSourcePolicy(null), {
+    sourceLocked: false,
+    csvUploadAllowed: true,
+    helperText: null,
+  });
+  assert.deepEqual(wizardState.getCampaignEditSourcePolicy('campaign-1'), {
+    sourceLocked: true,
+    csvUploadAllowed: false,
+    helperText: 'Source and CSV file are fixed after creation. You can still edit the mapping, content, senders, and schedule.',
+  });
+});
+
+test('test delivery summary reports complete, partial, and total failures accurately', () => {
+  assert.ok(wizardState, 'campaign wizard state module is missing');
+  assert.deepEqual(wizardState.summarizeTestDeliveryResponse({
+    results: [
+      { email: 'one@example.com', status: 'Sent' },
+      { email: 'two@example.com', status: 'Sent' },
+    ],
+  }), {
+    delivered: 2,
+    failed: 0,
+    isCompleteSuccess: true,
+    message: 'Test emails sent to 2 recipients.',
+  });
+  assert.deepEqual(wizardState.summarizeTestDeliveryResponse({
+    results: [
+      { email: 'one@example.com', status: 'Sent' },
+      { email: 'two@example.com', status: 'Failed' },
+    ],
+  }), {
+    delivered: 1,
+    failed: 1,
+    isCompleteSuccess: false,
+    message: 'Test delivery partially failed: 1 sent, 1 failed.',
+  });
+  assert.deepEqual(wizardState.summarizeTestDeliveryResponse({
+    results: [
+      { email: 'one@example.com', status: 'Failed' },
+      { email: 'two@example.com', status: 'Failed' },
+    ],
+  }), {
+    delivered: 0,
+    failed: 2,
+    isCompleteSuccess: false,
+    message: 'Test delivery failed for all 2 recipients.',
+  });
 });
 
 test('audience preview invalidation is immutable', () => {

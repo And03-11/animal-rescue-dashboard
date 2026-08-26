@@ -4,7 +4,6 @@ import {
   Alert,
   Box,
   Button,
-  Chip,
   CircularProgress,
   Container,
   Dialog,
@@ -12,40 +11,21 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
-  IconButton,
-  LinearProgress,
-  Link,
-  Paper,
   Snackbar,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Tooltip,
   Typography,
 } from '@mui/material';
-import {
-  Edit as EditIcon,
-} from '@mui/icons-material';
-import { Link as RouterLink } from 'react-router-dom';
 import axios from 'axios';
-import ScheduleIcon from '@mui/icons-material/Schedule';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
-import RocketLaunchIcon from '@mui/icons-material/RocketLaunch';
-import DeleteIcon from '@mui/icons-material/Delete';
-import PauseCircleOutlineIcon from '@mui/icons-material/PauseCircleOutline';
-import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
 import apiClient from '../api/axiosConfig';
+import { CampaignTable } from '../features/email-sender/CampaignTableWorkspace';
 import { CampaignWizard } from '../features/email-sender/CampaignWizard';
 import {
   CampaignSaveSessionState,
   executeCampaignSavePlan,
   planCampaignSave,
 } from '../features/email-sender/campaignWizardOrchestration';
+import type { CampaignWizardPayload } from '../features/email-sender/campaignWizardState';
 import type {
-  CampaignFormData,
   CampaignLaunchResponse,
   CreateCampaignResponse,
   CsvColumnMapping,
@@ -82,6 +62,8 @@ const getCampaignSaveErrorMessage = (error: unknown): string => {
 // --- Componente Principal de la Página (SIN CAMBIOS RESPECTO AL CÓDIGO QUE YA TENÍAS) ---
 export const EmailSenderPage = () => {
   const [campaigns, setCampaigns] = useState<EmailCampaign[]>([]);
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(15);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -146,15 +128,24 @@ export const EmailSenderPage = () => {
 
 
   const handleSaveCampaign = async (
-    campaignDataFromForm: CampaignFormData,
+    campaignDataFromForm: CampaignWizardPayload,
     mapping?: CsvColumnMapping,
     signal?: AbortSignal,
   ) => {
-    const { csvFile, ...campaignBaseData } = campaignDataFromForm;
-    const sourceType = campaignBaseData.source_type;
+    const {
+      csvFile,
+      source_type: requestedSourceType,
+      ...campaignRequestData
+    } = campaignDataFromForm;
     const saveSignal = signal ?? new AbortController().signal;
     const saveState = campaignSaveSessionRef.current;
     const campaignIdForSave = saveState.resolveCampaignId(saveSignal, editingCampaignId);
+    const existingSourceType = campaignIdForSave
+      ? campaigns.find((campaign) => campaign.id === campaignIdForSave)?.source_type
+      : undefined;
+    const sourceType = requestedSourceType
+      ?? existingSourceType
+      ?? (mapping ? 'csv' : 'airtable');
     const operations = planCampaignSave({
       existingCampaignId: campaignIdForSave,
       sourceType,
@@ -178,7 +169,10 @@ export const EmailSenderPage = () => {
             setSnackbarMessage('Saving campaign configuration…');
             const response = await apiClient.post<CreateCampaignResponse>(
               '/sender/campaigns',
-              campaignBaseData,
+              {
+                ...campaignRequestData,
+                source_type: sourceType,
+              },
               { signal: operationSignal },
             );
             return response.data.id;
@@ -190,7 +184,7 @@ export const EmailSenderPage = () => {
             setSnackbarMessage('Updating campaign configuration…');
             await apiClient.put(
               `/sender/campaigns/${currentCampaignId}`,
-              campaignBaseData,
+              campaignRequestData,
               { signal: operationSignal },
             );
           } else if (operation === 'upload-csv') {
@@ -321,6 +315,16 @@ export const EmailSenderPage = () => {
     }
   };
 
+  const lastPage = Math.max(0, Math.ceil(campaigns.length / rowsPerPage) - 1);
+  const visiblePage = Math.min(page, lastPage);
+  useEffect(() => {
+    if (page !== visiblePage) setPage(visiblePage);
+  }, [page, visiblePage]);
+  const visibleCampaigns = campaigns.slice(
+    visiblePage * rowsPerPage,
+    (visiblePage + 1) * rowsPerPage,
+  );
+
 
   // --- Renderizado ---
   if (loading && campaigns.length === 0) return (
@@ -341,177 +345,29 @@ export const EmailSenderPage = () => {
       {/* Muestra error general si existe Y no está el modal abierto (para evitar duplicados) */}
       {error && !isModalOpen && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
-      <Paper variant="outlined">
-        <TableContainer>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>Created At</TableCell>
-                <TableCell>Campaign Name</TableCell>
-                {/* --- AÑADE ESTA LÍNEA --- */}
-                <TableCell>Subject</TableCell>
-                <TableCell>Source</TableCell>
-                <TableCell>Target Info</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell sx={{ minWidth: 200 }}>Progress</TableCell>
-                <TableCell align="right">Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {campaigns.length === 0 && !loading ? (
-                <TableRow><TableCell colSpan={7} align="center">No campaigns found. Create one to get started!</TableCell></TableRow>
-              ) : (
-                campaigns.map((campaign) => (
-                  <TableRow key={campaign.id} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
-                    <TableCell>{new Date(campaign.createdAt).toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' })}</TableCell>
-                    <TableCell sx={{ fontWeight: 500 }}>
-                      <Link component={RouterLink} to={`/campaign/${campaign.id}`} underline="hover" color="inherit">
-                        {campaign.campaign_name || `(ID: ${campaign.id.substring(9)})`} {/* Muestra nombre o ID corto */}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      {campaign.subject || '(No Subject)'}
-                    </TableCell>
-                    <TableCell>
-                      <Chip label={campaign.source_type?.toUpperCase()} size="small"
-                        color={campaign.source_type === 'airtable' ? 'info' : 'secondary'} variant="outlined" />
-                    </TableCell>
-                    <TableCell>
-                      {campaign.source_type === 'airtable'
-                        ? `${campaign.region} (Bounced: ${campaign.is_bounced ? 'Yes' : 'No'})`
-                        : campaign.csv_filename || (campaign.status === 'Draft' ? 'CSV Pending Upload' : 'CSV Processed')}
-                      {/* Muestra nombre del archivo o estado */}
-                    </TableCell>
-                    <TableCell>
-                      <Chip
-                        icon={campaign.status === 'Scheduled' ? <ScheduleIcon fontSize="small" /> : undefined}
-                        label={campaign.status}
-                        size="small"
-                        color={campaign.status === 'Completed' ? 'success' : campaign.status === 'Sending' ? 'warning' : campaign.status === 'Scheduled' ? 'info' : campaign.status.startsWith('Error') ? 'error' : 'default'}
-                      />
-                      {campaign.status === 'Scheduled' && campaign.scheduled_at && (
-                        <Typography variant="caption" display="block" color="info.main" sx={{ mt: 0.5 }}>
-                          📅 {new Date(campaign.scheduled_at).toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' })}
-                        </Typography>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {/* Lógica de progreso */}
-                      {(campaign.progress && campaign.progress.total > 0) || campaign.status === 'Sending' || campaign.status === 'Completed' ? (
-                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                          <Box sx={{ width: '100%', mr: 1 }}>
-                            <LinearProgress variant="determinate"
-                              value={Math.min(100, Math.max(0, Number(campaign.progress?.percentage) || 0))}
-                              color={campaign.status === 'Sending' ? 'warning' : campaign.status === 'Completed' ? 'success' : 'primary'} />
-                          </Box>
-                          <Box sx={{ minWidth: 70 }}>
-                            <Typography variant="body2" color="text.secondary">{`${campaign.progress?.sent ?? campaign.sent_count_final ?? 0} / ${campaign.progress?.total ?? campaign.target_count ?? '?'}`}</Typography>
-                          </Box>
-                        </Box>
-                      ) : campaign.status === 'Draft' ? (
-                        <Typography variant="caption" color="text.secondary">Waiting...</Typography>
-                      ) : campaign.status === 'Ready' ? (
-                        <Typography variant="caption" color="success.main">Ready to Launch</Typography>
-                      ) : campaign.status === 'Scheduled' ? (
-                        <Typography variant="caption" color="info.main">⏰ Scheduled</Typography>
-                      ) : (
-                        <Typography variant="caption" color="text.secondary">N/A</Typography>
-                      )}
-                    </TableCell>
-                    <TableCell align="right">
-
-                      {campaign.status === 'Sending' && (
-                        <Tooltip title="Pause Sending">
-                          <span> {/* Span para Tooltip en botón deshabilitado */}
-                            <IconButton
-                              aria-label="pause campaign"
-                              onClick={() => handlePauseCampaign(campaign.id)}
-                              color="warning" // Color naranja para pausa
-                              size="small"
-                              disabled={actionLoading[campaign.id] || deleting} // Deshabilitado si ya hay acción o se está borrando
-                              sx={{ mr: 0.5 }} // Margen derecho
-                            >
-                              {actionLoading[campaign.id] ? <CircularProgress size={16} color="inherit" /> : <PauseCircleOutlineIcon fontSize="small" />}
-                            </IconButton>
-                          </span>
-                        </Tooltip>
-                      )}
-
-                      {/* Botón Reanudar (visible si está 'Paused') */}
-                      {campaign.status === 'Paused' && (
-                        <Tooltip title="Resume Sending">
-                          <span>
-                            <IconButton
-                              aria-label="resume campaign"
-                              onClick={() => handleResumeCampaign(campaign.id)}
-                              color="success" // Color verde para reanudar
-                              size="small"
-                              disabled={actionLoading[campaign.id] || deleting}
-                              sx={{ mr: 0.5 }}
-                            >
-                              {actionLoading[campaign.id] ? <CircularProgress size={16} color="inherit" /> : <PlayCircleOutlineIcon fontSize="small" />}
-                            </IconButton>
-                          </span>
-                        </Tooltip>
-                      )}
-
-                      {/* Botón Launch */}
-                      <Button
-                        variant="outlined" size="small" startIcon={<RocketLaunchIcon />}
-                        onClick={() => handleLaunchCampaign(campaign.id)}
-                        // Habilitado si está en 'Ready', o si es 'Airtable' y está en 'Draft'
-                        // O si se completó con errores y tiene emails pendientes
-                        disabled={
-                          !(
-                            campaign.status === 'Ready' ||
-                            (campaign.source_type === 'airtable' && campaign.status === 'Draft') ||
-                            (campaign.status === 'Completed with Errors' && (campaign.sent_count_final ?? campaign.progress?.sent ?? 0) < (campaign.target_count ?? campaign.progress?.total ?? 0))
-                          )
-                        }
-                      >
-                        {campaign.status === 'Sending' ? 'Sending...' : (campaign.status === 'Completed with Errors' ? 'Retry Failed' : 'Launch')}
-                      </Button>
-                      {/* --- INICIO: BOTÓN EDITAR --- */}
-                      <Tooltip title="Edit Campaign">
-                        <span>
-                          <IconButton
-                            aria-label="edit campaign"
-                            onClick={() => { setEditingCampaignId(campaign.id); setError(null); setIsModalOpen(true); }}
-                            color="primary"
-                            size="small"
-                            disabled={campaign.status === 'Sending' || deleting}
-                            sx={{ ml: 1 }}
-                          >
-                            <EditIcon fontSize="small" />
-                          </IconButton>
-                        </span>
-                      </Tooltip>
-                      {/* --- FIN: BOTÓN EDITAR --- */}
-                      {/* --- INICIO: NUEVO BOTÓN ELIMINAR --- */}
-                      <Tooltip title="Delete Campaign">
-                        {/* Span necesario para Tooltip en botón deshabilitado */}
-                        <span>
-                          <IconButton
-                            aria-label="delete campaign"
-                            onClick={() => handleDeleteClick(campaign)}
-                            color="error" // Color rojo para indicar peligro
-                            size="small"
-                            disabled={campaign.status === 'Sending' || deleting} // Deshabilitado si enviando o si ya se está eliminando algo
-                            sx={{ ml: 1 }} // Margen izquierdo para separarlo
-                          >
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
-                        </span>
-                      </Tooltip>
-                      {/* --- FIN: NUEVO BOTÓN ELIMINAR --- */}
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </Paper>
+      <CampaignTable
+        campaigns={visibleCampaigns}
+        total={campaigns.length}
+        page={visiblePage}
+        rowsPerPage={rowsPerPage}
+        onPageChange={setPage}
+        onRowsPerPageChange={(nextRowsPerPage) => {
+          setRowsPerPage(nextRowsPerPage);
+          setPage(0);
+        }}
+        loading={loading}
+        deleting={deleting}
+        actionLoading={actionLoading}
+        onPause={handlePauseCampaign}
+        onResume={handleResumeCampaign}
+        onLaunch={handleLaunchCampaign}
+        onEdit={(campaignId) => {
+          setEditingCampaignId(campaignId);
+          setError(null);
+          setIsModalOpen(true);
+        }}
+        onDelete={handleDeleteClick}
+      />
 
       {/* Modal para Crear/Editar Campaña */}
       <CampaignWizard

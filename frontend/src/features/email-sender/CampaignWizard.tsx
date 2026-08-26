@@ -25,6 +25,7 @@ import axios from 'axios';
 import apiClient from '../../api/axiosConfig';
 import {
   buildCampaignPayload,
+  summarizeTestDeliveryResponse,
   computeAudiencePreviewKey,
   createSuggestedCsvMapping,
   hydrateCampaignWizardDraft,
@@ -35,6 +36,7 @@ import {
 } from './campaignWizardState';
 import type {
   CampaignWizardDraft,
+  CampaignWizardPayload,
   CampaignWizardStep,
 } from './campaignWizardState';
 import {
@@ -97,7 +99,7 @@ export interface CampaignWizardProps {
   initialCampaignId?: string | null;
   onClose: () => void;
   onSave: (
-    campaign: CampaignFormData,
+    campaign: CampaignWizardPayload,
     mapping?: CsvColumnMapping,
     signal?: AbortSignal,
   ) => Promise<void> | void;
@@ -547,6 +549,7 @@ export function CampaignWizard({
     const senderConfig = buildCampaignPayload(current).sender_config;
     setSendingTest(true);
     setError(null);
+    setSuccessMessage(null);
     try {
       const payload = {
         emails,
@@ -554,7 +557,7 @@ export function CampaignWizard({
         html_body: current.htmlBody,
         sender_config: senderConfig,
       };
-      await apiClient.post(
+      const response = await apiClient.post<unknown>(
         current.campaignId
           ? `/sender/campaigns/${current.campaignId}/send-test`
           : '/sender/send-test-adhoc',
@@ -562,9 +565,21 @@ export function CampaignWizard({
         { timeout: 30_000, signal: session.signal },
       );
       if (!isSessionCurrent(session)) return;
-      setSuccessMessage(`Test email sent to ${emails.length} recipient${emails.length === 1 ? '' : 's'}.`);
+      const summary = summarizeTestDeliveryResponse(response.data);
+      if (summary.isCompleteSuccess) {
+        setSuccessMessage(summary.message);
+      } else {
+        setError(summary.message);
+      }
     } catch (requestError: unknown) {
       if (!isSessionCurrent(session) || isAbortError(requestError)) return;
+      if (axios.isAxiosError(requestError) && requestError.response?.data) {
+        const summary = summarizeTestDeliveryResponse(requestError.response.data);
+        if (summary.failed > 0) {
+          setError(summary.message);
+          return;
+        }
+      }
       setError(getApiErrorMessage(requestError, 'Failed to send test emails.'));
       throw requestError;
     } finally {
