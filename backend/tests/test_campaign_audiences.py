@@ -48,6 +48,17 @@ def test_legacy_filter_becomes_one_branch():
 
 
 @pytest.mark.skipif(_IMPORT_ERROR is not None, reason="campaign audience module is missing")
+def test_stored_empty_audiences_fall_back_to_valid_legacy_fields():
+    branches = normalize_audiences(
+        [], legacy_region="USA", legacy_is_bounced=True
+    )
+
+    assert serialize_audiences(branches) == [
+        {"region": "USA", "is_bounced": True}
+    ]
+
+
+@pytest.mark.skipif(_IMPORT_ERROR is not None, reason="campaign audience module is missing")
 def test_rejects_duplicates_and_invalid_regions():
     with pytest.raises(ValueError, match="Audience branches must be unique"):
         normalize_audiences(

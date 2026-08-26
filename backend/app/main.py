@@ -38,7 +38,14 @@ async def lifespan(app: FastAPI):
     FastAPICache.init(InMemoryBackend(), prefix="fastapi-cache")
     print("Sistema de caché inicializado.")
     
-    # ✅ Start email scheduler worker
+    recovered_campaigns = email_sender.recover_interrupted_campaigns()
+    if recovered_campaigns:
+        print(
+            "Recovered interrupted email campaigns: "
+            + ", ".join(recovered_campaigns)
+        )
+
+    # ✅ Start email scheduler worker after local lease recovery.
     start_scheduler()
     
     yield

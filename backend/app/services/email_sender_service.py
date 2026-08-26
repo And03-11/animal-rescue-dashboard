@@ -70,7 +70,7 @@ class EmailSenderService:
                 
                 # Handle scheduled_at
                 scheduled_at = campaign_data.get('scheduled_at')
-                status = 'Scheduled' if scheduled_at else 'Draft'
+                status = campaign_data.get('status', 'Draft')
                 
                 cur.execute("""
                     INSERT INTO email_sender_campaigns (
@@ -218,8 +218,16 @@ class EmailSenderService:
         """)
     
     def mark_campaign_launching(self, campaign_id: str) -> Optional[Dict[str, Any]]:
-        """Mark a campaign as launching (prevents duplicate launches)"""
-        return self.update_campaign(campaign_id, {'status': 'Sending'})
+        """Atomically claim one due Scheduled campaign."""
+        return self._execute_one(
+            """
+            UPDATE email_sender_campaigns
+            SET status = 'Launching', updated_at = NOW()
+            WHERE id = %s AND status = 'Scheduled'
+            RETURNING *
+            """,
+            (campaign_id,),
+        )
 
 
 # Singleton instance
