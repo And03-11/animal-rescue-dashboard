@@ -143,29 +143,31 @@ def test_lock_file_contains_owner_and_lease_metadata(tmp_path):
     now = [datetime(2026, 8, 25, 12, 0, tzinfo=timezone.utc)]
     storage = make_storage(tmp_path, now=now)
 
-    assert storage.acquire_launch_lock("Campaign_lease", "owner-a") == "owner-a"
+    lease = storage.acquire_launch_lock("Campaign_lease", "owner-a")
+    assert lease == "owner-a"
 
     payload = json.loads(storage.launch_lock_path("Campaign_lease").read_text(encoding="utf-8"))
-    assert payload == {
-        "owner_id": "owner-a",
-        "acquired_at": "2026-08-25T12:00:00+00:00",
-        "expires_at": "2026-08-25T12:00:30+00:00",
-    }
+    assert payload["owner_id"] == "owner-a"
+    assert payload["generation"] == lease.generation
+    assert payload["acquired_at"] == "2026-08-25T12:00:00+00:00"
+    assert payload["expires_at"] == "2026-08-25T12:00:30+00:00"
 
 
 def test_live_lock_is_not_reclaimed_and_expired_lock_is_reclaimed(tmp_path):
     now = [datetime(2026, 8, 25, 12, 0, tzinfo=timezone.utc)]
     storage = make_storage(tmp_path, now=now, lease_seconds=10)
-    assert storage.acquire_launch_lock("Campaign_reclaim", "owner-a") == "owner-a"
+    owner_a = storage.acquire_launch_lock("Campaign_reclaim", "owner-a")
+    assert owner_a == "owner-a"
 
     now[0] += timedelta(seconds=9)
     assert storage.acquire_launch_lock("Campaign_reclaim", "owner-b") is None
-    assert storage.owns_launch_lock("Campaign_reclaim", "owner-a")
+    assert storage.owns_launch_lock("Campaign_reclaim", owner_a)
 
     now[0] += timedelta(seconds=2)
-    assert storage.acquire_launch_lock("Campaign_reclaim", "owner-b") == "owner-b"
-    assert not storage.release_launch_lock("Campaign_reclaim", "owner-a")
-    assert storage.owns_launch_lock("Campaign_reclaim", "owner-b")
+    owner_b = storage.acquire_launch_lock("Campaign_reclaim", "owner-b")
+    assert owner_b == "owner-b"
+    assert not storage.release_launch_lock("Campaign_reclaim", owner_a)
+    assert storage.owns_launch_lock("Campaign_reclaim", owner_b)
 
 
 def test_legacy_owner_only_lock_uses_mtime_for_expiry(tmp_path):
@@ -177,22 +179,24 @@ def test_legacy_owner_only_lock_uses_mtime_for_expiry(tmp_path):
     stale_mtime = (now[0] - timedelta(seconds=11)).timestamp()
     os.utime(lock_path, (stale_mtime, stale_mtime))
 
-    assert storage.acquire_launch_lock("Campaign_legacy_lock", "new-owner") == "new-owner"
-    assert storage.owns_launch_lock("Campaign_legacy_lock", "new-owner")
+    new_owner = storage.acquire_launch_lock("Campaign_legacy_lock", "new-owner")
+    assert new_owner == "new-owner"
+    assert storage.owns_launch_lock("Campaign_legacy_lock", new_owner)
 
 
 def test_renewal_extends_lease_and_release_remains_owner_checked(tmp_path):
     now = [datetime(2026, 8, 25, 12, 0, tzinfo=timezone.utc)]
     storage = make_storage(tmp_path, now=now, lease_seconds=10)
-    assert storage.acquire_launch_lock("Campaign_renew", "owner-a") == "owner-a"
+    owner_a = storage.acquire_launch_lock("Campaign_renew", "owner-a")
+    assert owner_a == "owner-a"
 
     now[0] += timedelta(seconds=8)
-    assert storage.renew_launch_lock("Campaign_renew", "owner-a")
+    assert storage.renew_launch_lock("Campaign_renew", owner_a)
     now[0] += timedelta(seconds=5)
 
     assert storage.acquire_launch_lock("Campaign_renew", "owner-b") is None
     assert not storage.release_launch_lock("Campaign_renew", "owner-b")
-    assert storage.release_launch_lock("Campaign_renew", "owner-a")
+    assert storage.release_launch_lock("Campaign_renew", owner_a)
 
 
 def test_restart_recovery_preserves_live_owner_and_recovers_only_stale_work(tmp_path):
@@ -201,15 +205,18 @@ def test_restart_recovery_preserves_live_owner_and_recovers_only_stale_work(tmp_
     for campaign_id in ("Campaign_live", "Campaign_stale", "Campaign_crashed"):
         storage.save_campaign(campaign_id, {"id": campaign_id, "status": "Sending"})
 
-    assert storage.acquire_launch_lock("Campaign_live", "live-owner") == "live-owner"
-    assert storage.acquire_launch_lock("Campaign_stale", "stale-owner") == "stale-owner"
-    now[0] += timedelta(seconds=11)
-    assert storage.renew_launch_lock("Campaign_live", "live-owner")
+    live_owner = storage.acquire_launch_lock("Campaign_live", "live-owner")
+    stale_owner = storage.acquire_launch_lock("Campaign_stale", "stale-owner")
+    assert live_owner == "live-owner"
+    assert stale_owner == "stale-owner"
+    now[0] += timedelta(seconds=8)
+    assert storage.renew_launch_lock("Campaign_live", live_owner)
+    now[0] += timedelta(seconds=3)
 
     recovered = storage.recover_interrupted_campaigns()
 
     assert recovered == ["Campaign_crashed", "Campaign_stale"]
     assert storage.load_campaign("Campaign_live")["status"] == "Sending"
-    assert storage.owns_launch_lock("Campaign_live", "live-owner")
+    assert storage.owns_launch_lock("Campaign_live", live_owner)
     assert storage.load_campaign("Campaign_stale")["status"] == "Interrupted"
     assert not storage.is_launch_locked("Campaign_stale")

@@ -23,12 +23,18 @@ from backend.app.services.campaign_audiences import normalize_audiences, seriali
 from backend.app.services.gmail_service import GmailService
 from backend.app.services.credentials_manager import credentials_manager_instance
 from backend.app.services.email_sender_service import get_email_sender_service
-from backend.app.services.campaign_csv import read_csv_preview_rows, read_mapped_contacts
+from backend.app.services.campaign_csv import (
+    inspect_csv_content,
+    read_csv_preview_rows,
+    read_mapped_contacts,
+)
 from backend.app.services.email_test_delivery import deliver_test_emails
 from backend.app.services.campaign_storage import (
     CampaignFileStorage,
+    CampaignLeaseLostError,
     CampaignMutationLockedError,
     InvalidCampaignIdError,
+    LaunchLeaseGuard,
     summarize_campaign,
 )
 
@@ -200,6 +206,44 @@ def _refresh_airtable_campaign_contacts(
     config.update(updated_config)
     return contact_data
 
+_CSV_READINESS_DETAIL = (
+    "CSV campaigns require a valid mapping and at least one eligible recipient."
+)
+
+
+def _validated_csv_contacts(
+    storage: CampaignFileStorage,
+    campaign_id: str,
+    config: Dict[str, Any],
+) -> List[Dict[str, str]]:
+    mapping = config.get("mapping")
+    if (
+        not isinstance(mapping, dict)
+        or not isinstance(mapping.get("email"), str)
+        or not mapping.get("email")
+        or not isinstance(mapping.get("name"), str)
+        or not mapping.get("name")
+        or not isinstance(mapping.get("has_header"), bool)
+    ):
+        raise HTTPException(status_code=422, detail=_CSV_READINESS_DETAIL)
+    target_path = storage.target_path(campaign_id)
+    if not target_path.exists():
+        raise HTTPException(status_code=422, detail=_CSV_READINESS_DETAIL)
+    try:
+        contacts = read_mapped_contacts(target_path, mapping, campaign_id)
+    except (
+        OSError,
+        UnicodeError,
+        ValueError,
+        KeyError,
+        csv.Error,
+        pd.errors.ParserError,
+    ) as error:
+        raise HTTPException(status_code=422, detail=_CSV_READINESS_DETAIL) from error
+    if not contacts:
+        raise HTTPException(status_code=422, detail=_CSV_READINESS_DETAIL)
+    return contacts
+
 
 def prepare_campaign_launch(
     campaign_id: str,
@@ -257,6 +301,10 @@ def prepare_campaign_launch(
                     ),
                 )
 
+        if config.get("source_type") == "csv":
+            csv_contacts = _validated_csv_contacts(storage, campaign_id, config)
+            config["target_count"] = len(csv_contacts)
+
         if rollback_config is not None:
             rollback_config.clear()
             rollback_config.update(config)
@@ -264,7 +312,9 @@ def prepare_campaign_launch(
         config["status"] = "Launching"
         config["launch_id"] = owner_id
         config["last_updated"] = datetime.now().isoformat()
-        storage.save_campaign(campaign_id, config, serialize_unknown=True)
+        storage.save_campaign_owned(
+            campaign_id, config, lease=owner_id, serialize_unknown=True
+        )
         return owner_id
     except Exception:
         storage.release_launch_lock(campaign_id, owner_id)
@@ -272,7 +322,28 @@ def prepare_campaign_launch(
 
 
 def recover_interrupted_campaigns() -> list[str]:
-    return _get_campaign_storage().recover_interrupted_campaigns()
+    storage = _get_campaign_storage()
+    recovered = storage.recover_interrupted_campaigns()
+    interrupted = {
+        campaign["id"]
+        for campaign in storage.list_campaigns_with_progress(
+            page_size=100_000
+        )["items"]
+        if campaign.get("status") == "Interrupted"
+    }
+    for campaign_id in sorted(interrupted):
+        try:
+            get_email_sender_service().update_campaign(
+                campaign_id, {"status": "Interrupted"}
+            )
+        except Exception:
+            logger.warning(
+                "Interrupted campaign remote sync failed for %s; "
+                "startup will retry",
+                campaign_id,
+                exc_info=True,
+            )
+    return recovered
 
 
 def _select_unique_pending_contacts(
@@ -340,7 +411,11 @@ def _request_audiences(
     )
 
 # --- REEMPLAZA esta función completa ---
-def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
+def _run_campaign_task_unlocked(
+    campaign_id: str,
+    launch_id: str,
+    lease_guard: LaunchLeaseGuard,
+):
     """
     Tarea en segundo plano: Lee la configuración, obtiene los contactos
     (de Airtable o CSV según source_type) y envía los emails.
@@ -350,6 +425,7 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
     target_csv_path = storage.target_path(campaign_id)
     sent_log_path = storage.sent_log_path(campaign_id)
 
+    lease_guard.ensure_owned()
     # --- 1. Cargar Configuración ---
     try:
         config = storage.load_campaign(campaign_id)
@@ -389,23 +465,49 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
         except Exception as error:
             print(f"[{campaign_id}] ERROR: Failed to refresh Airtable contacts: {error}")
             config['status'] = 'Error - Airtable Fetch Failed'
-            storage.save_campaign(campaign_id, config, serialize_unknown=True)
+            storage.save_campaign_owned(
+                campaign_id, config, lease=launch_id, serialize_unknown=True
+            )
+            lease_guard.ensure_owned()
             _sync_remote_campaign_status(campaign_id, config['status'])
             return
 
         if not contact_data:
             config['status'] = 'Error - No Airtable Recipients'
-            storage.save_campaign(campaign_id, config, serialize_unknown=True)
+            storage.save_campaign_owned(
+                campaign_id, config, lease=launch_id, serialize_unknown=True
+            )
+            lease_guard.ensure_owned()
             _sync_remote_campaign_status(campaign_id, config['status'])
             return
 
+    elif source_type == 'csv':
+        try:
+            contact_data = _validated_csv_contacts(storage, campaign_id, config)
+        except HTTPException:
+            config['status'] = 'Error - CSV Not Ready'
+            storage.save_campaign_owned(
+                campaign_id, config, lease=launch_id, serialize_unknown=True
+            )
+            lease_guard.ensure_owned()
+            _sync_remote_campaign_status(campaign_id, config['status'])
+            return
+        config['target_count'] = len(contact_data)
+    else:
+        config['status'] = 'Error - Unknown Source'
+        storage.save_campaign_owned(
+            campaign_id, config, lease=launch_id, serialize_unknown=True
+        )
+        lease_guard.ensure_owned()
+        _sync_remote_campaign_status(campaign_id, config['status'])
+        return
+
     # --- Actualizar Estado a 'Sending' ---
+    lease_guard.ensure_owned()
     config['status'] = 'Sending'
-    try:
-        storage.save_campaign(campaign_id, config, serialize_unknown=True)
-    except Exception as e:
-        print(f"[{campaign_id}] WARNING: Could not update status to 'Sending': {e}")
-        # Continuamos igualmente, pero el frontend no verá el cambio inmediato
+    storage.save_campaign_owned(
+        campaign_id, config, lease=launch_id, serialize_unknown=True
+    )
 
     # --- INICIO: NUEVO BLOQUE para cargar Servicios de Gmail ---
     sender_config = config.get('sender_config', 'all') # 'all' por defecto si no está
@@ -426,13 +528,13 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
     if not gmail_services:
         print(f"[{campaign_id}] ERROR: No se pudieron cargar servicios de Gmail válidos. Abortando.")
         config['status'] = 'Error - No Senders Loaded'
-        # Guardar estado de error...
-        try:
-            storage.save_campaign(campaign_id, config, serialize_unknown=True)
-            service = get_email_sender_service()
-            service.update_campaign(campaign_id, {'status': config['status']})
-        except Exception as e_save: print(f"[{campaign_id}] WARNING: Could not save error status: {e_save}")
-        return # Detiene la tarea
+        storage.save_campaign_owned(
+            campaign_id, config, lease=launch_id, serialize_unknown=True
+        )
+        lease_guard.ensure_owned()
+        service = get_email_sender_service()
+        service.update_campaign(campaign_id, {'status': config['status']})
+        return
 
     print(f"[{campaign_id}] {len(gmail_services)} cuentas de Gmail listas para enviar.")
     # --- FIN: NUEVO BLOQUE ---
@@ -496,9 +598,14 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
         print(f"[{campaign_id}] No contacts found or processed. Campaign finished.")
         config['status'] = 'Completed - No Contacts'
         try:
-            storage.save_campaign(campaign_id, config, serialize_unknown=True)
+            storage.save_campaign_owned(
+                campaign_id, config, lease=launch_id, serialize_unknown=True
+            )
+            lease_guard.ensure_owned()
             service = get_email_sender_service()
             service.update_campaign(campaign_id, {'status': config['status']})
+        except CampaignLeaseLostError:
+            raise
         except Exception: pass
         return
 
@@ -551,6 +658,7 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
         # Shared state for threads
         log_lock = threading.Lock()
         stop_event = threading.Event()
+        lease_lost_event = threading.Event()
         
         # Counters
         sent_count_lock = threading.Lock()
@@ -567,7 +675,9 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
             print(f"[{campaign_id}] Worker {worker_id} started using {credential_name}")
             
             while not contacts_queue.empty() and not stop_event.is_set():
+                contact = None
                 try:
+                    lease_guard.ensure_owned()
                     # Retrieve contact
                     try:
                         contact = contacts_queue.get(timeout=1)
@@ -623,6 +733,7 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
                     html_body_personalized = html_body_template.replace("{{name}}", name).replace("*|FNAME|*", name)
                     
                     success = False
+                    lease_guard.ensure_owned()
                     try:
                         success = service.send_email(
                             to_email=email,
@@ -632,13 +743,16 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
                     except Exception as e_send:
                          print(f"[{campaign_id}] Worker {worker_id} Exception sending to {email}: {e_send}")
 
+                    lease_guard.ensure_owned()
                     if success:
                         print(f"  -> Worker {worker_id}: SUCCESS {email}")
                         
                         delivery_logged = False
                         with log_lock:
                             try:
-                                storage.append_sent_email(campaign_id, email)
+                                storage.append_sent_email_owned(
+                                    campaign_id, email, lease=launch_id
+                                )
                                 sent_emails_set.add(email.strip().lower())
                                 delivery_logged = True
                             except OSError as log_error:
@@ -674,6 +788,12 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
                     
                     contacts_queue.task_done()
                     
+                except CampaignLeaseLostError:
+                    lease_lost_event.set()
+                    stop_event.set()
+                    if contact is not None:
+                        contacts_queue.task_done()
+                    break
                 except Exception as e_worker:
                     print(f"[{campaign_id}] Worker {worker_id} crashed: {e_worker}")
                     traceback.print_exc()
@@ -690,6 +810,9 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
         
         for t in threads:
             t.join()
+        if lease_lost_event.is_set():
+            raise CampaignLeaseLostError(campaign_id)
+        lease_guard.ensure_owned()
 
     # --- INICIO: REEMPLAZO de Actualización Final de Estado ---
     print(f"[{campaign_id}] Campaña finalizada.")
@@ -724,15 +847,19 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
             final_status = 'Completed - No Valid Contacts to Send'
 
 
+    lease_guard.ensure_owned()
     config['status'] = final_status
     config['completedAt'] = datetime.now().isoformat() # Guardar fecha/hora de finalización
     config['sent_count_final'] = final_sent_count # Guardar conteo final real
 
     try:
-        storage.save_campaign(campaign_id, config, serialize_unknown=True)
+        storage.save_campaign_owned(
+            campaign_id, config, lease=launch_id, serialize_unknown=True
+        )
         print(f"[{campaign_id}] Estado final guardado en local como: {final_status}")
         
         # Sincronizar con Supabase DB
+        lease_guard.ensure_owned()
         service = get_email_sender_service()
         service.update_campaign(campaign_id, {
             'status': final_status,
@@ -740,6 +867,8 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
             'sent_count_final': final_sent_count
         })
         print(f"[{campaign_id}] Estado final guardado en Supabase como: {final_status}")
+    except CampaignLeaseLostError:
+        raise
     except Exception as e:
         print(f"[{campaign_id}] ADVERTENCIA: No se pudo guardar el estado final '{final_status}': {e}")
     # --- FIN: REEMPLAZO de Actualización Final de Estado ---
@@ -768,15 +897,19 @@ def run_campaign_task(campaign_id: str, launch_id: Optional[str] = None):
         return
 
     try:
-        with storage.launch_lock_heartbeat(campaign_id, launch_id):
-            _run_campaign_task_unlocked(campaign_id, launch_id)
+        with storage.launch_lock_heartbeat(campaign_id, launch_id) as lease_guard:
+            _run_campaign_task_unlocked(campaign_id, launch_id, lease_guard)
+    except CampaignLeaseLostError:
+        print(f"[{campaign_id}] Launch fenced: lease ownership was lost.")
     except Exception as error:
         print(f"[{campaign_id}] Unexpected campaign failure: {error}")
         try:
             config = storage.load_campaign(campaign_id)
             config["status"] = "Interrupted"
             config["interrupted_at"] = datetime.now().isoformat()
-            storage.save_campaign(campaign_id, config, serialize_unknown=True)
+            storage.save_campaign_owned(
+                campaign_id, config, lease=launch_id, serialize_unknown=True
+            )
             _sync_remote_campaign_status(campaign_id, "Interrupted")
         except Exception as recovery_error:
             print(f"[{campaign_id}] Could not persist interrupted state: {recovery_error}")
@@ -1024,6 +1157,17 @@ def update_campaign(
                 ) from error
             config["mapping"] = mapping
             config["target_count"] = len(contacts)
+            if not contacts:
+                raise HTTPException(
+                    status_code=422,
+                    detail=_CSV_READINESS_DETAIL,
+                )
+
+        if config.get("source_type") == "csv" and (
+            config.get("scheduled_at") is not None
+        ):
+            contacts = _validated_csv_contacts(storage, campaign_id, config)
+            config["target_count"] = len(contacts)
 
         if (
             config.get("scheduled_at") is not None
@@ -1057,7 +1201,9 @@ def update_campaign(
                 owner_id=owner_id,
             )
         else:
-            storage.save_campaign(campaign_id, config, serialize_unknown=True)
+            storage.save_campaign_owned(
+                campaign_id, config, lease=owner_id, serialize_unknown=True
+            )
 
         remote_fields = {
             "campaign_name",
@@ -1175,17 +1321,13 @@ def _validate_csv_upload(
     ):
         raise HTTPException(status_code=422, detail="Upload a valid CSV file.")
     try:
-        text = content.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        text = content.decode("latin-1")
-    try:
-        first_row = next(csv.reader(io.StringIO(text)), None)
-    except csv.Error as error:
+        csv_format = inspect_csv_content(content)
+    except (UnicodeError, ValueError, csv.Error) as error:
         raise HTTPException(
             status_code=422,
             detail="Upload a valid CSV file.",
         ) from error
-    if first_row is None or len(first_row) < 2:
+    if csv_format.first_row is None or len(csv_format.first_row) < 2:
         raise HTTPException(status_code=422, detail="Upload a valid CSV file.")
 
 
@@ -1501,10 +1643,10 @@ async def save_csv_mapping(
                 status_code=422,
                 detail="Invalid CSV mapping or recipient data.",
             ) from error
-        if config.get("scheduled_at") is not None and not contacts:
+        if not contacts:
             raise HTTPException(
                 status_code=422,
-                detail="Scheduled campaigns require at least one eligible recipient.",
+                detail=_CSV_READINESS_DETAIL,
             )
 
         config["mapping"] = mapping
@@ -1513,13 +1655,16 @@ async def save_csv_mapping(
             "Scheduled" if config.get("scheduled_at") else "Ready"
         )
         config["last_updated"] = datetime.now().isoformat()
-        storage.save_campaign(campaign_id, config, serialize_unknown=True)
+        storage.save_campaign_owned(
+            campaign_id, config, lease=owner_id, serialize_unknown=True
+        )
 
         try:
             get_email_sender_service().update_campaign(
                 campaign_id,
                 {
                     "mapping": mapping,
+                    "csv_filename": config.get("csv_filename"),
                     "target_count": len(contacts),
                     "status": config["status"],
                 },

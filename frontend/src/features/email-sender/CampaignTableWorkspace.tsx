@@ -369,7 +369,11 @@ export function CampaignTable({
                       startIcon={<RocketLaunchOutlinedIcon />}
                       onClick={() => onLaunch(campaign.id)}
                     >
-                      {presentation.primaryAction === 'retry' ? 'Retry failed' : 'Launch'}
+                      {presentation.primaryAction === 'retry'
+                        ? (campaign.status === 'Interrupted'
+                          ? 'Resume safely'
+                          : 'Retry failed')
+                        : 'Launch'}
                     </Button>
                   )}
                   {presentation.primaryAction === 'pause' && (
@@ -675,7 +679,11 @@ export function CampaignTable({
                           startIcon={<RocketLaunchOutlinedIcon />}
                           onClick={() => onLaunch(campaign.id)}
                         >
-                          {presentation.primaryAction === 'retry' ? 'Retry failed' : 'Launch'}
+                          {presentation.primaryAction === 'retry'
+                            ? (campaign.status === 'Interrupted'
+                              ? 'Resume safely'
+                              : 'Retry failed')
+                            : 'Launch'}
                         </Button>
                       )}
                       {presentation.primaryAction === 'pause' && (

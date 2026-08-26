@@ -108,7 +108,7 @@ def test_create_csv_campaign_preserves_files_and_remote_sync(write_environment):
 
 
 def test_update_campaign_preserves_status_transition_and_remote_payload(write_environment):
-    campaign_data, _sent_logs, _targets, remote_service = write_environment
+    campaign_data, _sent_logs, targets, remote_service = write_environment
     campaign_id = "Campaign_update"
     config_path = campaign_data / f"{campaign_id}.json"
     config_path.write_text(
@@ -125,6 +125,9 @@ def test_update_campaign_preserves_status_transition_and_remote_payload(write_en
             }
         ),
         encoding="utf-8",
+    )
+    (targets / f"target_{campaign_id}.csv").write_text(
+        "Email,Name\nana@example.org,Ana\n", encoding="utf-8"
     )
 
     response = client.put(
@@ -183,7 +186,12 @@ def test_save_mapping_preserves_count_status_and_remote_sync(write_environment):
     campaign_id = "Campaign_mapping"
     config_path = campaign_data / f"{campaign_id}.json"
     config_path.write_text(
-        json.dumps({"id": campaign_id, "source_type": "csv", "status": "Draft"}),
+        json.dumps({
+            "id": campaign_id,
+            "source_type": "csv",
+            "status": "Draft",
+            "csv_filename": "contacts.csv",
+        }),
         encoding="utf-8",
     )
     (targets / f"target_{campaign_id}.csv").write_text(
@@ -211,6 +219,7 @@ def test_save_mapping_preserves_count_status_and_remote_sync(write_environment):
             campaign_id,
             {
                 "mapping": mapped["mapping"],
+                "csv_filename": "contacts.csv",
                 "target_count": 2,
                 "status": "Ready",
             },
@@ -642,7 +651,7 @@ def test_update_campaign_does_not_mutate_while_campaign_lock_is_held(
         )
 
         assert response.status_code == 409
-        assert storage.owns_launch_lock(campaign_id, "existing-owner")
+        assert storage.owns_launch_lock(campaign_id, owner_id)
         assert json.loads(config_path.read_text(encoding="utf-8")) == original
         assert target_path.read_text(encoding="utf-8").splitlines() == [
             "Email",
@@ -650,7 +659,7 @@ def test_update_campaign_does_not_mutate_while_campaign_lock_is_held(
         ]
         assert remote_service.updated == []
     finally:
-        storage.release_launch_lock(campaign_id, "existing-owner")
+        storage.release_launch_lock(campaign_id, owner_id)
 
 
 def test_update_campaign_logs_unexpected_failure_and_returns_stable_500(

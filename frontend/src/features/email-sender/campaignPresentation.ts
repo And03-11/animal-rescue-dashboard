@@ -22,7 +22,9 @@ export function buildCampaignPresentation(campaign: EmailCampaign): CampaignPres
 
   let primaryAction: CampaignPrimaryAction = 'none';
 
-  if (campaign.status === 'Completed with Errors' && delivered < total) {
+  if (campaign.status === 'Interrupted') {
+    primaryAction = 'retry';
+  } else if (campaign.status === 'Completed with Errors' && delivered < total) {
     primaryAction = 'retry';
   } else if (campaign.status === 'Completed' || campaign.status === 'Completed with Errors') {
     primaryAction = 'report';

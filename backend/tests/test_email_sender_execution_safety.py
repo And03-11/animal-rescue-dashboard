@@ -156,7 +156,7 @@ def test_execution_wrapper_releases_lock_after_completion(
     monkeypatch.setattr(
         email_sender,
         "_run_campaign_task_unlocked",
-        lambda received_id, received_launch_id: calls.append(
+        lambda received_id, received_launch_id, _lease_guard: calls.append(
             (received_id, received_launch_id)
         ),
     )
@@ -558,7 +558,7 @@ def test_worker_refresh_commit_failure_preserves_prior_audience_snapshot(
 def test_manual_queue_failure_restores_prior_status_before_releasing_lock(
     campaign_directories
 ):
-    campaign_data, _sent_logs, _targets = campaign_directories
+    campaign_data, _sent_logs, targets = campaign_directories
     campaign_id = "Campaign_manual_queue_failure"
     config_path = campaign_data / f"{campaign_id}.json"
     config_path.write_text(
@@ -568,9 +568,17 @@ def test_manual_queue_failure_restores_prior_status_before_releasing_lock(
                 "source_type": "csv",
                 "status": "Ready",
                 "target_count": 1,
+                "mapping": {
+                    "email": "Email",
+                    "name": "Name",
+                    "has_header": True,
+                },
             }
         ),
         encoding="utf-8",
+    )
+    (targets / f"target_{campaign_id}.csv").write_text(
+        "Email,Name\nready@example.org,Ready\n", encoding="utf-8"
     )
 
     class ThrowingBackgroundTasks:
@@ -593,7 +601,7 @@ def test_manual_queue_failure_restores_prior_status_before_releasing_lock(
 def test_manual_queue_failure_preserves_scheduling_update_completed_before_lock(
     campaign_directories, monkeypatch
 ):
-    campaign_data, _sent_logs, _targets = campaign_directories
+    campaign_data, _sent_logs, targets = campaign_directories
     campaign_id = "Campaign_manual_queue_schedule_race"
     config_path = campaign_data / f"{campaign_id}.json"
     config_path.write_text(
@@ -612,6 +620,9 @@ def test_manual_queue_failure_preserves_scheduling_update_completed_before_lock(
             }
         ),
         encoding="utf-8",
+    )
+    (targets / f"target_{campaign_id}.csv").write_text(
+        "Email,Name\nready@example.org,Ready\n", encoding="utf-8"
     )
 
     class ThrowingBackgroundTasks:

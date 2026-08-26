@@ -134,3 +134,38 @@ def test_read_mapped_contacts_deduplicates_normalized_valid_recipients(tmp_path)
         {"Email": "ANA@example.com", "Name": "Ana"},
         {"Email": "leo@example.com", "Name": "Leo"},
     ]
+
+
+@pytest.mark.parametrize("delimiter", [",", ";", "\t", "|"])
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-8-sig", "latin-1"])
+def test_upload_preview_and_worker_share_dialect_and_encoding(
+    tmp_path,
+    delimiter,
+    encoding,
+):
+    text = (
+        f"Email{delimiter}Name\n"
+        f" ANA@example.com {delimiter}Peña\n"
+        f"ana@EXAMPLE.com{delimiter}Duplicate\n"
+        f"leo@example.com{delimiter}Leo\n"
+    )
+    content = text.encode(encoding)
+
+    email_sender._validate_csv_upload("contacts.csv", "text/csv", content)
+    csv_path = tmp_path / f"contacts-{encoding}.csv"
+    csv_path.write_bytes(content)
+
+    first, second, detected = read_csv_preview_rows(csv_path)
+    contacts = read_mapped_contacts(
+        csv_path,
+        {"email": "Email", "name": "Name", "has_header": True},
+        "Campaign_dialect",
+    )
+
+    assert first == ["Email", "Name"]
+    assert second == [" ANA@example.com ", "Peña"]
+    assert detected == delimiter
+    assert contacts == [
+        {"Email": "ANA@example.com", "Name": "Peña"},
+        {"Email": "leo@example.com", "Name": "Leo"},
+    ]

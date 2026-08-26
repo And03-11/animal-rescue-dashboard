@@ -13,6 +13,11 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator, Mapping
 from uuid import uuid4
 
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
+
 import pandas as pd
 
 
@@ -55,6 +60,46 @@ class CampaignMutationLockedError(RuntimeError):
     """Raised when another launch or mutation owns the campaign lock."""
 
 
+class CampaignLeaseLostError(RuntimeError):
+    """Raised when a worker no longer owns its generation-fenced launch lease."""
+
+
+class LaunchLease(str):
+    """String-compatible owner token carrying an unforgeable fence generation."""
+
+    generation: str
+
+    def __new__(cls, owner_id: str, generation: str):
+        lease = str.__new__(cls, owner_id)
+        lease.generation = generation
+        return lease
+
+
+class LaunchLeaseGuard:
+    def __init__(
+        self,
+        storage: "CampaignFileStorage",
+        campaign_id: str,
+        lease: LaunchLease,
+    ) -> None:
+        self.storage = storage
+        self.campaign_id = campaign_id
+        self.lease = lease
+        self.lost = threading.Event()
+
+    def mark_lost(self) -> None:
+        self.lost.set()
+
+    def ensure_owned(self) -> None:
+        if self.lost.is_set() or not self.storage.owns_launch_lock(
+            self.campaign_id, self.lease
+        ):
+            self.lost.set()
+            raise CampaignLeaseLostError(
+                f"Launch lease lost for {self.campaign_id}"
+            )
+
+
 @dataclass(frozen=True)
 class CampaignSnapshot:
     campaign: bytes | None
@@ -63,6 +108,9 @@ class CampaignSnapshot:
 
 class CampaignFileStorage:
     """Share the campaign lock while atomically replacing audience state."""
+
+    _thread_guard_registry_lock = threading.Lock()
+    _thread_guards: dict[str, threading.RLock] = {}
 
     def __init__(
         self,
@@ -134,6 +182,11 @@ class CampaignFileStorage:
             self.campaign_data_dir, f"{campaign_id}.launch.lock", campaign_id
         )
 
+    def launch_guard_path(self, campaign_id: str) -> Path:
+        return self._contained_path(
+            self.campaign_data_dir, f"{campaign_id}.launch.guard", campaign_id
+        )
+
     def source_csv_path(self, campaign_id: str) -> Path:
         return self._contained_path(
             self.targets_dir, f"target_{campaign_id}.csv", campaign_id
@@ -171,6 +224,29 @@ class CampaignFileStorage:
             os.replace(temporary_path, campaign_path)
         finally:
             self._cleanup_temporary_path(temporary_path, campaign_id)
+
+    def save_campaign_owned(
+        self,
+        campaign_id: str,
+        config: dict[str, Any],
+        *,
+        lease: str,
+        serialize_unknown: bool = False,
+    ) -> None:
+        """Persist campaign state only while this exact fence still owns the lease."""
+        with self._lease_mutation_guard(campaign_id):
+            current = self._read_lock_payload(self.launch_lock_path(campaign_id))
+            if (
+                current is None
+                or self._lock_is_expired(*current)
+                or not self._lease_matches(current[0], lease)
+            ):
+                raise CampaignLeaseLostError(campaign_id)
+            self.save_campaign(
+                campaign_id,
+                config,
+                serialize_unknown=serialize_unknown,
+            )
 
     def _utc_now(self) -> datetime:
         current = self._now()
@@ -216,15 +292,61 @@ class CampaignFileStorage:
             ) + timedelta(seconds=self.lock_lease_seconds)
         return expires_at <= self._utc_now()
 
+    @classmethod
+    def _thread_guard_for(cls, guard_path: Path) -> threading.RLock:
+        guard_key = str(guard_path.resolve())
+        with cls._thread_guard_registry_lock:
+            return cls._thread_guards.setdefault(guard_key, threading.RLock())
+
+    @contextmanager
+    def _lease_mutation_guard(self, campaign_id: str) -> Iterator[None]:
+        """Serialize one lease CAS across threads and independent processes."""
+        guard_path = self.launch_guard_path(campaign_id)
+        guard_path.parent.mkdir(parents=True, exist_ok=True)
+        thread_guard = self._thread_guard_for(guard_path)
+        with thread_guard:
+            descriptor = os.open(guard_path, os.O_CREAT | os.O_RDWR)
+            locked = False
+            try:
+                if os.fstat(descriptor).st_size == 0:
+                    os.write(descriptor, b"\0")
+                    os.fsync(descriptor)
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                if os.name == "nt":
+                    msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)
+                else:
+                    fcntl.flock(descriptor, fcntl.LOCK_EX)
+                locked = True
+                yield
+            finally:
+                if locked:
+                    os.lseek(descriptor, 0, os.SEEK_SET)
+                    if os.name == "nt":
+                        msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+                    else:
+                        fcntl.flock(descriptor, fcntl.LOCK_UN)
+                os.close(descriptor)
+
+    @staticmethod
+    def _lease_matches(payload: Mapping[str, Any], lease: str) -> bool:
+        if payload.get("owner_id") != str(lease):
+            return False
+        expected_generation = getattr(lease, "generation", None)
+        actual_generation = payload.get("generation")
+        if actual_generation is None:
+            return expected_generation is None
+        return (
+            isinstance(expected_generation, str)
+            and expected_generation == actual_generation
+        )
+
     def _reclaim_expired_lock(self, campaign_id: str) -> bool:
         lock_path = self.launch_lock_path(campaign_id)
-        current = self._read_lock_payload(lock_path)
-        if current is None or not self._lock_is_expired(*current):
-            return False
-        try:
-            lock_path.unlink()
-            return True
-        except FileNotFoundError:
+        with self._lease_mutation_guard(campaign_id):
+            current = self._read_lock_payload(lock_path)
+            if current is None or not self._lock_is_expired(*current):
+                return False
+            lock_path.unlink(missing_ok=True)
             return True
 
     def _write_lock_payload(
@@ -264,16 +386,20 @@ class CampaignFileStorage:
 
     def acquire_launch_lock(
         self, campaign_id: str, owner_id: str | None = None
-    ) -> str | None:
-        """Atomically reserve a campaign, reclaiming only an expired lease."""
+    ) -> LaunchLease | None:
+        """CAS one generation-fenced lease, replacing it only after expiry."""
         owner_id = owner_id or uuid4().hex
         lock_path = self.launch_lock_path(campaign_id)
         lock_path.parent.mkdir(parents=True, exist_ok=True)
-
-        for attempt in range(2):
+        with self._lease_mutation_guard(campaign_id):
+            current = self._read_lock_payload(lock_path)
+            if current is not None and not self._lock_is_expired(*current):
+                return None
             acquired_at = self._utc_now()
+            generation = uuid4().hex
             payload = {
                 "owner_id": owner_id,
+                "generation": generation,
                 "acquired_at": acquired_at.isoformat(),
                 "expires_at": (
                     acquired_at + timedelta(seconds=self.lock_lease_seconds)
@@ -283,75 +409,81 @@ class CampaignFileStorage:
                 self._write_lock_payload(
                     lock_path,
                     payload,
-                    exclusive=True,
+                    exclusive=current is None,
                     campaign_id=campaign_id,
                 )
-                return owner_id
             except FileExistsError:
-                if attempt == 0 and self._reclaim_expired_lock(campaign_id):
-                    continue
                 return None
-        return None
+            return LaunchLease(owner_id, generation)
 
-    def owns_launch_lock(self, campaign_id: str, owner_id: str) -> bool:
-        current = self._read_lock_payload(self.launch_lock_path(campaign_id))
-        return current is not None and current[0].get("owner_id") == owner_id
+    def owns_launch_lock(self, campaign_id: str, lease: str) -> bool:
+        with self._lease_mutation_guard(campaign_id):
+            current = self._read_lock_payload(self.launch_lock_path(campaign_id))
+            return (
+                current is not None
+                and not self._lock_is_expired(*current)
+                and self._lease_matches(current[0], lease)
+            )
 
     def is_launch_locked(self, campaign_id: str) -> bool:
-        lock_path = self.launch_lock_path(campaign_id)
-        current = self._read_lock_payload(lock_path)
-        if current is None:
-            return False
-        if not self._lock_is_expired(*current):
-            return True
-        self._reclaim_expired_lock(campaign_id)
-        return False
+        with self._lease_mutation_guard(campaign_id):
+            current = self._read_lock_payload(self.launch_lock_path(campaign_id))
+            return current is not None and not self._lock_is_expired(*current)
 
-    def renew_launch_lock(self, campaign_id: str, owner_id: str) -> bool:
+    def renew_launch_lock(self, campaign_id: str, lease: str) -> bool:
         lock_path = self.launch_lock_path(campaign_id)
-        current = self._read_lock_payload(lock_path)
-        if current is None or current[0].get("owner_id") != owner_id:
-            return False
-        acquired_at = current[0].get("acquired_at")
-        if self._parse_lock_timestamp(acquired_at) is None:
-            acquired_at = self._utc_now().isoformat()
-        payload = {
-            "owner_id": owner_id,
-            "acquired_at": acquired_at,
-            "expires_at": (
-                self._utc_now() + timedelta(seconds=self.lock_lease_seconds)
-            ).isoformat(),
-        }
-        self._write_lock_payload(
-            lock_path,
-            payload,
-            exclusive=False,
-            campaign_id=campaign_id,
-        )
-        return True
-
-    def release_launch_lock(self, campaign_id: str, owner_id: str) -> bool:
-        if not self.owns_launch_lock(campaign_id, owner_id):
-            return False
-        try:
-            self.launch_lock_path(campaign_id).unlink()
+        with self._lease_mutation_guard(campaign_id):
+            current = self._read_lock_payload(lock_path)
+            if (
+                current is None
+                or self._lock_is_expired(*current)
+                or not self._lease_matches(current[0], lease)
+            ):
+                return False
+            acquired_at = current[0].get("acquired_at")
+            if self._parse_lock_timestamp(acquired_at) is None:
+                acquired_at = self._utc_now().isoformat()
+            payload = {
+                "owner_id": str(lease),
+                "generation": current[0].get("generation"),
+                "acquired_at": acquired_at,
+                "expires_at": (
+                    self._utc_now() + timedelta(seconds=self.lock_lease_seconds)
+                ).isoformat(),
+            }
+            self._write_lock_payload(
+                lock_path,
+                payload,
+                exclusive=False,
+                campaign_id=campaign_id,
+            )
             return True
-        except FileNotFoundError:
-            return False
+
+    def release_launch_lock(self, campaign_id: str, lease: str) -> bool:
+        lock_path = self.launch_lock_path(campaign_id)
+        with self._lease_mutation_guard(campaign_id):
+            current = self._read_lock_payload(lock_path)
+            if current is None or not self._lease_matches(current[0], lease):
+                return False
+            lock_path.unlink(missing_ok=True)
+            return True
 
     @contextmanager
     def launch_lock_heartbeat(
         self,
         campaign_id: str,
-        owner_id: str,
-    ) -> Iterator[None]:
+        lease: LaunchLease,
+    ) -> Iterator[LaunchLeaseGuard]:
         """Renew a live send lease until the guarded operation completes."""
         stopped = threading.Event()
         interval = max(1.0, self.lock_lease_seconds / 3)
+        guard = LaunchLeaseGuard(self, campaign_id, lease)
+        guard.ensure_owned()
 
         def heartbeat() -> None:
             while not stopped.wait(interval):
-                if not self.renew_launch_lock(campaign_id, owner_id):
+                if not self.renew_launch_lock(campaign_id, lease):
+                    guard.mark_lost()
                     return
 
         thread = threading.Thread(
@@ -361,7 +493,7 @@ class CampaignFileStorage:
         )
         thread.start()
         try:
-            yield
+            yield guard
         finally:
             stopped.set()
             thread.join(timeout=interval + 1)
@@ -446,6 +578,23 @@ class CampaignFileStorage:
             writer.writerow({"Email": email})
             log_file.flush()
             os.fsync(log_file.fileno())
+
+    def append_sent_email_owned(
+        self,
+        campaign_id: str,
+        email: str,
+        *,
+        lease: str,
+    ) -> None:
+        with self._lease_mutation_guard(campaign_id):
+            current = self._read_lock_payload(self.launch_lock_path(campaign_id))
+            if (
+                current is None
+                or self._lock_is_expired(*current)
+                or not self._lease_matches(current[0], lease)
+            ):
+                raise CampaignLeaseLostError(campaign_id)
+            self.append_sent_email(campaign_id, email)
 
     def delete_created_campaign_artifacts(self, campaign_id: str) -> None:
         """Compensate a failed create without touching any other campaign."""

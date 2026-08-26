@@ -1,60 +1,75 @@
-"""CSV preview parsing shared by the email campaign workflow."""
+"""CSV parsing shared by upload, preview, mapping, and campaign delivery."""
 
 import csv
+from dataclasses import dataclass
+import io
 import os
+from pathlib import Path
 from typing import Any, Mapping, Optional
 
 import pandas as pd
 
 
 CsvRow = Optional[list[str]]
+SUPPORTED_CSV_DELIMITERS = (",", ";", "\t", "|")
 
 
-def read_csv_preview_rows(csv_path: str | os.PathLike[str]) -> tuple[CsvRow, CsvRow, str]:
-    """Read the first two CSV rows while preserving the legacy detection rules."""
-    delimiter = ","
+@dataclass(frozen=True)
+class CsvFormat:
+    encoding: str
+    delimiter: str
+    first_row: CsvRow
+    second_row: CsvRow
 
+
+def inspect_csv_content(content: bytes) -> CsvFormat:
+    """Decode and sniff one payload with rules shared by every CSV consumer."""
+    if not content or b"\x00" in content:
+        raise ValueError("Invalid CSV content")
     try:
-        print("Attempting to read CSV with utf-8-sig encoding...")
-        with open(csv_path, "r", newline="", encoding="utf-8-sig") as csvfile:
-            sniffer = csv.Sniffer()
-            sample = csvfile.read(4096)
-            try:
-                dialect = sniffer.sniff(sample, delimiters=",;\t|")
-                delimiter = dialect.delimiter
-            except csv.Error as sniff_err:
-                print(f"Sniffer failed: {sniff_err}. Trying common delimiters...")
-                for test_delimiter in [",", ";", "\t", "|"]:
-                    if test_delimiter in sample:
-                        delimiter = test_delimiter
-                        print(f"Using detected delimiter: '{delimiter}'")
-                        break
-
-            csvfile.seek(0)
-            reader = csv.reader(csvfile, delimiter=delimiter)
-            first_row = next(reader, None)
-            second_row = next(reader, None)
-            print(f"Successfully read preview with utf-8-sig. Delimiter: '{delimiter}'")
+        text = content.decode("utf-8-sig")
+        encoding = "utf-8-sig"
     except UnicodeDecodeError:
-        print("UTF-8 decoding failed. Attempting to read CSV with latin-1 encoding...")
-        with open(csv_path, "r", newline="", encoding="latin-1") as csvfile:
-            sniffer = csv.Sniffer()
-            try:
-                sample = csvfile.read(2048)
-                dialect = sniffer.sniff(sample)
-                delimiter = dialect.delimiter
-                csvfile.seek(0)
-            except csv.Error:
-                delimiter = ","
-                csvfile.seek(0)
-                print("Could not detect delimiter with latin-1, defaulting to ','")
+        text = content.decode("latin-1")
+        encoding = "latin-1"
 
-            reader = csv.reader(csvfile, delimiter=delimiter)
-            first_row = next(reader, None)
-            second_row = next(reader, None)
-            print(f"Successfully read preview with latin-1. Delimiter: '{delimiter}'")
+    sample = text[:65_536]
+    try:
+        delimiter = csv.Sniffer().sniff(
+            sample, delimiters="".join(SUPPORTED_CSV_DELIMITERS)
+        ).delimiter
+    except csv.Error:
+        first_line = next((line for line in sample.splitlines() if line), "")
+        delimiter = max(
+            SUPPORTED_CSV_DELIMITERS,
+            key=lambda candidate: first_line.count(candidate),
+        )
 
-    return first_row, second_row, delimiter
+    reader = csv.reader(io.StringIO(text, newline=""), delimiter=delimiter)
+    first_row = next(reader, None)
+    second_row = next(reader, None)
+    return CsvFormat(
+        encoding=encoding,
+        delimiter=delimiter,
+        first_row=first_row,
+        second_row=second_row,
+    )
+
+
+def inspect_csv_file(csv_path: str | os.PathLike[str]) -> CsvFormat:
+    return inspect_csv_content(Path(csv_path).read_bytes())
+
+
+def read_csv_preview_rows(
+    csv_path: str | os.PathLike[str],
+) -> tuple[CsvRow, CsvRow, str]:
+    """Read preview rows using the exact dialect and encoding used at send time."""
+    csv_format = inspect_csv_file(csv_path)
+    return (
+        csv_format.first_row,
+        csv_format.second_row,
+        csv_format.delimiter,
+    )
 
 
 def read_mapped_contacts(
@@ -62,40 +77,26 @@ def read_mapped_contacts(
     mapping: Mapping[str, Any],
     campaign_id: str,
 ) -> list[dict[str, str]]:
-    """Load campaign contacts while preserving the existing mapping behavior."""
-    delimiter = ","
-    with open(csv_path, "r", newline="", encoding="utf-8-sig") as csvfile:
-        try:
-            sample = csvfile.read(2048)
-            delimiter = csv.Sniffer().sniff(sample).delimiter
-            print(f"[{campaign_id}] Delimiter detected for processing: '{delimiter}'")
-        except csv.Error:
-            print(f"[{campaign_id}] Delimiter detection failed, using default: ','")
-
+    """Load normalized, valid, case-insensitively deduplicated recipients."""
+    csv_format = inspect_csv_file(csv_path)
     has_header = mapping.get("has_header", False)
     dataframe = pd.read_csv(
         csv_path,
-        delimiter=delimiter,
+        delimiter=csv_format.delimiter,
+        encoding=csv_format.encoding,
         dtype=str,
         keep_default_na=False,
         header=0 if has_header else None,
     )
-    print(f"[{campaign_id}] CSV loaded into DataFrame. Columns found: {dataframe.columns.tolist()}")
 
     email_column = mapping["email"]
     name_column = mapping["name"]
 
     if has_header:
         if email_column not in dataframe.columns:
-            raise ValueError(
-                f"Saved email column '{email_column}' not found in actual CSV header: "
-                f"{dataframe.columns.tolist()}"
-            )
+            raise ValueError(f"Saved email column '{email_column}' was not found")
         if name_column not in dataframe.columns:
-            raise ValueError(
-                f"Saved name column '{name_column}' not found in actual CSV header: "
-                f"{dataframe.columns.tolist()}"
-            )
+            raise ValueError(f"Saved name column '{name_column}' was not found")
         actual_email_key: str | int = email_column
         actual_name_key: str | int = name_column
     else:
@@ -109,23 +110,14 @@ def read_mapped_contacts(
             actual_email_key = email_column_index
             actual_name_key = name_column_index
         except (ValueError, IndexError, AttributeError) as error:
-            raise ValueError(
-                "Invalid generic column reference in saved mapping "
-                f"('{email_column}', '{name_column}'). Error: {error}"
-            ) from error
-
-    print(
-        f"[{campaign_id}] Accessing DataFrame columns using -> "
-        f"Email key: '{actual_email_key}', Name key: '{actual_name_key}'"
-    )
+            raise ValueError("Invalid generic column reference in saved mapping") from error
 
     contacts: list[dict[str, str]] = []
     seen_emails: set[str] = set()
-    for index, row in dataframe.iterrows():
-        email_value = str(row[actual_email_key]).strip() if actual_email_key in row else ""
-        name_value = str(row[actual_name_key]).strip() if actual_name_key in row else ""
+    for _index, row in dataframe.iterrows():
+        email_value = str(row[actual_email_key]).strip()
+        name_value = str(row[actual_name_key]).strip()
         normalized_email = email_value.lower()
-
         if (
             email_value
             and "@" in email_value
@@ -136,11 +128,5 @@ def read_mapped_contacts(
             contacts.append(
                 {"Email": email_value, "Name": name_value or "Valued Supporter"}
             )
-        elif email_value and normalized_email not in seen_emails:
-            print(
-                f"[{campaign_id}] WARNING: Skipping row {index} due to invalid "
-                f"email format: '{email_value}'"
-            )
 
-    print(f"[{campaign_id}] Processed {len(contacts)} valid contacts from CSV.")
     return contacts
