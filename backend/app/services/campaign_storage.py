@@ -35,6 +35,7 @@ CAMPAIGN_SUMMARY_FIELDS = frozenset(
         "sent_count_final",
         "target_count",
         "performance",
+        "click_tracking_enabled",
     }
 )
 
@@ -369,6 +370,7 @@ class CampaignFileStorage:
             try:
                 with path.open("r", encoding="utf-8") as campaign_file:
                     campaign_data = json.load(campaign_file)
+                campaign_data.setdefault("click_tracking_enabled", False)
 
                 total_contacts = campaign_data.get("target_count", 0)
                 campaign_id = campaign_data.get("id")
@@ -401,6 +403,7 @@ class CampaignFileStorage:
 
     def get_campaign_details(self, campaign_id: str) -> dict[str, Any]:
         campaign_details = self.load_campaign(campaign_id)
+        campaign_details.setdefault("click_tracking_enabled", False)
 
         target_contacts: list[str] = []
         target_path = self.target_path(campaign_id)

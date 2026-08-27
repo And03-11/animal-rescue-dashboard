@@ -10,19 +10,19 @@ export type CampaignPrimaryAction =
 
 export interface CampaignPresentation {
   primaryAction: CampaignPrimaryAction;
-  delivered: number;
+  sent: number;
   total: number;
   openRate: number | null;
   clickRate: number | null;
 }
 
 export function buildCampaignPresentation(campaign: EmailCampaign): CampaignPresentation {
-  const delivered = campaign.progress?.sent ?? campaign.sent_count_final ?? 0;
+  const sent = campaign.progress?.sent ?? campaign.sent_count_final ?? 0;
   const total = campaign.progress?.total ?? campaign.target_count ?? 0;
 
   let primaryAction: CampaignPrimaryAction = 'none';
 
-  if (campaign.status === 'Completed with Errors' && delivered < total) {
+  if (campaign.status === 'Completed with Errors' && sent < total) {
     primaryAction = 'retry';
   } else if (campaign.status === 'Completed' || campaign.status === 'Completed with Errors') {
     primaryAction = 'report';
@@ -39,7 +39,7 @@ export function buildCampaignPresentation(campaign: EmailCampaign): CampaignPres
 
   return {
     primaryAction,
-    delivered,
+    sent,
     total,
     openRate: campaign.performance?.open_rate ?? null,
     clickRate: campaign.performance?.click_rate ?? null,

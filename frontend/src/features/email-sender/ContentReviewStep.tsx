@@ -136,6 +136,7 @@ export function ContentReviewStep({
             ['Segment', segmentLabel],
             ['Senders', senderModeLabel],
             ['Delivery', scheduleLabel],
+            ['Tracking', draft.clickTrackingEnabled ? 'Donation clicks' : 'Off'],
           ].map(([label, value]) => (
             <Box key={label} sx={{ minWidth: 0 }}>
               <Typography component="dt" variant="caption" color="text.secondary">{label}</Typography>

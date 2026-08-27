@@ -11,6 +11,7 @@ import {
   MenuItem,
   Select,
   Stack,
+  Switch,
   TextField,
   ToggleButton,
   ToggleButtonGroup,
@@ -194,6 +195,45 @@ export function CampaignSetupStep({
             inputProps={{ maxLength: 240 }}
           />
         </Stack>
+      </Box>
+
+      <Box component="fieldset" sx={{ m: 0, p: 0, border: 0, minWidth: 0 }}>
+        <Typography component="legend" variant="subtitle2" sx={{ mb: 1 }}>
+          Engagement tracking
+        </Typography>
+        <Box
+          sx={{
+            maxWidth: 680,
+            p: 2,
+            border: '1px solid',
+            borderColor: 'divider',
+            borderRadius: 2,
+            bgcolor: 'background.paper',
+          }}
+        >
+          <FormControlLabel
+            sx={{ m: 0, alignItems: 'flex-start' }}
+            control={(
+              <Switch
+                checked={draft.clickTrackingEnabled}
+                onChange={(event) => onDraftChange({
+                  clickTrackingEnabled: event.target.checked,
+                })}
+                inputProps={{ 'aria-label': 'Track donation clicks' }}
+              />
+            )}
+            label={(
+              <Box sx={{ pt: 0.35 }}>
+                <Typography variant="body2" sx={{ fontWeight: 650 }}>
+                  Track donation clicks
+                </Typography>
+                <Typography variant="caption" color="text.secondary" component="p" sx={{ mt: 0.25 }}>
+                  Uses first-party tracking on donations.animallove.cr. Open tracking stays off.
+                </Typography>
+              </Box>
+            )}
+          />
+        </Box>
       </Box>
 
       <Box

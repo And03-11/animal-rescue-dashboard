@@ -7,7 +7,7 @@ import random
 import json
 import traceback
 from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, File
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool
 import pandas as pd
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Union, Literal
@@ -300,6 +300,7 @@ class CampaignRequest(BaseModel):
     )
     source_type: Literal["airtable", "csv"]
     segment: Literal["standard", "dnr"] = "standard"
+    click_tracking_enabled: StrictBool = False
 
 class CampaignUpdateRequest(BaseModel):
     campaign_name: Optional[str] = None
@@ -314,6 +315,7 @@ class CampaignUpdateRequest(BaseModel):
         default=None, min_length=1, max_length=4
     )
     segment: Optional[Literal["standard", "dnr"]] = None
+    click_tracking_enabled: Optional[StrictBool] = None
 
 
 
@@ -1057,6 +1059,7 @@ def update_campaign(
             )
 
         config = storage.load_campaign(campaign_id)
+        config.setdefault("click_tracking_enabled", False)
         request_fields = req.model_fields_set
         audience_filters_changed = bool(
             {"audiences", "region", "is_bounced", "segment"} & request_fields
@@ -1126,7 +1129,7 @@ def update_campaign(
                 remote_fields = [
                     "campaign_name", "subject", "html_body", "sender_config",
                     "scheduled_at", "status", "region", "is_bounced", "segment",
-                    "audiences", "target_count",
+                    "audiences", "target_count", "click_tracking_enabled",
                 ]
                 get_email_sender_service().update_campaign(
                     campaign_id, {key: config[key] for key in remote_fields if key in config}
@@ -1168,7 +1171,7 @@ def update_campaign(
         # Intentar actualizar supabase
         try:
             service = get_email_sender_service()
-            supabase_update = {k: v for k, v in config.items() if k in ['campaign_name', 'subject', 'html_body', 'sender_config', 'scheduled_at', 'status', 'region', 'is_bounced', 'segment']}
+            supabase_update = {k: v for k, v in config.items() if k in ['campaign_name', 'subject', 'html_body', 'sender_config', 'scheduled_at', 'status', 'region', 'is_bounced', 'segment', 'click_tracking_enabled']}
             service.update_campaign(campaign_id, supabase_update)
         except Exception as e:
             print(f"Supabase update error: {e}")

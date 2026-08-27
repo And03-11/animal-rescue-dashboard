@@ -36,6 +36,7 @@ export interface CampaignFormData {
   html_body: string;
   sender_config: string | string[];
   scheduled_at: string | null;
+  click_tracking_enabled: boolean;
   csvFile?: File | null;
   region?: string;
   is_bounced?: boolean;
@@ -87,6 +88,7 @@ export interface EmailCampaign {
   performance?: CampaignPerformance;
   sent_count_final?: number;
   target_count?: number;
+  click_tracking_enabled?: boolean;
 }
 
 export interface PaginatedCampaignsResponse {
@@ -122,6 +124,7 @@ export interface CampaignDetails {
   status?: string;
   target_count?: number;
   html_body?: string;
+  click_tracking_enabled?: boolean;
 }
 
 export interface CampaignDetailsResponse {

@@ -20,6 +20,7 @@ const baseDraft = () => ({
   campaignName: 'Campaign',
   subject: 'Subject',
   htmlBody: '<p>Body</p>',
+  clickTrackingEnabled: false,
   scheduledAt: null,
   csvFile: null,
 });
@@ -188,6 +189,22 @@ test('payload keeps all selected branches and one segment', () => {
   assert.equal('region' in payload, false);
   assert.equal('is_bounced' in payload, false);
   assert.equal(payload.sender_config, 'all');
+  assert.equal(payload.click_tracking_enabled, false);
+});
+
+test('click tracking defaults off, hydrates explicit true, and persists in payload', () => {
+  assert.ok(wizardState, 'campaign wizard state module is missing');
+  const fresh = wizardState.hydrateCampaignWizardDraft({});
+  const tracked = wizardState.hydrateCampaignWizardDraft({
+    click_tracking_enabled: true,
+  });
+
+  assert.equal(fresh.clickTrackingEnabled, false);
+  assert.equal(tracked.clickTrackingEnabled, true);
+  assert.equal(
+    wizardState.buildCampaignPayload(tracked).click_tracking_enabled,
+    true,
+  );
 });
 
 test('payload maps group and manual sender branches immutably', () => {

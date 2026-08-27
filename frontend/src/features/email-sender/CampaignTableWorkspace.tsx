@@ -114,7 +114,7 @@ export function CampaignTable({
               <TableCell>Campaign</TableCell>
               <TableCell>Status</TableCell>
               <TableCell>Audience</TableCell>
-              <TableCell>Delivered</TableCell>
+              <TableCell>Sent</TableCell>
               <TableCell align="right">Open rate</TableCell>
               <TableCell align="right">Click rate</TableCell>
               <TableCell align="right">Actions</TableCell>
@@ -171,7 +171,7 @@ export function CampaignTable({
                 ? buildAudienceTooltipProps(audiencePresentation)
                 : null;
               const deliveryPercentage = presentation.total > 0
-                ? Math.min(100, Math.max(0, (presentation.delivered / presentation.total) * 100))
+                ? Math.min(100, Math.max(0, (presentation.sent / presentation.total) * 100))
                 : 0;
               const isActionBusy = Boolean(actionLoading[campaign.id]);
 
@@ -296,7 +296,7 @@ export function CampaignTable({
                       <Stack spacing={0.9}>
                         <Typography variant="body2" sx={{ fontWeight: 650 }}>
                           <Box component="span" className="dashboard-data-value">
-                            {presentation.delivered.toLocaleString()}
+                            {presentation.sent.toLocaleString()}
                           </Box>
                           <Box component="span" sx={{ color: 'text.secondary', fontWeight: 500 }}>
                             {' '}/ {presentation.total.toLocaleString()}

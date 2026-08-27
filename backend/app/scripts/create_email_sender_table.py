@@ -43,6 +43,10 @@ def create_email_sender_table():
                 ALTER TABLE email_sender_campaigns
                 ADD COLUMN IF NOT EXISTS segment VARCHAR(20) NOT NULL DEFAULT 'standard'
             """)
+            cur.execute("""
+                ALTER TABLE email_sender_campaigns
+                ADD COLUMN IF NOT EXISTS click_tracking_enabled BOOLEAN NOT NULL DEFAULT FALSE
+            """)
             conn.commit()
             print("✅ Added scheduled_at column if missing.")
             return True
@@ -60,6 +64,7 @@ def create_email_sender_table():
                 html_body TEXT,
                 region VARCHAR(20),
                 is_bounced BOOLEAN DEFAULT FALSE,
+                click_tracking_enabled BOOLEAN NOT NULL DEFAULT FALSE,
                 sender_config JSONB,
                 csv_filename VARCHAR(255),
                 mapping JSONB,

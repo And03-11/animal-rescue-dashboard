@@ -107,6 +107,77 @@ def test_create_csv_campaign_preserves_files_and_remote_sync(write_environment):
     assert remote_service.created[0]["status"] == "Draft"
 
 
+@pytest.mark.parametrize("click_tracking_enabled", [True, False])
+def test_create_campaign_persists_explicit_click_tracking_boolean(
+    write_environment, click_tracking_enabled
+):
+    campaign_data, _sent_logs, _targets, remote_service = write_environment
+
+    response = client.post(
+        "/api/v1/sender/campaigns",
+        json={
+            "source_type": "csv",
+            "subject": "Welcome",
+            "html_body": "<p>Hello</p>",
+            "campaign_name": "Tracked campaign",
+            "sender_config": "all",
+            "click_tracking_enabled": click_tracking_enabled,
+        },
+    )
+
+    assert response.status_code == 201
+    created = response.json()
+    assert created["click_tracking_enabled"] is click_tracking_enabled
+    stored = json.loads(
+        (campaign_data / f"{created['id']}.json").read_text(encoding="utf-8")
+    )
+    assert stored["click_tracking_enabled"] is click_tracking_enabled
+    assert remote_service.created[-1]["click_tracking_enabled"] is click_tracking_enabled
+
+
+def test_create_campaign_defaults_click_tracking_to_false(write_environment):
+    campaign_data, _sent_logs, _targets, remote_service = write_environment
+
+    response = client.post(
+        "/api/v1/sender/campaigns",
+        json={
+            "source_type": "csv",
+            "subject": "Welcome",
+            "html_body": "<p>Hello</p>",
+            "campaign_name": "Legacy-compatible campaign",
+            "sender_config": "all",
+        },
+    )
+
+    assert response.status_code == 201
+    created = response.json()
+    assert created["click_tracking_enabled"] is False
+    stored = json.loads(
+        (campaign_data / f"{created['id']}.json").read_text(encoding="utf-8")
+    )
+    assert stored["click_tracking_enabled"] is False
+    assert remote_service.created[-1]["click_tracking_enabled"] is False
+
+
+@pytest.mark.parametrize("invalid_value", ["true", "false", 1, 0])
+def test_create_campaign_rejects_non_boolean_click_tracking_values(
+    write_environment, invalid_value
+):
+    response = client.post(
+        "/api/v1/sender/campaigns",
+        json={
+            "source_type": "csv",
+            "subject": "Welcome",
+            "html_body": "<p>Hello</p>",
+            "campaign_name": "Invalid tracking",
+            "sender_config": "all",
+            "click_tracking_enabled": invalid_value,
+        },
+    )
+
+    assert response.status_code == 422
+
+
 def test_update_campaign_preserves_status_transition_and_remote_payload(write_environment):
     campaign_data, _sent_logs, _targets, remote_service = write_environment
     campaign_id = "Campaign_update"
@@ -146,11 +217,139 @@ def test_update_campaign_preserves_status_transition_and_remote_payload(write_en
                 "subject": "Updated",
                 "html_body": "<p>Old</p>",
                 "sender_config": "all",
+                "click_tracking_enabled": False,
                 "scheduled_at": "2026-07-15T12:00:00",
                 "status": "Scheduled",
             },
         )
     ]
+
+
+def test_update_legacy_campaign_normalizes_missing_click_tracking_to_false(
+    write_environment
+):
+    campaign_data, _sent_logs, _targets, remote_service = write_environment
+    campaign_id = "Campaign_legacy_tracking"
+    config_path = campaign_data / f"{campaign_id}.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "id": campaign_id,
+                "source_type": "csv",
+                "campaign_name": "Legacy",
+                "subject": "Old",
+                "html_body": "<p>Old</p>",
+                "sender_config": "all",
+                "status": "Draft",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.put(
+        f"/api/v1/sender/campaigns/{campaign_id}",
+        json={"subject": "Updated"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["click_tracking_enabled"] is False
+    assert json.loads(config_path.read_text(encoding="utf-8"))[
+        "click_tracking_enabled"
+    ] is False
+    assert remote_service.updated[-1][1]["click_tracking_enabled"] is False
+
+
+def test_legacy_campaign_reads_expose_click_tracking_as_disabled(write_environment):
+    campaign_data, _sent_logs, _targets, _remote_service = write_environment
+    campaign_id = "Campaign_legacy_tracking_reads"
+    (campaign_data / f"{campaign_id}.json").write_text(
+        json.dumps(
+            {
+                "id": campaign_id,
+                "createdAt": "2026-08-27T12:00:00",
+                "source_type": "csv",
+                "status": "Draft",
+                "target_count": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    details = client.get(f"/api/v1/sender/campaigns/{campaign_id}/details")
+    listing = client.get("/api/v1/sender/campaigns?page_size=15&offset=0")
+
+    assert details.status_code == 200
+    assert details.json()["details"]["click_tracking_enabled"] is False
+    assert listing.status_code == 200
+    summary = next(
+        item for item in listing.json()["items"] if item["id"] == campaign_id
+    )
+    assert summary["click_tracking_enabled"] is False
+
+
+def test_update_campaign_persists_click_tracking_toggle(write_environment):
+    campaign_data, _sent_logs, _targets, remote_service = write_environment
+    campaign_id = "Campaign_tracking_toggle"
+    config_path = campaign_data / f"{campaign_id}.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "id": campaign_id,
+                "source_type": "csv",
+                "campaign_name": "Toggle",
+                "subject": "Subject",
+                "html_body": "<p>Body</p>",
+                "sender_config": "all",
+                "status": "Draft",
+                "click_tracking_enabled": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    enabled = client.put(
+        f"/api/v1/sender/campaigns/{campaign_id}",
+        json={"click_tracking_enabled": True},
+    )
+    disabled = client.put(
+        f"/api/v1/sender/campaigns/{campaign_id}",
+        json={"click_tracking_enabled": False},
+    )
+
+    assert enabled.status_code == 200
+    assert enabled.json()["click_tracking_enabled"] is True
+    assert disabled.status_code == 200
+    assert disabled.json()["click_tracking_enabled"] is False
+    assert json.loads(config_path.read_text(encoding="utf-8"))[
+        "click_tracking_enabled"
+    ] is False
+    assert remote_service.updated[-2][1]["click_tracking_enabled"] is True
+    assert remote_service.updated[-1][1]["click_tracking_enabled"] is False
+
+
+@pytest.mark.parametrize("invalid_value", ["true", 1])
+def test_update_campaign_rejects_non_boolean_click_tracking_values(
+    write_environment, invalid_value
+):
+    campaign_data, _sent_logs, _targets, _remote_service = write_environment
+    campaign_id = "Campaign_invalid_tracking_update"
+    (campaign_data / f"{campaign_id}.json").write_text(
+        json.dumps(
+            {
+                "id": campaign_id,
+                "source_type": "csv",
+                "status": "Draft",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.put(
+        f"/api/v1/sender/campaigns/{campaign_id}",
+        json={"click_tracking_enabled": invalid_value},
+    )
+
+    assert response.status_code == 422
 
 
 def test_upload_csv_preserves_file_and_config_metadata(write_environment):

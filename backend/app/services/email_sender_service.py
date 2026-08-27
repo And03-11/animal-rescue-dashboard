@@ -79,9 +79,11 @@ class EmailSenderService:
                     INSERT INTO email_sender_campaigns (
                         id, campaign_name, source_type, subject, html_body,
                         region, is_bounced, sender_config, status, scheduled_at,
-                        target_count, audiences, segment, created_at
+                        target_count, audiences, segment, click_tracking_enabled,
+                        created_at
                     ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW()
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, NOW()
                     ) RETURNING *
                 """, (
                     campaign_data['id'],
@@ -97,6 +99,7 @@ class EmailSenderService:
                     campaign_data.get('target_count', 0),
                     audiences_json,
                     segment,
+                    campaign_data.get('click_tracking_enabled', False),
                 ))
                 result = cur.fetchone()
             conn.commit()
@@ -167,7 +170,8 @@ class EmailSenderService:
                 'sent_count_final': 'sent_count_final',
                 'completed_at': 'completed_at',
                 'last_updated': 'last_updated',
-                'scheduled_at': 'scheduled_at'
+                'scheduled_at': 'scheduled_at',
+                'click_tracking_enabled': 'click_tracking_enabled',
             }
             
             for key, db_field in field_mapping.items():

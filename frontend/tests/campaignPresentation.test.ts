@@ -16,11 +16,12 @@ test('completed campaigns open their report and keep engagement metrics empty un
 
   assert.deepEqual(presentation, {
     primaryAction: 'report',
-    delivered: 1031,
+    sent: 1031,
     total: 1032,
     openRate: null,
     clickRate: null,
   });
+  assert.equal('delivered' in presentation, false);
 });
 
 test('campaigns with failed recipients expose retry as their primary action', async () => {
