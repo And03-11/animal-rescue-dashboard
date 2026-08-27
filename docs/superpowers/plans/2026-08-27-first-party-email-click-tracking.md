@@ -570,8 +570,9 @@
 - Modify: `backend/tests/test_email_sender_tracking.py`
 
 **Interfaces:**
-- `prepare_email(..., click_tracking_enabled=False)` always prepares the
-  delivery and unsubscribe token while leaving donation links untouched.
+- `prepare_email(..., click_tracking_enabled=True)` preserves the existing
+  tracked-call default; passing `False` still prepares the delivery and
+  unsubscribe token while leaving donation links untouched.
 
 - [ ] **Step 1: Write failing service and worker tests**
 
