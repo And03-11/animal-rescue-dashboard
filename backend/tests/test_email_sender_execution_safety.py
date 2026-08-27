@@ -12,6 +12,10 @@ from backend.app.api.v1.endpoints import email_sender
 from backend.app.services.airtable_service import AirtableCampaignQueryError
 from backend.app.services.campaign_audiences import AudienceCount, AudienceResolution
 from backend.app.services.campaign_storage import CampaignFileStorage
+from backend.app.services.email_tracking import (
+    EmailTrackingService,
+    InMemoryEmailTrackingRepository,
+)
 
 
 class CapturingBackgroundTasks:
@@ -36,10 +40,12 @@ class RecordingGmailService:
     def __init__(self, events):
         self.events = events
         self.sent = []
+        self.extra_headers = []
 
-    def send_email(self, *, to_email, subject, html_body):
+    def send_email(self, *, to_email, subject, html_body, extra_headers=None):
         self.events.append(("send", to_email))
         self.sent.append(to_email)
+        self.extra_headers.append(dict(extra_headers or {}))
         return True
 
 
@@ -96,11 +102,21 @@ def execution_environment(campaign_directories, monkeypatch):
     events = []
     gmail = RecordingGmailService(events)
     remote = RecordingRemoteService()
+    tracking_service = EmailTrackingService(
+        InMemoryEmailTrackingRepository(),
+        allowed_hosts={"donations.animallove.cr"},
+    )
     monkeypatch.setattr(
         email_sender, "credentials_manager_instance", FakeCredentialsManager(gmail)
     )
     monkeypatch.setattr(email_sender, "get_email_sender_service", lambda: remote)
+    monkeypatch.setattr(
+        email_sender, "get_email_tracking_service", lambda: tracking_service
+    )
     monkeypatch.setattr(email_sender.time, "sleep", lambda _seconds: None)
+    monkeypatch.setenv(
+        "EMAIL_PUBLIC_API_BASE_URL", "https://dashboard.animallove.cr"
+    )
     return (*campaign_directories, events, gmail, remote)
 
 
@@ -359,6 +375,17 @@ def test_worker_refreshes_multiple_audiences_and_rewrites_targets_before_send(
     assert airtable.received == [([("USA", False), ("EUR", True)], "dnr")]
     assert events[0] == ("resolve", [("USA", False), ("EUR", True)], "dnr")
     assert [entry[0] for entry in events[1:]] == ["send", "send"]
+    assert len(gmail.extra_headers) == 2
+    assert all(
+        headers["List-Unsubscribe"].startswith(
+            "<https://dashboard.animallove.cr/api/v1/email-tracking/unsubscribe/"
+        )
+        for headers in gmail.extra_headers
+    )
+    assert all(
+        headers["List-Unsubscribe-Post"] == "List-Unsubscribe=One-Click"
+        for headers in gmail.extra_headers
+    )
     assert gmail.sent == ["first@example.org", "second@example.org"]
     stored = json.loads(config_path.read_text(encoding="utf-8"))
     assert stored["audiences"] == [

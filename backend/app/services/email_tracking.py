@@ -1168,7 +1168,12 @@ class EmailTrackingService:
         return original, normalized
 
     def prepare_email(
-        self, *, campaign_id: str, recipient_email: str, html_body: str
+        self,
+        *,
+        campaign_id: str,
+        recipient_email: str,
+        html_body: str,
+        click_tracking_enabled: bool = True,
     ) -> PreparedTrackedEmail:
         campaign_id = campaign_id.strip()
         if not campaign_id:
@@ -1252,15 +1257,18 @@ class EmailTrackingService:
             except ValueError:
                 return href
 
-        parser = _TrackingHTMLRewriter(rewrite_href)
-        parser.feed(html_body)
-        parser.close()
+        prepared_html = html_body
+        if click_tracking_enabled:
+            parser = _TrackingHTMLRewriter(rewrite_href)
+            parser.feed(html_body)
+            parser.close()
+            prepared_html = parser.html
 
         self.repository.replace_tracking_links(delivery.id, stored_links)
         unsubscribe_token = self._issue_unsubscribe_token(delivery.id)
         return PreparedTrackedEmail(
             delivery_id=delivery.id,
-            html_body=parser.html,
+            html_body=prepared_html,
             links=tuple(prepared_links),
             unsubscribe_token=unsubscribe_token,
         )

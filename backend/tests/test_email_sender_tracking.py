@@ -112,7 +112,36 @@ def _run_locked_campaign(campaign_id):
     email_sender.run_campaign_task(campaign_id, launch_id)
 
 
-def test_worker_leaves_html_untouched_when_click_tracking_is_disabled(
+def test_prepare_email_without_click_tracking_keeps_compliance_and_skips_links():
+    repository = InMemoryEmailTrackingRepository()
+    tracking_service = EmailTrackingService(
+        repository,
+        allowed_hosts={"donations.animallove.cr"},
+    )
+    original_html = (
+        '<p>Hello</p><a href="https://donations.animallove.cr/give">Donate</a>'
+    )
+
+    prepared = tracking_service.prepare_email(
+        campaign_id="Campaign_compliance-only",
+        recipient_email="Person@Example.org",
+        html_body=original_html,
+        click_tracking_enabled=False,
+    )
+
+    assert prepared.html_body == original_html
+    assert prepared.links == ()
+    assert prepared.unsubscribe_token
+    assert repository.links_for_delivery(prepared.delivery_id) == []
+    delivery = repository.delivery_for(
+        "Campaign_compliance-only", "person@example.org"
+    )
+    assert delivery is not None
+    assert delivery.id == prepared.delivery_id
+    assert delivery.status == "prepared"
+
+
+def test_worker_adds_compliance_without_rewriting_links_when_tracking_is_disabled(
     campaign_environment, monkeypatch
 ):
     campaign_data, sent_logs, targets, gmail, _remote = campaign_environment
@@ -124,11 +153,13 @@ def test_worker_leaves_html_untouched_when_click_tracking_is_disabled(
         click_tracking_enabled=False,
     )
 
-    def unexpected_tracking_service():
-        raise AssertionError("Tracking service must not load for opt-out campaigns")
-
+    repository = InMemoryEmailTrackingRepository()
+    tracking_service = EmailTrackingService(
+        repository,
+        allowed_hosts={"donations.animallove.cr"},
+    )
     monkeypatch.setattr(
-        email_sender, "get_email_tracking_service", unexpected_tracking_service
+        email_sender, "get_email_tracking_service", lambda: tracking_service
     )
 
     _run_locked_campaign(campaign_id)
@@ -138,6 +169,19 @@ def test_worker_leaves_html_untouched_when_click_tracking_is_disabled(
     assert "#alc=" not in sent_html
     assert "utm_campaign" not in sent_html
     assert "Hello Ana" in sent_html
+    assert "Unsubscribe" in sent_html
+    headers = gmail.sent[0]["extra_headers"]
+    assert headers["List-Unsubscribe"].startswith(
+        "<https://dashboard.animallove.cr/api/v1/email-tracking/unsubscribe/"
+    )
+    assert headers["List-Unsubscribe"].endswith(">")
+    assert headers["List-Unsubscribe"][1:-1] in sent_html
+    assert headers["List-Unsubscribe-Post"] == "List-Unsubscribe=One-Click"
+    delivery = repository.delivery_for(campaign_id, "donor@example.org")
+    assert delivery is not None
+    assert delivery.status == "sent"
+    assert delivery.sender_account == "tracking-sender.json"
+    assert repository.links_for_delivery(delivery.id) == []
     sent = pd.read_csv(sent_logs / f"sent_{campaign_id}.csv")
     assert sent["Email"].tolist() == ["donor@example.org"]
 
@@ -187,7 +231,7 @@ def test_worker_tracks_enabled_campaign_and_records_gmail_delivery(
     assert sent["Email"].tolist() == ["donor@example.org"]
 
 
-def test_worker_fails_closed_when_tracking_preparation_fails(
+def test_worker_fails_closed_when_compliance_preparation_fails_without_tracking(
     campaign_environment, monkeypatch
 ):
     campaign_data, sent_logs, targets, gmail, _remote = campaign_environment
@@ -196,11 +240,15 @@ def test_worker_fails_closed_when_tracking_preparation_fails(
         campaign_data,
         targets,
         campaign_id,
-        click_tracking_enabled=True,
+        click_tracking_enabled=False,
     )
 
     class _BrokenTrackingService:
-        def prepare_email(self, **_kwargs):
+        def is_suppressed(self, _recipient_email):
+            return False
+
+        def prepare_email(self, **kwargs):
+            assert kwargs["click_tracking_enabled"] is False
             raise RuntimeError("tracking database unavailable")
 
     monkeypatch.setattr(
@@ -215,16 +263,17 @@ def test_worker_fails_closed_when_tracking_preparation_fails(
     assert stored["status"] == "Error - Sending Failed"
 
 
+@pytest.mark.parametrize("click_tracking_enabled", [True, False])
 def test_worker_records_failed_delivery_when_gmail_rejects_send(
-    campaign_environment, monkeypatch
+    campaign_environment, monkeypatch, click_tracking_enabled
 ):
     campaign_data, sent_logs, targets, gmail, _remote = campaign_environment
-    campaign_id = "Campaign_tracking-gmail-failure"
+    campaign_id = f"Campaign_tracking-gmail-failure-{click_tracking_enabled}"
     _write_csv_campaign(
         campaign_data,
         targets,
         campaign_id,
-        click_tracking_enabled=True,
+        click_tracking_enabled=click_tracking_enabled,
     )
     gmail.result = GmailSendResult(success=False, error="transport unavailable")
     repository = InMemoryEmailTrackingRepository()
@@ -299,7 +348,7 @@ def test_worker_does_not_resend_after_gmail_success_if_legacy_ledger_failed(
     assert stored["status"] == "Completed"
 
 
-def test_worker_skips_suppressed_recipient_without_calling_gmail(
+def test_worker_skips_suppressed_recipient_without_tracking_or_gmail(
     campaign_environment, monkeypatch
 ):
     campaign_data, sent_logs, targets, gmail, _remote = campaign_environment
@@ -308,7 +357,7 @@ def test_worker_skips_suppressed_recipient_without_calling_gmail(
         campaign_data,
         targets,
         campaign_id,
-        click_tracking_enabled=True,
+        click_tracking_enabled=False,
     )
     repository = InMemoryEmailTrackingRepository()
     tracking_service = EmailTrackingService(
@@ -332,16 +381,17 @@ def test_worker_skips_suppressed_recipient_without_calling_gmail(
     assert stored["status"] == "Error - Sending Failed"
 
 
-def test_tracking_enabled_worker_fails_before_gmail_without_public_base_url(
-    campaign_environment, monkeypatch
+@pytest.mark.parametrize("click_tracking_enabled", [True, False])
+def test_worker_fails_before_gmail_without_compliance_public_base_url(
+    campaign_environment, monkeypatch, click_tracking_enabled
 ):
     campaign_data, sent_logs, targets, gmail, _remote = campaign_environment
-    campaign_id = "Campaign_tracking-no-public-base"
+    campaign_id = f"Campaign_tracking-no-public-base-{click_tracking_enabled}"
     config_path = _write_csv_campaign(
         campaign_data,
         targets,
         campaign_id,
-        click_tracking_enabled=True,
+        click_tracking_enabled=click_tracking_enabled,
     )
     repository = InMemoryEmailTrackingRepository()
     tracking_service = EmailTrackingService(
