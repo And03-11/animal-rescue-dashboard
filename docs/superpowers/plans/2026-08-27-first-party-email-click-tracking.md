@@ -568,6 +568,7 @@
 - Modify: `backend/app/services/email_tracking.py`
 - Modify: `backend/app/api/v1/endpoints/email_sender.py`
 - Modify: `backend/tests/test_email_sender_tracking.py`
+- Modify: `backend/tests/test_email_sender_execution_safety.py`
 
 **Interfaces:**
 - `prepare_email(..., click_tracking_enabled=True)` preserves the existing
