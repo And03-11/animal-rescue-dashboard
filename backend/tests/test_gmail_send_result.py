@@ -155,3 +155,26 @@ def test_send_email_submits_plain_text_then_html_alternatives():
     assert "should-not-appear" not in plain_text
     assert unsubscribe_url in html_text
     assert html_text == html_body
+
+
+def test_send_email_plain_text_keeps_adjacent_table_cells_separate():
+    api = _FakeGmailApi(result={"id": "gmail-message-1"})
+    service = _gmail_service(api)
+    html_body = (
+        "<table><tr><th>Amount</th><th>Status</th></tr>"
+        "<tr><td>Donate</td><td>Now</td></tr></table>"
+    )
+
+    result = service.send_email(
+        to_email="donor@example.org",
+        subject="Table update",
+        html_body=html_body,
+    )
+
+    assert result.success is True
+    raw = api.messages_resource.sent[0]["body"]["raw"]
+    parsed = message_from_bytes(base64.urlsafe_b64decode(raw.encode("ascii")))
+    plain_text = parsed.get_payload()[0].get_payload(decode=True).decode("utf-8")
+
+    assert "Amount Status" in plain_text
+    assert "Donate Now" in plain_text

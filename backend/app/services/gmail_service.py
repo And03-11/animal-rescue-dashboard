@@ -30,6 +30,7 @@ class _EmailHtmlToTextParser(HTMLParser):
         }
     )
     _IGNORED_TAGS = frozenset({"script", "style"})
+    _TABLE_CELL_TAGS = frozenset({"td", "th"})
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -66,6 +67,8 @@ class _EmailHtmlToTextParser(HTMLParser):
             href = self._links.pop()
             if href:
                 self._pending_links.append(href)
+        if tag in self._TABLE_CELL_TAGS:
+            self._separator()
         if tag in self._BLOCK_TAGS:
             self._flush_pending_links()
             self._newline()
@@ -100,6 +103,10 @@ class _EmailHtmlToTextParser(HTMLParser):
     def _newline(self):
         if self._chunks and not self._chunks[-1].endswith("\n"):
             self._chunks.append("\n")
+
+    def _separator(self):
+        if self._chunks and not self._chunks[-1].endswith((" ", "\n")):
+            self._chunks.append(" ")
 
 
 def _html_to_plain_text(html_body: str) -> str:
