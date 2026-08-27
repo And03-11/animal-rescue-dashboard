@@ -215,15 +215,28 @@ The HTML body receives a visible unsubscribe footer when the campaign does
 not already contain an unsubscribe URL. Test sends do not create tracking or
 unsubscribe records and do not affect campaign metrics.
 
+Every launched campaign email, including campaigns with donation click
+tracking disabled, must perform the suppression check, create a unique
+unsubscribe token, add the visible footer, and emit the RFC 8058 headers.
+Donation click rewriting remains independently optional. When it is disabled,
+the original donation URLs remain byte-for-byte unchanged by the tracking
+service and no click-link records are created.
+
+Campaign MIME is generated deterministically as `multipart/alternative` with
+an explicit readable `text/plain` part followed by the `text/html` part. The
+visible unsubscribe footer is inserted before the closing `</body>` (or
+`</html>` when no body exists) rather than after the document.
+
 ## Rollout and Failure Rules
 
 - Existing campaigns with no `click_tracking_enabled` field behave as
   disabled.
 - New wizard drafts expose the option, initially disabled until deployment
   configuration is complete.
-- Tracking-enabled sends fail closed before Gmail when tracking persistence or
-  unsubscribe preparation fails. Tracking-disabled sends preserve current
-  behavior.
+- All launched campaign sends fail closed before Gmail when suppression lookup,
+  delivery-ledger persistence, or unsubscribe preparation fails. Disabling
+  donation click tracking disables only UTM/fragment rewriting and click-link
+  persistence; it never disables compliance preparation.
 - Applying the SQL migration, configuring the public API URL/CORS origin, and
   installing the plugin are explicit deployment steps.
 - No production database or WordPress mutation occurs as part of the local
@@ -240,6 +253,10 @@ unsubscribe records and do not affect campaign metrics.
 - Gmail message IDs are stored for successful sends.
 - The campaign table says “Sent”, not “Delivered”.
 - RFC 8058 headers are present when unsubscribe is configured.
+- RFC 8058 headers and the visible footer are present for every launched
+  campaign email, whether donation click tracking is enabled or disabled.
+- Every launched campaign message contains explicit plain-text and HTML MIME
+  alternatives, with the plain-text part first.
 - A one-click POST creates a suppression; a scanner GET does not.
 - Suppressed recipients are not sent future campaign messages.
 - The WordPress plugin passes JavaScript tests and PHP syntax validation and

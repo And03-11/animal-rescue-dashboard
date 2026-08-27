@@ -40,6 +40,16 @@ from backend.app.api.v1.endpoints.analytics import router as analytics_router
 # ✅ Import email scheduler worker
 from backend.app.core.scheduler_worker import start_scheduler, stop_scheduler
 
+
+def _scheduler_enabled() -> bool:
+    return os.getenv("SCHEDULER_ENABLED", "true").strip().casefold() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+
+
 # ✅ 2. DEFINE el 'lifespan' de la aplicación
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -52,19 +62,22 @@ async def lifespan(app: FastAPI):
     FastAPICache.init(InMemoryBackend(), prefix="fastapi-cache")
     print("Sistema de caché inicializado.")
     
-    # ✅ Start email scheduler worker
-    recovered_campaigns = email_sender.recover_interrupted_campaigns()
-    if recovered_campaigns:
-        print(
-            "Recovered interrupted email campaigns: "
-            + ", ".join(recovered_campaigns)
-        )
-    start_scheduler()
+    scheduler_started = _scheduler_enabled()
+    if scheduler_started:
+        recovered_campaigns = email_sender.recover_interrupted_campaigns()
+        if recovered_campaigns:
+            print(
+                "Recovered interrupted email campaigns: "
+                + ", ".join(recovered_campaigns)
+            )
+        start_scheduler()
+    else:
+        print("Scheduler disabled for this API instance.")
     
     yield
     
-    # ✅ Stop email scheduler worker
-    stop_scheduler()
+    if scheduler_started:
+        stop_scheduler()
     print("Sistema de caché detenido.")
 
 # ✅ 3. PASA el 'lifespan' a la instancia de FastAPI

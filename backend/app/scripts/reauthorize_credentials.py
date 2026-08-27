@@ -22,6 +22,8 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
+from backend.app.services.gmail_service import resolve_gmail_token_path
+
 # Scopes: gmail.send (for sending) + gmail.readonly (to verify email address)
 SCOPES = [
     'https://www.googleapis.com/auth/gmail.send',
@@ -58,9 +60,14 @@ def get_credential_path(account_num: int) -> str:
 
 
 def get_token_path(credential_filename: str) -> str:
-    """Get the token file path (at project root, matching GmailService convention)."""
-    token_name = f"token_{credential_filename}.json"
-    return os.path.join(PROJECT_ROOT, token_name)
+    """Get the existing compatible token path, or the canonical new path."""
+    credentials_dir = (
+        CREDENTIALS_BP_DIR
+        if credential_filename.startswith("credentials_account_BP")
+        else CREDENTIALS_NORMAL_DIR
+    )
+    credential_path = os.path.join(credentials_dir, credential_filename)
+    return resolve_gmail_token_path(credential_path, project_root=PROJECT_ROOT)
 
 
 def get_email_from_token(token_path: str) -> str:

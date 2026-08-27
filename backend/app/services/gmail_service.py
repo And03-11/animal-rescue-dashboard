@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from pathlib import Path
 from typing import Mapping
 
 from google.auth.transport.requests import Request
@@ -14,6 +15,43 @@ from googleapiclient.discovery import build
 
 SCOPES = ['https://www.googleapis.com/auth/gmail.send']
 _HEADER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9-]+$")
+PROJECT_ROOT = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..")
+)
+
+
+def resolve_gmail_token_path(
+    credentials_path: str, *, project_root: str | None = None
+) -> str:
+    """Return an existing compatible token path, or the canonical new path."""
+    credentials_file = Path(credentials_path).resolve()
+    credential_filename = credentials_file.name
+    credentials_dir = credentials_file.parent
+    canonical_path = credentials_dir / f"token_{credential_filename}"
+    legacy_filename = f"token_{credential_filename}.json"
+
+    if project_root is None:
+        resolved_project_root = None
+        for parent in credentials_file.parents:
+            if parent.name.casefold() == "gmail_credentials":
+                resolved_project_root = parent.parent.parent
+                break
+        if resolved_project_root is None:
+            resolved_project_root = Path(PROJECT_ROOT).resolve()
+    else:
+        resolved_project_root = Path(project_root).resolve()
+
+    candidates = (
+        canonical_path,
+        resolved_project_root / legacy_filename,
+        credentials_dir / legacy_filename,
+    )
+
+    for token_path in candidates:
+        if token_path.exists():
+            return str(token_path)
+
+    return str(canonical_path)
 
 
 @dataclass(frozen=True)
@@ -29,11 +67,7 @@ class GmailSendResult:
 class GmailService:
     def __init__(self, credentials_path: str):
         self.credentials_path = credentials_path
-        # Look for token in the same directory as the credentials
-        self.token_path = os.path.join(
-            os.path.dirname(credentials_path), 
-            f"token_{os.path.basename(credentials_path)}"
-        )
+        self.token_path = resolve_gmail_token_path(credentials_path)
         self.service = self._authenticate()
 
     def _authenticate(self):

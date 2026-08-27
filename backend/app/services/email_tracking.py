@@ -21,7 +21,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID, uuid4
 
 import psycopg2
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import RealDictCursor, register_uuid
 
 
 _EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -575,10 +575,12 @@ class PostgresEmailTrackingRepository:
         self.db_url = db_url
 
     def _connect(self):
-        return psycopg2.connect(
+        connection = psycopg2.connect(
             self.db_url,
             connect_timeout=int(os.getenv("DB_CONNECT_TIMEOUT_SECONDS", "8")),
         )
+        register_uuid(conn_or_curs=connection)
+        return connection
 
     @staticmethod
     def _uuid(value) -> UUID:

@@ -533,3 +533,118 @@
 - [ ] **Step 7: Review integration state**
 
   Run `git status --short`, `git log --oneline -8`, and inspect the diff against the starting commit. Do not push, apply the live migration, or install the plugin without explicit user authorization.
+
+### Task 9: Insert the unsubscribe footer inside the HTML document
+
+**Files:**
+- Modify: `backend/app/services/email_tracking.py`
+- Modify: `backend/tests/test_email_unsubscribe.py`
+
+**Interfaces:**
+- `append_unsubscribe_footer(html, url)` inserts the footer inside the HTML document.
+
+- [ ] **Step 1: Write failing footer-placement tests**
+
+  Cover `</body>`, `</html>` without a body, fragments without
+  either closing tag, case-insensitive closing tags, and existing unsubscribe
+  links.
+
+- [ ] **Step 2: Run the focused test and verify RED**
+
+  Run: `backend\venv\Scripts\python.exe -m pytest backend/tests/test_email_unsubscribe.py -q`
+
+- [ ] **Step 3: Implement the smallest insertion logic**
+
+  Insert before the last case-insensitive `</body>`; otherwise before the last
+  `</html>`; otherwise append. Preserve the existing idempotency behavior.
+
+- [ ] **Step 4: Run the focused test and verify GREEN**
+
+  Run the command from Step 2 and record RED/GREEN evidence.
+
+### Task 10: Make campaign compliance independent of donation click tracking
+
+**Files:**
+- Modify: `backend/app/services/email_tracking.py`
+- Modify: `backend/app/api/v1/endpoints/email_sender.py`
+- Modify: `backend/tests/test_email_sender_tracking.py`
+
+**Interfaces:**
+- `prepare_email(..., click_tracking_enabled=False)` always prepares the
+  delivery and unsubscribe token while leaving donation links untouched.
+
+- [ ] **Step 1: Write failing service and worker tests**
+
+  Prove that tracking-disabled sends still check suppression, create the
+  delivery and unsubscribe token, add both RFC 8058 headers and the visible
+  footer, and fail closed before Gmail when compliance preparation fails.
+  Prove that disabled tracking creates no click-link records and leaves
+  eligible donation URLs unchanged.
+
+- [ ] **Step 2: Run the focused tests and verify RED**
+
+  Run:
+
+  ```powershell
+  backend\venv\Scripts\python.exe -m pytest backend/tests/test_email_sender_tracking.py backend/tests/test_email_tracking_links.py -q
+  ```
+
+- [ ] **Step 3: Implement mandatory compliance preparation**
+
+  Always load the tracking service, check suppression immediately before the
+  send, prepare the delivery and unsubscribe token, append the footer, and add
+  both RFC 8058 headers. Rewrite and persist donation links only when
+  `click_tracking_enabled` is true. A suppression or persistence error stops
+  the campaign before Gmail.
+
+- [ ] **Step 4: Run focused tests and verify GREEN**
+
+  Run the command from Step 2 plus
+  `backend/tests/test_email_sender_execution_safety.py`.
+
+### Task 11: Generate deterministic plain-text and HTML MIME alternatives
+
+**Files:**
+- Modify: `backend/app/services/gmail_service.py`
+- Modify: `backend/tests/test_gmail_send_result.py`
+
+**Interfaces:**
+- `GmailService.send_email(...)` sends an explicit readable `text/plain`
+  part followed by the `text/html` part.
+
+- [ ] **Step 1: Write a failing raw-MIME test**
+
+  Decode the submitted message and assert exact multipart/alternative order,
+  UTF-8 content types, readable text derived from representative HTML, and the
+  unsubscribe URL in both alternatives.
+
+- [ ] **Step 2: Run the focused test and verify RED**
+
+  Run: `backend\venv\Scripts\python.exe -m pytest backend/tests/test_gmail_send_result.py -q`
+
+- [ ] **Step 3: Implement standard-library HTML-to-text conversion**
+
+  Attach the generated plain-text part first and the unchanged HTML part
+  second. Keep additional headers and structured send results unchanged.
+
+- [ ] **Step 4: Run the focused test and verify GREEN**
+
+  Run the command from Step 2 and record RED/GREEN evidence.
+
+### Task 12: Verify and review post-canary hardening
+
+- [ ] **Step 1: Run focused integration suites**
+
+  Run unsubscribe, worker, Gmail, tracking, and execution-safety tests.
+
+- [ ] **Step 2: Run the complete backend suite**
+
+  Run: `backend\venv\Scripts\python.exe -m pytest backend/tests -q`
+
+- [ ] **Step 3: Inspect the raw MIME contract and whole-change diff**
+
+  Confirm plain text precedes HTML, compliance is present with click tracking
+  off, donation URLs are untouched when disabled, and no secret or test
+  recipient was added to tracked sources.
+
+- [ ] **Step 4: Complete a whole-branch code review before another canary**
