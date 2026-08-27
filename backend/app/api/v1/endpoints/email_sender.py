@@ -14,6 +14,7 @@ from typing import List, Dict, Any, Optional, Union, Literal
 import threading
 import queue
 from uuid import uuid4
+from urllib.parse import quote, urlsplit
 
 
 from backend.app.services.airtable_service import AirtableCampaignQueryError, AirtableService
@@ -29,7 +30,10 @@ from backend.app.services.campaign_storage import (
     InvalidCampaignIdError,
 )
 from backend.app.services.email_test_delivery import deliver_test_emails
-from backend.app.services.email_tracking import get_email_tracking_service
+from backend.app.services.email_tracking import (
+    append_unsubscribe_footer,
+    get_email_tracking_service,
+)
 
 
 from fastapi import Depends, Query, status
@@ -37,6 +41,30 @@ from backend.app.core.security import get_current_user
 
 
 logger = logging.getLogger(__name__)
+
+
+def _email_public_api_base_url() -> str:
+    value = os.getenv("EMAIL_PUBLIC_API_BASE_URL", "").strip().rstrip("/")
+    if not value:
+        raise ValueError("EMAIL_PUBLIC_API_BASE_URL is required")
+    parsed = urlsplit(value)
+    development_hosts = {"localhost", "127.0.0.1", "::1"}
+    if (
+        parsed.hostname is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.scheme.casefold() not in {"http", "https"}
+        or (
+            parsed.scheme.casefold() != "https"
+            and parsed.hostname.casefold() not in development_hosts
+        )
+    ):
+        raise ValueError(
+            "EMAIL_PUBLIC_API_BASE_URL must be an absolute safe HTTPS base URL"
+        )
+    return value
 
 
 def _update_campaign_status(campaign_id: str, new_status: str) -> Dict[str, Any]:
@@ -496,9 +524,11 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
     html_body_template = config.get('html_body', '<p>Error: Email body missing.</p>')
     click_tracking_enabled = config.get("click_tracking_enabled") is True
     tracking_service = None
+    public_api_base_url = None
     if click_tracking_enabled:
         try:
             tracking_service = get_email_tracking_service()
+            public_api_base_url = _email_public_api_base_url()
         except Exception as tracking_error:
             print(
                 f"[{campaign_id}] ERROR: Click tracking could not initialize: "
@@ -629,8 +659,24 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
 
                     prepared_delivery_id = None
                     html_body_to_send = html_body_personalized
+                    extra_headers = None
                     if click_tracking_enabled:
                         try:
+                            if tracking_service.is_suppressed(email):
+                                print(
+                                    f"[{campaign_id}] Worker {worker_id} skipped a "
+                                    "suppressed recipient."
+                                )
+                                with failed_contacts_lock:
+                                    failed_contacts.append(
+                                        {
+                                            "email": email,
+                                            "reason": "Suppressed - unsubscribed",
+                                            "account": credential_name,
+                                        }
+                                    )
+                                contacts_queue.task_done()
+                                continue
                             prepared_email = tracking_service.prepare_email(
                                 campaign_id=campaign_id,
                                 recipient_email=email,
@@ -668,6 +714,21 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
                                 if stop_event.is_set():
                                     break
                                 continue
+                            unsubscribe_url = (
+                                f"{public_api_base_url}/api/v1/email-tracking/"
+                                "unsubscribe/"
+                                f"{quote(prepared_email.unsubscribe_token, safe='')}"
+                            )
+                            html_body_to_send = append_unsubscribe_footer(
+                                html_body_to_send,
+                                unsubscribe_url,
+                            )
+                            extra_headers = {
+                                "List-Unsubscribe": f"<{unsubscribe_url}>",
+                                "List-Unsubscribe-Post": (
+                                    "List-Unsubscribe=One-Click"
+                                ),
+                            }
                         except Exception as tracking_error:
                             print(
                                 f"[{campaign_id}] Worker {worker_id} could not "
@@ -688,10 +749,15 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
                     success = False
                     send_result = None
                     try:
+                        send_kwargs = {
+                            "to_email": email,
+                            "subject": subject,
+                            "html_body": html_body_to_send,
+                        }
+                        if extra_headers is not None:
+                            send_kwargs["extra_headers"] = extra_headers
                         send_result = service.send_email(
-                            to_email=email,
-                            subject=subject,
-                            html_body=html_body_to_send
+                            **send_kwargs
                         )
                         success = bool(send_result)
                     except Exception as e_send:

@@ -31,6 +31,65 @@ _AUTOMATION_USER_AGENT_PATTERN = re.compile(
     r"bot|crawler|spider|scanner|proofpoint|safelinks|barracuda|mimecast|urlscan",
     re.IGNORECASE,
 )
+_DEVELOPMENT_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+class _UnsubscribeLinkDetector(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.found = False
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        if tag.casefold() != "a":
+            return
+        attributes = {name.casefold(): value or "" for name, value in attrs}
+        rel_values = {
+            value.casefold() for value in attributes.get("rel", "").split()
+        }
+        href = attributes.get("href", "")
+        try:
+            path = urlsplit(href).path.casefold()
+        except ValueError:
+            path = href.casefold()
+        if "unsubscribe" in path or "unsubscribe" in rel_values:
+            self.found = True
+
+
+def append_unsubscribe_footer(html_body: str, unsubscribe_url: str) -> str:
+    """Append one fixed, accessible unsubscribe footer to an HTML message."""
+
+    if not isinstance(html_body, str):
+        raise ValueError("html_body must be a string")
+    parsed = urlsplit(unsubscribe_url)
+    if (
+        parsed.hostname is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+        or parsed.scheme.casefold() not in {"http", "https"}
+        or (
+            parsed.scheme.casefold() != "https"
+            and parsed.hostname.casefold() not in _DEVELOPMENT_HOSTS
+        )
+    ):
+        raise ValueError("unsubscribe_url must be an absolute safe HTTPS URL")
+
+    detector = _UnsubscribeLinkDetector()
+    detector.feed(html_body)
+    detector.close()
+    if detector.found:
+        return html_body
+
+    safe_url = escape(unsubscribe_url, quote=True)
+    footer = (
+        '<footer role="contentinfo" style="margin-top:32px;padding-top:16px;'
+        'border-top:1px solid #d7dedb;color:#66736e;font-size:12px;'
+        'line-height:1.5;text-align:center">'
+        'You are receiving this email from Animal Love Rescue Center. '
+        f'<a href="{safe_url}" rel="unsubscribe" style="color:#267f73">'
+        'Unsubscribe</a></footer>'
+    )
+    return html_body + footer
 
 
 def token_digest(token: str) -> str:
@@ -155,6 +214,12 @@ class EmailTrackingRepository(Protocol):
     ) -> None:
         """Persist a failed Gmail handoff for campaign diagnostics."""
 
+    def consume_unsubscribe_token(self, digest: str) -> bool:
+        """Idempotently suppress the delivery recipient resolved by one digest."""
+
+    def is_suppressed(self, recipient_email_normalized: str) -> bool:
+        """Return whether a normalized recipient is on the local suppression list."""
+
 
 class InMemoryEmailTrackingRepository:
     """Behavioral repository used by unit tests and local domain checks."""
@@ -166,6 +231,8 @@ class InMemoryEmailTrackingRepository:
         self._link_id_by_token_hash: dict[str, UUID] = {}
         self._unsubscribe_hash_by_delivery: dict[UUID, str] = {}
         self._events_by_key: dict[tuple[UUID, str, str], TrackingEvent] = {}
+        self._used_unsubscribe_hashes: set[str] = set()
+        self._suppressions: dict[str, tuple[str, str]] = {}
 
     @property
     def delivery_count(self) -> int:
@@ -174,6 +241,10 @@ class InMemoryEmailTrackingRepository:
     @property
     def event_count(self) -> int:
         return len(self._events_by_key)
+
+    @property
+    def suppression_count(self) -> int:
+        return len(self._suppressions)
 
     def prepare_delivery(
         self,
@@ -300,6 +371,28 @@ class InMemoryEmailTrackingRepository:
             failure_reason=failure_reason,
         )
 
+    def consume_unsubscribe_token(self, digest: str) -> bool:
+        delivery_id = next(
+            (
+                delivery_id
+                for delivery_id, token_hash in self._unsubscribe_hash_by_delivery.items()
+                if hmac.compare_digest(token_hash, digest)
+            ),
+            None,
+        )
+        if delivery_id is None:
+            return False
+        delivery = self._deliveries_by_id[delivery_id]
+        self._suppressions.setdefault(
+            delivery.recipient_email_normalized,
+            (delivery.recipient_email, delivery.campaign_id),
+        )
+        self._used_unsubscribe_hashes.add(digest)
+        return True
+
+    def is_suppressed(self, recipient_email_normalized: str) -> bool:
+        return recipient_email_normalized in self._suppressions
+
     def delivery_for(
         self, campaign_id: str, recipient_email: str
     ) -> DeliveryRecord | None:
@@ -349,6 +442,8 @@ class InMemoryEmailTrackingRepository:
             values.update({event.visitor_id, event.user_agent, event.device_class})
             if event.ip_hash:
                 values.add(event.ip_hash)
+        for normalized_email, (recipient_email, campaign_id) in self._suppressions.items():
+            values.update({normalized_email, recipient_email, campaign_id})
         return values
 
 
@@ -532,6 +627,79 @@ class PostgresEmailTrackingRepository:
             raise
         finally:
             connection.close()
+
+    def consume_unsubscribe_token(self, digest: str) -> bool:
+        connection = self._connect()
+        try:
+            with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute(
+                    """
+                    SELECT d.recipient_email, d.recipient_email_normalized,
+                           d.campaign_id
+                    FROM email_unsubscribe_tokens AS token
+                    JOIN email_campaign_deliveries AS d
+                      ON d.id = token.delivery_id
+                    WHERE token.token_hash = %s
+                    FOR UPDATE OF token
+                    """,
+                    (digest,),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    connection.commit()
+                    return False
+                cursor.execute(
+                    """
+                    INSERT INTO email_suppressions (
+                        id, recipient_email, recipient_email_normalized,
+                        reason, source, campaign_id
+                    ) VALUES (%s, %s, %s, 'unsubscribe', 'email_one_click', %s)
+                    ON CONFLICT (recipient_email_normalized) DO UPDATE
+                    SET reason = EXCLUDED.reason,
+                        source = EXCLUDED.source,
+                        campaign_id = EXCLUDED.campaign_id,
+                        updated_at = NOW()
+                    """,
+                    (
+                        uuid4(),
+                        row["recipient_email"],
+                        row["recipient_email_normalized"],
+                        row["campaign_id"],
+                    ),
+                )
+                cursor.execute(
+                    """
+                    UPDATE email_unsubscribe_tokens
+                    SET used_at = COALESCE(used_at, NOW())
+                    WHERE token_hash = %s
+                    """,
+                    (digest,),
+                )
+            connection.commit()
+            return True
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def is_suppressed(self, recipient_email_normalized: str) -> bool:
+        connection = self._connect()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1 FROM email_suppressions
+                        WHERE recipient_email_normalized = %s
+                    )
+                    """,
+                    (recipient_email_normalized,),
+                )
+                row = cursor.fetchone()
+        finally:
+            connection.close()
+        return bool(row and row[0])
 
     def find_tracking_link_by_digest(
         self, digest: str
@@ -821,17 +989,43 @@ class EmailTrackingService:
         parser.feed(html_body)
         parser.close()
 
-        unsubscribe_token = secrets.token_urlsafe(24)
         self.repository.replace_tracking_links(delivery.id, stored_links)
-        self.repository.replace_unsubscribe_token(
-            delivery.id, token_digest(unsubscribe_token)
-        )
+        unsubscribe_token = self._issue_unsubscribe_token(delivery.id)
         return PreparedTrackedEmail(
             delivery_id=delivery.id,
             html_body=parser.html,
             links=tuple(prepared_links),
             unsubscribe_token=unsubscribe_token,
         )
+
+    def _issue_unsubscribe_token(self, delivery_id: UUID) -> str:
+        unsubscribe_token = secrets.token_urlsafe(24)
+        self.repository.replace_unsubscribe_token(
+            delivery_id, token_digest(unsubscribe_token)
+        )
+        return unsubscribe_token
+
+    def prepare_unsubscribe(self, *, campaign_id: str, recipient_email: str) -> str:
+        campaign_id = campaign_id.strip()
+        if not campaign_id:
+            raise ValueError("campaign_id is required")
+        original_email, normalized_email = self._normalize_email(recipient_email)
+        delivery = self.repository.prepare_delivery(
+            campaign_id=campaign_id,
+            recipient_email=original_email,
+            recipient_email_normalized=normalized_email,
+        )
+        return self._issue_unsubscribe_token(delivery.id)
+
+    def unsubscribe(self, token: str) -> None:
+        if not isinstance(token, str) or not 16 <= len(token) <= 512:
+            return None
+        self.repository.consume_unsubscribe_token(token_digest(token))
+        return None
+
+    def is_suppressed(self, recipient_email: str) -> bool:
+        _original, normalized_email = self._normalize_email(recipient_email)
+        return self.repository.is_suppressed(normalized_email)
 
     def mark_delivery_sent(
         self,

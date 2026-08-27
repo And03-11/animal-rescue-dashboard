@@ -31,12 +31,13 @@ class _GmailService:
         )
         self.sent = []
 
-    def send_email(self, *, to_email, subject, html_body):
+    def send_email(self, *, to_email, subject, html_body, extra_headers=None):
         self.sent.append(
             {
                 "to_email": to_email,
                 "subject": subject,
                 "html_body": html_body,
+                "extra_headers": dict(extra_headers or {}),
             }
         )
         return self.result
@@ -69,6 +70,9 @@ def campaign_environment(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(email_sender, "get_email_sender_service", lambda: remote)
     monkeypatch.setattr(email_sender.time, "sleep", lambda _seconds: None)
+    monkeypatch.setenv(
+        "EMAIL_PUBLIC_API_BASE_URL", "https://dashboard.animallove.cr"
+    )
     return campaign_data, sent_logs, targets, gmail, remote
 
 
@@ -165,6 +169,15 @@ def test_worker_tracks_enabled_campaign_and_records_gmail_delivery(
     assert "#alc=" in sent_html
     assert "utm_campaign=Campaign_tracking-enabled" in sent_html
     assert "donor@example.org" not in sent_html
+    assert "Unsubscribe" in sent_html
+    headers = gmail.sent[0]["extra_headers"]
+    assert headers["List-Unsubscribe"].startswith(
+        "<https://dashboard.animallove.cr/api/v1/email-tracking/unsubscribe/"
+    )
+    assert headers["List-Unsubscribe"].endswith(">")
+    unsubscribe_url = headers["List-Unsubscribe"][1:-1]
+    assert unsubscribe_url in sent_html
+    assert headers["List-Unsubscribe-Post"] == "List-Unsubscribe=One-Click"
     delivery = repository.delivery_for(campaign_id, "donor@example.org")
     assert delivery is not None
     assert delivery.status == "sent"
@@ -284,3 +297,65 @@ def test_worker_does_not_resend_after_gmail_success_if_legacy_ledger_failed(
     assert sent["Email"].tolist() == ["donor@example.org"]
     stored = json.loads(config_path.read_text(encoding="utf-8"))
     assert stored["status"] == "Completed"
+
+
+def test_worker_skips_suppressed_recipient_without_calling_gmail(
+    campaign_environment, monkeypatch
+):
+    campaign_data, sent_logs, targets, gmail, _remote = campaign_environment
+    campaign_id = "Campaign_tracking-suppressed"
+    config_path = _write_csv_campaign(
+        campaign_data,
+        targets,
+        campaign_id,
+        click_tracking_enabled=True,
+    )
+    repository = InMemoryEmailTrackingRepository()
+    tracking_service = EmailTrackingService(
+        repository,
+        allowed_hosts={"donations.animallove.cr"},
+    )
+    token = tracking_service.prepare_unsubscribe(
+        campaign_id="Campaign_prior",
+        recipient_email="DONOR@example.org",
+    )
+    tracking_service.unsubscribe(token)
+    monkeypatch.setattr(
+        email_sender, "get_email_tracking_service", lambda: tracking_service
+    )
+
+    _run_locked_campaign(campaign_id)
+
+    assert gmail.sent == []
+    assert not (sent_logs / f"sent_{campaign_id}.csv").exists()
+    stored = json.loads(config_path.read_text(encoding="utf-8"))
+    assert stored["status"] == "Error - Sending Failed"
+
+
+def test_tracking_enabled_worker_fails_before_gmail_without_public_base_url(
+    campaign_environment, monkeypatch
+):
+    campaign_data, sent_logs, targets, gmail, _remote = campaign_environment
+    campaign_id = "Campaign_tracking-no-public-base"
+    config_path = _write_csv_campaign(
+        campaign_data,
+        targets,
+        campaign_id,
+        click_tracking_enabled=True,
+    )
+    repository = InMemoryEmailTrackingRepository()
+    tracking_service = EmailTrackingService(
+        repository,
+        allowed_hosts={"donations.animallove.cr"},
+    )
+    monkeypatch.setattr(
+        email_sender, "get_email_tracking_service", lambda: tracking_service
+    )
+    monkeypatch.delenv("EMAIL_PUBLIC_API_BASE_URL", raising=False)
+
+    _run_locked_campaign(campaign_id)
+
+    assert gmail.sent == []
+    assert not (sent_logs / f"sent_{campaign_id}.csv").exists()
+    stored = json.loads(config_path.read_text(encoding="utf-8"))
+    assert stored["status"] == "Error - Tracking Unavailable"
