@@ -89,7 +89,12 @@ def append_unsubscribe_footer(html_body: str, unsubscribe_url: str) -> str:
         f'<a href="{safe_url}" rel="unsubscribe" style="color:#267f73">'
         'Unsubscribe</a></footer>'
     )
-    return html_body + footer
+    insertion_point = html_body.casefold().rfind("</body>")
+    if insertion_point < 0:
+        insertion_point = html_body.casefold().rfind("</html>")
+    if insertion_point < 0:
+        return html_body + footer
+    return html_body[:insertion_point] + footer + html_body[insertion_point:]
 
 
 def token_digest(token: str) -> str:

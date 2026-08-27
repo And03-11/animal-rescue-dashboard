@@ -83,6 +83,50 @@ def test_unsubscribe_footer_is_accessible_and_not_duplicated():
 
 
 @pytest.mark.parametrize(
+    ("original", "closing_tag"),
+    [
+        ("<html><body><p>Thank you</p></body></html>", "</body>"),
+        ("<html><body>First</body><body>Last</body></html>", "</body>"),
+        ("<html><main><p>Thank you</p></main></html>", "</html>"),
+        ("<html><BODY><p>Thank you</p></BODY></html>", "</body>"),
+    ],
+)
+def test_unsubscribe_footer_is_inserted_before_the_last_document_closing_tag(
+    original, closing_tag
+):
+    url = "https://dashboard.animallove.cr/api/v1/email-tracking/unsubscribe/token"
+
+    appended = append_unsubscribe_footer(original, url)
+
+    insertion_point = original.casefold().rfind(closing_tag)
+    footer_start = appended.index('<footer role="contentinfo"')
+    assert appended[:footer_start] == original[:insertion_point]
+    assert appended[footer_start:].endswith(original[insertion_point:])
+
+
+def test_unsubscribe_footer_appends_to_html_fragments_without_document_closing_tags():
+    url = "https://dashboard.animallove.cr/api/v1/email-tracking/unsubscribe/token"
+    original = "<main><p>Thank you</p></main>"
+
+    appended = append_unsubscribe_footer(original, url)
+
+    assert appended.startswith(original)
+    assert appended.endswith("</footer>")
+
+
+def test_existing_unsubscribe_link_leaves_html_document_unchanged():
+    original = (
+        '<html><body><a href="https://dashboard.animallove.cr/unsubscribe/token" '
+        'rel="unsubscribe">Manage preferences</a></body></html>'
+    )
+
+    assert append_unsubscribe_footer(
+        original,
+        "https://dashboard.animallove.cr/api/v1/email-tracking/unsubscribe/token",
+    ) == original
+
+
+@pytest.mark.parametrize(
     "url",
     [
         "http://dashboard.animallove.cr/unsubscribe/token",
