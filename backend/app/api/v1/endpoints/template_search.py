@@ -5,12 +5,14 @@ Flow: query → translate to English → embed → search_templates RPC → retu
 """
 import os
 import json
+import math
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
+from backend.app.core.security import get_current_user
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -123,26 +125,35 @@ def _parse_jsonb(value) -> List[str]:
     return []
 
 
+def _parse_similarity(value) -> float:
+    """Return a JSON-safe similarity value from Supabase."""
+    try:
+        similarity = float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return round(similarity, 4) if math.isfinite(similarity) else 0.0
+
+
 @router.post("/template-search", response_model=TemplateSearchResponse)
 async def search_templates(request: TemplateSearchRequest):
     """
-    Search email templates using pure semantic search.
-    1. Translate query to English (improves embedding quality for multilingual queries)
-    2. Generate embedding with text-embedding-3-small
-    3. Call Supabase vector search with no hard filters
+    Search email templates using pure semantic search. An empty query browses
+    the library through the same Supabase RPC without calling OpenAI.
     """
-    if not request.query.strip():
-        raise HTTPException(status_code=400, detail="Search query cannot be empty")
+    normalized_query = request.query.strip()
 
     try:
         # Step 1: translate to English
-        english_query = await _translate_to_english(request.query.strip())
+        english_query = await _translate_to_english(normalized_query) if normalized_query else ""
 
         # Step 2: embed
-        embedding = await _create_embedding(english_query)
+        embedding = await _create_embedding(english_query) if normalized_query else [0.0] * 1536
 
         # Step 3: vector search (no filters — pure semantic)
-        raw_results = await _search_supabase(embedding, match_count=10)
+        raw_results = await _search_supabase(
+            embedding,
+            match_count=10 if normalized_query else 100,
+        )
 
     except httpx.TimeoutException:
         raise HTTPException(status_code=504, detail="Search service timed out. Please try again.")
@@ -168,7 +179,7 @@ async def search_templates(request: TemplateSearchRequest):
             donor_action=r.get("donor_action"),
             tags=_parse_jsonb(r.get("tags")),
             conditions=_parse_jsonb(r.get("conditions")),
-            similarity=round(float(r.get("similarity", 0)), 4),
+            similarity=_parse_similarity(r.get("similarity")),
         )
         for r in raw_results
         if r.get("id")

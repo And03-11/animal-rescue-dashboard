@@ -47,6 +47,22 @@ DONORS_FIELDS = {
     "funnel_stage": "Funnel Stage",
     "status": "Status"
 }
+FUNNEL_REVIEW_FIELDS = {
+    "tag": "Tag",
+    "region": "Region",
+    "last_donation": "Last Donation",
+    "last_form_title": "Form Title Last Donation",
+    "donations_count": "Amount of donations",
+    "total_donated": "Total Donated",
+    "last_modified": "Last Modified",
+}
+
+DONOR_STAGE_OPTIONS = (
+    "Big Campaign", "Funnel", "Pending Approval", "Pending Stage", "NOP",
+    "NBC", "Influencers in Process", "Tagless", "Volunteer",
+    "Hebrew Campaigns", "Is in mailchimp", "Unsubscribers",
+    "Not BC Donors", "Influencers Have Come", "Cleaned", "Waiting after funnel",
+)
 EMAILS_FIELDS = {
     "email": "Email", 
     "donor": "Donor", 
@@ -180,13 +196,108 @@ class AirtableService:
         """
         if not email_ids:
             return []
-        
         id_formulas = [f"RECORD_ID() = '{id}'" for id in email_ids]
         formula = f"OR({', '.join(id_formulas)})"
         
         email_records = self.emails_table.all(formula=formula, fields=[EMAILS_FIELDS["email"]])
         
         return [rec.get("fields", {}).get(EMAILS_FIELDS["email"]) for rec in email_records if "fields" in rec]
+
+    @staticmethod
+    def _first_value(value: Any) -> Any:
+        if isinstance(value, list):
+            return value[0] if value else None
+        return value
+
+    def _funnel_review_item(
+        self,
+        record: Dict[str, Any],
+        email_map: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        fields = record.get("fields", {})
+        email_ids = fields.get(DONORS_FIELDS["emails_link"], []) or []
+        email_map = email_map or {}
+        return {
+            "id": record.get("id"),
+            "first_name": fields.get(DONORS_FIELDS["name"], ""),
+            "last_name": fields.get(DONORS_FIELDS["last_name"], ""),
+            "emails": [email_map[email_id] for email_id in email_ids if email_id in email_map],
+            "stage": fields.get(DONORS_FIELDS["stage"]),
+            "funnel_stage": fields.get(DONORS_FIELDS["funnel_stage"]),
+            "status": fields.get(DONORS_FIELDS["status"]),
+            "tag": fields.get(FUNNEL_REVIEW_FIELDS["tag"]),
+            "region": fields.get(FUNNEL_REVIEW_FIELDS["region"]),
+            "last_donation": self._first_value(fields.get(FUNNEL_REVIEW_FIELDS["last_donation"])),
+            "last_form_title": self._first_value(fields.get(FUNNEL_REVIEW_FIELDS["last_form_title"])),
+            "donations_count": fields.get(FUNNEL_REVIEW_FIELDS["donations_count"], 0),
+            "total_donated": fields.get(FUNNEL_REVIEW_FIELDS["total_donated"], 0),
+            "last_modified": fields.get(FUNNEL_REVIEW_FIELDS["last_modified"]),
+        }
+
+    def _email_map_for_donors(self, records: List[Dict[str, Any]]) -> Dict[str, str]:
+        email_ids = {
+            email_id
+            for record in records
+            for email_id in record.get("fields", {}).get(DONORS_FIELDS["emails_link"], []) or []
+        }
+        if not email_ids:
+            return {}
+        formulas = [f"RECORD_ID() = '{email_id}'" for email_id in email_ids]
+        email_records = self.emails_table.all(
+            formula=f"OR({', '.join(formulas)})",
+            fields=[EMAILS_FIELDS["email"]],
+        )
+        return {
+            record["id"]: record.get("fields", {}).get(EMAILS_FIELDS["email"])
+            for record in email_records
+            if record.get("fields", {}).get(EMAILS_FIELDS["email"])
+        }
+
+    def get_pending_funnel_reviews(self) -> List[Dict[str, Any]]:
+        """Return only the donors that currently belong in the manual review queue."""
+        formula = (
+            "AND({Stage} = 'Pending Approval', NOT({Region} = BLANK()), "
+            "{Status} != 'Final Check', {Status} != 'Potential Duplicate')"
+        )
+        fields = [
+            DONORS_FIELDS["name"], DONORS_FIELDS["last_name"],
+            DONORS_FIELDS["emails_link"], DONORS_FIELDS["stage"],
+            DONORS_FIELDS["funnel_stage"], DONORS_FIELDS["status"],
+            *FUNNEL_REVIEW_FIELDS.values(),
+        ]
+        records = self.donors_table.all(
+            formula=formula,
+            fields=list(dict.fromkeys(fields)),
+            sort=[f"-{FUNNEL_REVIEW_FIELDS['last_modified']}"],
+        )
+        email_map = self._email_map_for_donors(records)
+        return [self._funnel_review_item(record, email_map) for record in records]
+
+    def get_funnel_review_donor(self, record_id: str) -> Dict[str, Any]:
+        record = self.donors_table.get(record_id)
+        email_map = self._email_map_for_donors([record])
+        return self._funnel_review_item(record, email_map)
+
+    def update_funnel_review(self, record_id: str, action: str, value: Optional[str] = None) -> Dict[str, Any]:
+        """Apply one explicit human-selected action to one allowlisted Airtable field."""
+        current = self.donors_table.get(record_id)
+        if not current:
+            raise ValueError("Donor record not found.")
+
+        if action == "approve":
+            changes = {DONORS_FIELDS["stage"]: "Funnel"}
+        elif action == "potential_duplicate":
+            changes = {DONORS_FIELDS["status"]: "Potential Duplicate"}
+        elif action == "change_stage":
+            if value not in DONOR_STAGE_OPTIONS:
+                raise ValueError("Invalid donor stage.")
+            changes = {DONORS_FIELDS["stage"]: value}
+        else:
+            raise ValueError("Unsupported review action.")
+
+        updated = self.donors_table.update(record_id, changes, typecast=False)
+        email_map = self._email_map_for_donors([updated])
+        return self._funnel_review_item(updated, email_map)
 
     def get_unique_campaign_sources(self) -> List[str]:
         try:

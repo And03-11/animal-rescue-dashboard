@@ -4,8 +4,9 @@ import { Box, Typography, Paper, Chip, Tooltip } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
 import CampaignIcon from '@mui/icons-material/Campaign';
 import NotesIcon from '@mui/icons-material/Notes';
+import type { SchedulerNodeData } from '../../../types/scheduler.types';
 
-const CampaignNode = ({ data, isConnectable }: NodeProps) => {
+const CampaignNode = ({ data, isConnectable }: NodeProps<SchedulerNodeData>) => {
     const theme = useTheme();
 
     return (

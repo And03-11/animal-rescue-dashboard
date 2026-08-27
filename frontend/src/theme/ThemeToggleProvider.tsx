@@ -1,7 +1,8 @@
 // src/theme/ThemeToggleProvider.tsx
-import React, { createContext, useContext, useMemo, useState, useEffect } from 'react';
+import React, { useCallback, useMemo, useState, useEffect } from 'react';
 import { ThemeProvider, CssBaseline } from '@mui/material';
 import { darkTheme, lightTheme, limeTheme, violetTheme, prefersDarkMode } from './theme';
+import { ThemeModeContext, type ThemeMode } from './themeModeContext';
 
 const themeMap = {
   light: lightTheme,
@@ -9,22 +10,6 @@ const themeMap = {
   lime: limeTheme,
   violet: violetTheme,
 };
-
-export type ThemeMode = keyof typeof themeMap;
-
-interface ThemeContextType {
-  mode: ThemeMode;
-  toggleMode: () => void;
-  setCustomMode: (m: ThemeMode) => void;
-}
-
-const ThemeModeContext = createContext<ThemeContextType>({
-  mode: 'light',
-  toggleMode: () => {},
-  setCustomMode: () => {},
-});
-
-export const useThemeMode = () => useContext(ThemeModeContext);
 
 export const ThemeToggleProvider = ({ children }: { children: React.ReactNode }) => {
   const [mode, setMode] = useState<ThemeMode>(() => {
@@ -37,18 +22,22 @@ export const ThemeToggleProvider = ({ children }: { children: React.ReactNode })
     localStorage.setItem('custom-theme', mode);
   }, [mode]);
 
-  const toggleMode = () => {
+  const toggleMode = useCallback(() => {
     setMode((prev) => (prev === 'light' ? 'dark' : 'light'));
-  };
+  }, []);
 
-  const setCustomMode = (newMode: ThemeMode) => {
+  const setCustomMode = useCallback((newMode: ThemeMode) => {
     setMode(newMode);
-  };
+  }, []);
 
   const theme = useMemo(() => themeMap[mode], [mode]);
+  const contextValue = useMemo(
+    () => ({ mode, toggleMode, setCustomMode }),
+    [mode, setCustomMode, toggleMode],
+  );
 
   return (
-    <ThemeModeContext.Provider value={{ mode, toggleMode, setCustomMode }}>
+    <ThemeModeContext.Provider value={contextValue}>
       <ThemeProvider theme={theme}>
         <CssBaseline />
         {children}

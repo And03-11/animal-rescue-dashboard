@@ -23,7 +23,10 @@ class EmailSenderService:
     
     def _get_connection(self):
         """Get a database connection"""
-        return psycopg2.connect(self.db_url)
+        return psycopg2.connect(
+            self.db_url,
+            connect_timeout=int(os.getenv("DB_CONNECT_TIMEOUT_SECONDS", "8")),
+        )
     
     def _execute_query(self, query: str, params: tuple = None) -> List[Dict]:
         """Execute query and return results as list of dicts"""
@@ -70,7 +73,7 @@ class EmailSenderService:
                 
                 # Handle scheduled_at
                 scheduled_at = campaign_data.get('scheduled_at')
-                status = campaign_data.get('status', 'Draft')
+                status = 'Scheduled' if scheduled_at else 'Draft'
                 
                 cur.execute("""
                     INSERT INTO email_sender_campaigns (
@@ -218,38 +221,13 @@ class EmailSenderService:
         """)
     
     def mark_campaign_launching(self, campaign_id: str) -> Optional[Dict[str, Any]]:
-        """Durably claim one ready Scheduled campaign before reporting success."""
-        conn = self._get_connection()
-        try:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    """
-                    UPDATE email_sender_campaigns
-                    SET status = 'Launching', updated_at = NOW()
-                    WHERE id = %s
-                      AND status = 'Scheduled'
-                      AND (
-                        COALESCE(source_type, '') <> 'csv'
-                        OR (target_count > 0 AND mapping IS NOT NULL)
-                      )
-                    RETURNING *
-                    """,
-                    (campaign_id,),
-                )
-                if cur.rowcount != 1:
-                    conn.rollback()
-                    return None
-                result = cur.fetchone()
-                if result is None:
-                    conn.rollback()
-                    return None
-            conn.commit()
-            return dict(result)
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
+        """Atomically claim one scheduled campaign for launch."""
+        return self._execute_one("""
+            UPDATE email_sender_campaigns
+            SET status = 'Launching', last_updated = NOW()
+            WHERE id = %s AND status = 'Scheduled'
+            RETURNING *
+        """, (campaign_id,))
 
 
 # Singleton instance

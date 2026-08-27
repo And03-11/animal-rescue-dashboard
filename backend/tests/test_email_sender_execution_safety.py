@@ -4,12 +4,14 @@ import asyncio
 import json
 import threading
 
+import pandas as pd
 import pytest
 from fastapi import HTTPException
 
 from backend.app.api.v1.endpoints import email_sender
 from backend.app.services.airtable_service import AirtableCampaignQueryError
 from backend.app.services.campaign_audiences import AudienceCount, AudienceResolution
+from backend.app.services.campaign_storage import CampaignFileStorage
 
 
 class CapturingBackgroundTasks:
@@ -156,7 +158,7 @@ def test_execution_wrapper_releases_lock_after_completion(
     monkeypatch.setattr(
         email_sender,
         "_run_campaign_task_unlocked",
-        lambda received_id, received_launch_id, _lease_guard: calls.append(
+        lambda received_id, received_launch_id: calls.append(
             (received_id, received_launch_id)
         ),
     )
@@ -165,6 +167,58 @@ def test_execution_wrapper_releases_lock_after_completion(
 
     assert calls == [(campaign_id, launch_id)]
     assert not email_sender._get_campaign_storage().is_launch_locked(campaign_id)
+
+
+def test_restart_recovery_marks_only_active_campaigns_as_interrupted(
+    campaign_directories,
+):
+    campaign_data, sent_logs, targets = campaign_directories
+    storage = CampaignFileStorage(
+        str(campaign_data), str(sent_logs), str(targets)
+    )
+    active_id = "Campaign_interrupted"
+    scheduled_id = "Campaign_scheduled"
+    storage.save_campaign(active_id, {"id": active_id, "status": "Sending"})
+    storage.save_campaign(
+        scheduled_id, {"id": scheduled_id, "status": "Scheduled"}
+    )
+    assert storage.acquire_launch_lock(active_id)
+
+    recovered = storage.recover_interrupted_campaigns()
+
+    assert recovered == [active_id]
+    assert storage.load_campaign(active_id)["status"] == "Interrupted"
+    assert storage.load_campaign(scheduled_id)["status"] == "Scheduled"
+    assert not storage.is_launch_locked(active_id)
+
+
+def test_duplicate_and_previously_sent_addresses_are_removed():
+    contacts = [
+        {"Email": " sent@example.org ", "Name": "Already sent"},
+        {"Email": "NEW@example.org", "Name": "First"},
+        {"Email": "new@example.org", "Name": "Duplicate"},
+        {"Email": "", "Name": "Invalid"},
+    ]
+
+    pending = email_sender._select_unique_pending_contacts(
+        contacts, {"SENT@example.org"}
+    )
+
+    assert pending == [{"Email": "NEW@example.org", "Name": "First"}]
+
+
+def test_sent_ledger_is_durable_and_readable(campaign_directories):
+    campaign_data, sent_logs, targets = campaign_directories
+    storage = CampaignFileStorage(
+        str(campaign_data), str(sent_logs), str(targets)
+    )
+
+    storage.append_sent_email("Campaign_ledger", "one@example.org")
+    storage.append_sent_email("Campaign_ledger", "two@example.org")
+
+    ledger = pd.read_csv(storage.sent_log_path("Campaign_ledger"))
+    assert ledger["Email"].tolist() == ["one@example.org", "two@example.org"]
+
 
 
 def test_manual_launch_refreshes_stored_zero_and_queues_fresh_nonzero_audience(
@@ -428,6 +482,7 @@ def test_worker_resolver_failure_sets_error_without_send_or_target_rewrite(
     assert not email_sender._get_campaign_storage().is_launch_locked(campaign_id)
 
 
+
 def test_scheduled_lock_collision_restores_remote_state_and_next_retry_refreshes(
     execution_environment, monkeypatch
 ):
@@ -460,6 +515,7 @@ def test_scheduled_lock_collision_restores_remote_state_and_next_retry_refreshes
     assert airtable.received == [([("USA", False)], "standard")]
     assert gmail.sent == ["retry@example.org"]
     assert not storage.is_launch_locked(campaign_id)
+
 
 
 def test_scheduler_submission_failure_restores_remote_scheduled(
@@ -504,6 +560,7 @@ def test_scheduler_submission_failure_restores_remote_scheduled(
 
     assert service.marked == [campaign_id]
     assert service.updated == [(campaign_id, {"status": "Scheduled"})]
+
 
 
 def test_worker_refresh_commit_failure_preserves_prior_audience_snapshot(
@@ -555,10 +612,11 @@ def test_worker_refresh_commit_failure_preserves_prior_audience_snapshot(
     assert not storage.is_launch_locked(campaign_id)
 
 
+
 def test_manual_queue_failure_restores_prior_status_before_releasing_lock(
     campaign_directories
 ):
-    campaign_data, _sent_logs, targets = campaign_directories
+    campaign_data, _sent_logs, _targets = campaign_directories
     campaign_id = "Campaign_manual_queue_failure"
     config_path = campaign_data / f"{campaign_id}.json"
     config_path.write_text(
@@ -568,17 +626,9 @@ def test_manual_queue_failure_restores_prior_status_before_releasing_lock(
                 "source_type": "csv",
                 "status": "Ready",
                 "target_count": 1,
-                "mapping": {
-                    "email": "Email",
-                    "name": "Name",
-                    "has_header": True,
-                },
             }
         ),
         encoding="utf-8",
-    )
-    (targets / f"target_{campaign_id}.csv").write_text(
-        "Email,Name\nready@example.org,Ready\n", encoding="utf-8"
     )
 
     class ThrowingBackgroundTasks:
@@ -598,10 +648,11 @@ def test_manual_queue_failure_restores_prior_status_before_releasing_lock(
     assert not email_sender._get_campaign_storage().is_launch_locked(campaign_id)
 
 
+
 def test_manual_queue_failure_preserves_scheduling_update_completed_before_lock(
     campaign_directories, monkeypatch
 ):
-    campaign_data, _sent_logs, targets = campaign_directories
+    campaign_data, _sent_logs, _targets = campaign_directories
     campaign_id = "Campaign_manual_queue_schedule_race"
     config_path = campaign_data / f"{campaign_id}.json"
     config_path.write_text(
@@ -620,9 +671,6 @@ def test_manual_queue_failure_preserves_scheduling_update_completed_before_lock(
             }
         ),
         encoding="utf-8",
-    )
-    (targets / f"target_{campaign_id}.csv").write_text(
-        "Email,Name\nready@example.org,Ready\n", encoding="utf-8"
     )
 
     class ThrowingBackgroundTasks:

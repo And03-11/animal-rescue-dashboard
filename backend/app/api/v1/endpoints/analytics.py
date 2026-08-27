@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Body, Query
-from typing import Dict, Any, Optional, List
+from copy import deepcopy
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from typing import Dict, Any, Optional
 from pydantic import BaseModel
 from backend.app.services.supabase_service import get_supabase_service, SupabaseService
 from backend.app.services.data_service import DataService, get_data_service
 from backend.app.core.security import get_current_user
-import traceback
 
 router = APIRouter()
 
@@ -20,6 +21,27 @@ class SharedViewConfig(BaseModel):
 class SharedViewResponse(BaseModel):
     share_id: str
     url: str
+
+
+def _redact_shared_donations(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep donation facts public while removing direct donor identifiers."""
+    redacted = deepcopy(payload)
+    donations = redacted.get("donations")
+    if not isinstance(donations, list):
+        return redacted
+
+    for donation in donations:
+        if not isinstance(donation, dict):
+            continue
+        if "donorName" in donation:
+            donation["donorName"] = "Anonymous donor"
+        if "donorEmail" in donation:
+            donation["donorEmail"] = ""
+        if "donor_name" in donation:
+            donation["donor_name"] = "Anonymous donor"
+        if "donor_email" in donation:
+            donation["donor_email"] = ""
+    return redacted
 
 @router.post("/share-link", response_model=SharedViewResponse)
 async def create_shared_view(
@@ -44,56 +66,22 @@ async def create_shared_view(
         url = f"/shared/{token}"
         
         return {"share_id": token, "url": url}
-    except Exception as e:
-        error_detail = f"Error creating shared link: {type(e).__name__}: {e}"
-        full_traceback = traceback.format_exc()
-        print(f"[SHARE-LINK ERROR] {error_detail}")
-        print(f"[SHARE-LINK TRACEBACK]\n{full_traceback}")
-        raise HTTPException(status_code=500, detail=error_detail)
+    except Exception:
+        raise HTTPException(
+            status_code=500, detail="Unable to create shared link"
+        ) from None
 
 
-@router.get("/debug/share-link-test")
-async def debug_share_link(service: SupabaseService = Depends(get_supabase_service)):
-    """
-    Temporary diagnostic endpoint - tests the DB connection and share-link insert.
-    NO AUTH REQUIRED. Remove after debugging.
-    """
-    import psycopg2.extras
-    results = {}
-    try:
-        # Step 1: Test DB connection
-        conn = service._get_connection()
-        results["db_connection"] = "OK"
-        service._return_connection(conn)
-    except Exception as e:
-        results["db_connection"] = f"FAILED: {type(e).__name__}: {e}"
-        return results
-
-    try:
-        # Step 2: Check table columns
-        rows = service._execute_query("""
-            SELECT column_name, data_type
-            FROM information_schema.columns 
-            WHERE table_name = 'analytics_shared_views'
-            ORDER BY ordinal_position
-        """)
-        results["table_columns"] = [dict(r) for r in rows]
-    except Exception as e:
-        results["table_columns"] = f"FAILED: {type(e).__name__}: {e}"
-
-    try:
-        # Step 3: Try actual INSERT
-        test_config = {"source_id": "debug-test", "source_name": "Debug"}
-        token = service.create_shared_view(test_config, created_by="debug")
-        # Cleanup
-        service._execute_query("DELETE FROM analytics_shared_views WHERE token = %s", (token,))
-        results["insert_test"] = f"OK - token: {token}"
-    except Exception as e:
-        full_tb = traceback.format_exc()
-        results["insert_test"] = f"FAILED: {type(e).__name__}: {e}"
-        results["insert_traceback"] = full_tb
-
-    return results
+@router.delete("/share/{token}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_shared_view(
+    token: str,
+    current_user: str = Depends(get_current_user),
+    service: SupabaseService = Depends(get_supabase_service),
+):
+    """Revoke a shared view created by the authenticated user."""
+    if not service.revoke_shared_view(token, revoked_by=current_user):
+        raise HTTPException(status_code=404, detail="Shared view not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/share/{token}", response_model=Dict[str, Any])
@@ -156,9 +144,10 @@ async def get_shared_view_stats(
                 start_date=start_date,
                 end_date=end_date
             )
-    except Exception as e:
-        print(f"Error fetching shared view stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        raise HTTPException(
+            status_code=500, detail="Unable to fetch shared view stats"
+        ) from None
 
 
 @router.get("/share/{token}/donations", response_model=Dict[str, Any])
@@ -211,8 +200,9 @@ async def get_shared_view_donations(
                 offset=offset
             )
         
-        return result
+        return _redact_shared_donations(result)
         
-    except Exception as e:
-        print(f"Error fetching shared view donations: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        raise HTTPException(
+            status_code=500, detail="Unable to fetch shared view donations"
+        ) from None

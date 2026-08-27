@@ -6,30 +6,19 @@ import { motion } from 'framer-motion';
 const FunnelPage = () => {
 
     return (
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <Box sx={{ mb: 4 }}>
-                <Typography variant="h4" fontWeight="700" gutterBottom>
-                    New Comer Funnel
-                </Typography>
-                <Typography variant="body1" color="text.secondary">
-                    Overview of donor conversion stages and pending approvals.
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+            <Box>
+                <Typography variant="h4" fontWeight="650" gutterBottom>New Comer Funnel</Typography>
+                <Typography variant="body2" color="text.secondary">
+                    Monitor the active funnel.
                 </Typography>
             </Box>
 
-            <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5 }}
-            >
-                <FunnelStats />
-            </motion.div>
-
-            <motion.div
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.25, delay: 0.08 }}
-            >
-                <FunnelEmailInsights />
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    <FunnelStats />
+                    <FunnelEmailInsights />
+                </Box>
             </motion.div>
         </Box>
     );

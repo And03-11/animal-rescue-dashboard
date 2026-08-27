@@ -1,20 +1,11 @@
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useRef,
   useState,
   type ReactNode,
 } from 'react';
-
-type WebSocketPayload = unknown;
-type WebSocketListener = (data: WebSocketPayload) => void;
-
-interface WebSocketContextType {
-  isConnected: boolean;
-  subscribe: (eventType: string, callback: WebSocketListener) => () => void;
-}
+import { WebSocketContext, type WebSocketListener } from './webSocketContext';
 
 interface WebSocketMessage {
   type?: unknown;
@@ -23,8 +14,6 @@ interface WebSocketMessage {
 
 const RECONNECT_BASE_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 30_000;
-
-const WebSocketContext = createContext<WebSocketContextType | null>(null);
 
 export const WebSocketProvider = ({ children }: { children: ReactNode }) => {
   const [isConnected, setIsConnected] = useState(false);
@@ -129,12 +118,4 @@ export const WebSocketProvider = ({ children }: { children: ReactNode }) => {
       {children}
     </WebSocketContext.Provider>
   );
-};
-
-export const useWebSocket = () => {
-  const context = useContext(WebSocketContext);
-  if (!context) {
-    throw new Error('useWebSocket must be used within a WebSocketProvider');
-  }
-  return context;
 };

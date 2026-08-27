@@ -21,25 +21,19 @@ import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import CloseIcon from '@mui/icons-material/Close';
 import SaveIcon from '@mui/icons-material/Save';
 import DeleteIcon from '@mui/icons-material/Delete';
-import dayjs, { Dayjs } from 'dayjs';
-
-interface CampaignFormData {
-    id?: number;
-    title: string;
-    start_date: Dayjs;
-    end_date: Dayjs;
-    category: string;
-    notes: string;
-    segmentation_mode: 'bc_single' | 'bc_split' | 'standard';
-}
+import dayjs from 'dayjs';
+import type { SchedulerCampaignFormData, SegmentationMode } from '../types/scheduler.types';
 
 interface CampaignModalProps {
     open: boolean;
-    campaign: CampaignFormData | null;
+    campaign: SchedulerCampaignFormData | null;
     onClose: () => void;
-    onSave: (campaign: CampaignFormData) => Promise<void>;
+    onSave: (campaign: SchedulerCampaignFormData) => Promise<void>;
     onDelete?: (id: number) => Promise<void>;
 }
+
+const isSegmentationMode = (value: unknown): value is SegmentationMode =>
+    value === 'bc_single' || value === 'bc_split' || value === 'standard';
 
 const CATEGORIES = [
     'Big Campaigns',
@@ -59,7 +53,7 @@ export const CampaignModal: React.FC<CampaignModalProps> = ({
     onDelete
 }) => {
     const theme = useTheme();
-    const [formData, setFormData] = useState<CampaignFormData>({
+    const [formData, setFormData] = useState<SchedulerCampaignFormData>({
         title: '',
         start_date: dayjs(),
         end_date: dayjs(),
@@ -77,9 +71,9 @@ export const CampaignModal: React.FC<CampaignModalProps> = ({
                 start_date: dayjs(campaign.start_date),
                 end_date: dayjs(campaign.end_date),
                 // Ensure segmentation_mode is valid, default to standard if not
-                segmentation_mode: (['bc_single', 'bc_split', 'standard'].includes(campaign.segmentation_mode)
+                segmentation_mode: (isSegmentationMode(campaign.segmentation_mode)
                     ? campaign.segmentation_mode
-                    : 'standard') as any
+                    : 'standard')
             });
         } else {
             setFormData({
@@ -94,7 +88,10 @@ export const CampaignModal: React.FC<CampaignModalProps> = ({
         setError('');
     }, [campaign, open]);
 
-    const handleChange = (field: keyof CampaignFormData, value: any) => {
+    const handleChange = <Key extends keyof SchedulerCampaignFormData>(
+        field: Key,
+        value: SchedulerCampaignFormData[Key]
+    ) => {
         setFormData(prev => ({ ...prev, [field]: value }));
     };
 
@@ -115,8 +112,8 @@ export const CampaignModal: React.FC<CampaignModalProps> = ({
         try {
             await onSave(formData);
             onClose();
-        } catch (err: any) {
-            setError(err.message || 'Failed to save campaign');
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : 'Failed to save campaign');
         } finally {
             setLoading(false);
         }
@@ -135,8 +132,8 @@ export const CampaignModal: React.FC<CampaignModalProps> = ({
                 await onDelete(campaign.id);
             }
             onClose();
-        } catch (err: any) {
-            setError(err.message || 'Failed to delete campaign');
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : 'Failed to delete campaign');
         } finally {
             setLoading(false);
         }
@@ -205,7 +202,9 @@ export const CampaignModal: React.FC<CampaignModalProps> = ({
                         <DatePicker
                             label="Start Date"
                             value={formData.start_date}
-                            onChange={(newValue) => handleChange('start_date', newValue)}
+                            onChange={(newValue) => {
+                                if (newValue) handleChange('start_date', newValue);
+                            }}
                             slotProps={{
                                 textField: {
                                     fullWidth: true,
@@ -220,7 +219,9 @@ export const CampaignModal: React.FC<CampaignModalProps> = ({
                         <DatePicker
                             label="End Date"
                             value={formData.end_date}
-                            onChange={(newValue) => handleChange('end_date', newValue)}
+                            onChange={(newValue) => {
+                                if (newValue) handleChange('end_date', newValue);
+                            }}
                             slotProps={{
                                 textField: {
                                     fullWidth: true,
@@ -255,7 +256,11 @@ export const CampaignModal: React.FC<CampaignModalProps> = ({
                         <Select
                             value={formData.segmentation_mode}
                             label="Segmentation Mode"
-                            onChange={(e) => handleChange('segmentation_mode', e.target.value)}
+                            onChange={(e) => {
+                                if (isSegmentationMode(e.target.value)) {
+                                    handleChange('segmentation_mode', e.target.value);
+                                }
+                            }}
                             sx={{ borderRadius: '12px' }}
                         >
                             <MenuItem value="bc_single">Big Campaign - Unified Time (All Tags)</MenuItem>

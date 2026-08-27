@@ -9,6 +9,7 @@ import ReactFlow, {
     type Connection,
     type Edge,
     type Node,
+    type ReactFlowInstance,
     BackgroundVariant,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
@@ -21,7 +22,13 @@ import CampaignNode from './nodes/CampaignNode';
 import EmailNode from './nodes/EmailNode';
 import { SchedulerSidebar } from './SchedulerSidebar';
 import { NodeEditorPanel } from './NodeEditorPanel';
-import { type Campaign, type CampaignEmail, type ScheduledSend } from '../../types/scheduler.types';
+import {
+    type Campaign,
+    type CampaignEmail,
+    type ScheduledSend,
+    type SchedulerNodeData,
+    type SchedulerNodeInput,
+} from '../../types/scheduler.types';
 
 const nodeTypes = {
     campaign: CampaignNode,
@@ -39,28 +46,28 @@ interface FlowchartEditorProps {
     onDeleteCampaign?: () => void;
     onDeleteSend?: (id: number) => void;
     onDuplicateSend?: (send: ScheduledSend) => void;
-    onCreateSend?: (campaignId: number, data: any) => void;
+    onCreateSend?: (campaignId: number, data: SchedulerNodeInput) => void;
 }
 
 const FlowchartEditorContent = ({ campaigns, onUpdateCampaign, onUpdateEmail, onUpdateSend, onDeleteSend, onDuplicateSend, onCreateSend }: FlowchartEditorProps) => {
     const theme = useTheme();
     const reactFlowWrapper = useRef<HTMLDivElement>(null);
-    const [nodes, setNodes, onNodesChange] = useNodesState([]);
+    const [nodes, setNodes, onNodesChange] = useNodesState<SchedulerNodeData>([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-    const [reactFlowInstance, setReactFlowInstance] = useState<any>(null);
+    const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance<SchedulerNodeData> | null>(null);
     const [sidebarOpen, setSidebarOpen] = useState(false);
 
     // Editor Panel State
     const [editorOpen, setEditorOpen] = useState(false);
     const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-    const [selectedNodeData, setSelectedNodeData] = useState<any>(null);
+    const [selectedNodeData, setSelectedNodeData] = useState<SchedulerNodeData | null>(null);
     const [selectedNodeType, setSelectedNodeType] = useState<'campaign' | 'email' | null>(null);
 
     // Convert campaigns to nodes/edges on load or change
     useEffect(() => {
         if (!campaigns || campaigns.length === 0) return;
 
-        const newNodes: Node[] = [];
+        const newNodes: Node<SchedulerNodeData>[] = [];
         const newEdges: Edge[] = [];
         let yOffset = 0;
 
@@ -129,7 +136,7 @@ const FlowchartEditorContent = ({ campaigns, onUpdateCampaign, onUpdateEmail, on
 
         setNodes(newNodes);
         setEdges(newEdges);
-    }, [campaigns, theme.palette.text.secondary]);
+    }, [campaigns, setEdges, setNodes, theme.palette.text.secondary]);
 
     const onConnect = useCallback(
         (params: Connection) => setEdges((eds) => addEdge(params, eds)),
@@ -146,13 +153,14 @@ const FlowchartEditorContent = ({ campaigns, onUpdateCampaign, onUpdateEmail, on
             event.preventDefault();
             const type = event.dataTransfer.getData('application/reactflow');
             if (typeof type === 'undefined' || !type) return;
+            if (!reactFlowInstance) return;
 
             const position = reactFlowInstance.screenToFlowPosition({
                 x: event.clientX,
                 y: event.clientY,
             });
 
-            const newNode: Node = {
+            const newNode: Node<SchedulerNodeData> = {
                 id: getId(),
                 type,
                 position,
@@ -173,14 +181,15 @@ const FlowchartEditorContent = ({ campaigns, onUpdateCampaign, onUpdateEmail, on
         [reactFlowInstance, setNodes]
     );
 
-    const onNodeDoubleClick = useCallback((_: React.MouseEvent, node: Node) => {
+    const onNodeDoubleClick = useCallback((_: React.MouseEvent, node: Node<SchedulerNodeData>) => {
+        if (node.type !== 'campaign' && node.type !== 'email') return;
         setSelectedNodeId(node.id);
         setSelectedNodeData(node.data);
-        setSelectedNodeType(node.type as 'campaign' | 'email');
+        setSelectedNodeType(node.type);
         setEditorOpen(true);
     }, []);
 
-    const handleSaveNodeData = (newData: any) => {
+    const handleSaveNodeData = (newData: SchedulerNodeData) => {
         if (!selectedNodeId) return;
 
         // Update local state
@@ -195,22 +204,27 @@ const FlowchartEditorContent = ({ campaigns, onUpdateCampaign, onUpdateEmail, on
 
         // Propagate updates to parent
         if (selectedNodeType === 'campaign' && onUpdateCampaign && newData.original) {
-            onUpdateCampaign({ ...newData.original, ...newData });
+            onUpdateCampaign({
+                ...newData.original,
+                title: newData.title ?? newData.original.title,
+                category: newData.category ?? newData.original.category,
+                notes: newData.notes ?? newData.original.notes,
+            });
         } else if (selectedNodeType === 'email') {
             if (onUpdateEmail && newData.originalEmail) {
                 onUpdateEmail({
                     ...newData.originalEmail,
-                    title: newData.label,
-                    subject: newData.label,
-                    button_name: newData.buttonName
+                    title: newData.label ?? newData.originalEmail.title,
+                    subject: newData.label ?? newData.originalEmail.subject,
+                    button_name: newData.buttonName ?? newData.originalEmail.button_name
                 });
             }
             if (onUpdateSend && newData.originalSend) {
                 onUpdateSend({
                     ...newData.originalSend,
-                    service: newData.service,
+                    service: newData.service ?? newData.originalSend.service,
                     custom_service: newData.customService,
-                    status: newData.status,
+                    status: newData.status ?? newData.originalSend.status,
                     is_dnr: newData.isDnr,
                     dnr_date: newData.dnrDate
                 });
@@ -223,13 +237,14 @@ const FlowchartEditorContent = ({ campaigns, onUpdateCampaign, onUpdateEmail, on
                     if (sourceNode && sourceNode.type === 'campaign' && sourceNode.data.original) {
                         onCreateSend(sourceNode.data.original.id, newData);
                     } else if (sourceNode && sourceNode.type === 'email' && sourceNode.data.originalSend) {
+                        const originalSend = sourceNode.data.originalSend;
                         // If connected to another email, use its campaign_id
                         // Note: This assumes emails are in the same campaign
                         // We might need to fetch the campaign from the email's campaign_email_id -> campaign
                         // But for now, let's assume we can get it from the source node's originalSend.campaign_email_id (which links to campaign_email, which links to campaign)
                         // Actually, originalSend doesn't have campaign_id directly.
                         // But we have campaigns prop.
-                        const campaign = campaigns.find(c => c.emails?.some(e => e.id === sourceNode.data.originalSend.campaign_email_id));
+                        const campaign = campaigns.find(c => c.emails?.some(e => e.id === originalSend.campaign_email_id));
                         if (campaign) {
                             onCreateSend(campaign.id, newData);
                         }
@@ -245,7 +260,7 @@ const FlowchartEditorContent = ({ campaigns, onUpdateCampaign, onUpdateEmail, on
     const handleDeleteNode = () => {
         if (!selectedNodeId) return;
 
-        if (selectedNodeType === 'email' && onDeleteSend && selectedNodeData.originalSend) {
+        if (selectedNodeType === 'email' && onDeleteSend && selectedNodeData?.originalSend) {
             onDeleteSend(selectedNodeData.originalSend.id);
         }
 
@@ -255,7 +270,7 @@ const FlowchartEditorContent = ({ campaigns, onUpdateCampaign, onUpdateEmail, on
 
     const handleDuplicateNode = () => {
         console.log('handleDuplicateNode called', { selectedNodeId, selectedNodeData, onDuplicateSend });
-        if (!selectedNodeId || !selectedNodeData.originalSend || !onDuplicateSend) {
+        if (!selectedNodeId || !selectedNodeData?.originalSend || !onDuplicateSend) {
             console.error('Missing data for duplication', {
                 hasId: !!selectedNodeId,
                 hasOriginalSend: !!selectedNodeData?.originalSend,

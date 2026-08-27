@@ -8,7 +8,6 @@ import { Layout } from './components/Layout';
 import PrivateRoute from './components/PrivateRoute';
 // import PrivateAdminRoute from './components/PrivateAdminRoute'; // Ya no se usa directamente aquí, o se puede reusar para settings
 import LoginForm from './pages/LoginForm';
-import RegisterForm from './pages/RegisterForm';
 // import UserManagementPage from './pages/UserManagementPage'; // Eliminado
 import CampaignComparisonPage from './pages/CampaignComparisonPage';
 
@@ -23,6 +22,7 @@ const CampaignSchedulerPage = lazy(() => import('./pages/CampaignSchedulerPage')
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const SharedAnalyticsPage = lazy(() => import('./pages/SharedAnalyticsPage'));
 const TemplatesPage = lazy(() => import('./pages/TemplatesPage'));
+const EmailStudioPage = lazy(() => import('./pages/EmailStudioPage'));
 const TemplateSearchPage = lazy(() => import('./pages/TemplateSearchPage'));
 const FunnelPage = lazy(() => import('./pages/FunnelPage'));
 
@@ -67,7 +67,6 @@ export function AppRoutes() {
       <Routes>
         {/* --- Ruta Pública --- */}
         <Route path="/login" element={<LoginForm />} />
-        <Route path="/register" element={<RegisterForm />} />
         <Route path="/shared/:token" element={<SharedAnalyticsPage />} />
 
         {/* --- Standalone Private Routes (No Layout) --- */}
@@ -120,6 +119,10 @@ export function AppRoutes() {
           <Route
             path="templates"
             element={<PageTransition><TemplatesPage /></PageTransition>}
+          />
+          <Route
+            path="email-studio"
+            element={<EmailStudioPage />}
           />
           <Route
             path="template-search"

@@ -23,6 +23,7 @@ sent_logs/
 campaign_targets/
 *.csv
 tmp/*.log
+tmp/runtime/
 
 # Sistema Operativo
 .DS_Store

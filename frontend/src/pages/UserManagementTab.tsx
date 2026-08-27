@@ -13,20 +13,16 @@ import AddIcon from '@mui/icons-material/Add';
 import PersonIcon from '@mui/icons-material/Person';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import apiClient from "../api/axiosConfig";
-
-interface User {
-    id: number;
-    username: string;
-    is_admin: boolean;
-}
+import { getUserApiErrorMessage } from "../features/users/apiErrors";
+import type { UserAccount, UserFormState, UserUpdatePayload } from "../features/users/types";
 
 export default function UserManagementTab() {
     const theme = useTheme();
-    const [users, setUsers] = useState<User[]>([]);
+    const [users, setUsers] = useState<UserAccount[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [open, setOpen] = useState(false);
-    const [form, setForm] = useState({ id: 0, username: "", password: "", is_admin: false });
+    const [form, setForm] = useState<UserFormState>({ id: 0, username: "", password: "", is_admin: false });
     const [editMode, setEditMode] = useState(false);
 
     const fetchUsers = async () => {
@@ -34,7 +30,7 @@ export default function UserManagementTab() {
             setLoading(true);
             // Add timestamp to prevent caching
             const timestamp = new Date().getTime();
-            const res = await apiClient.get(`/users/list?_t=${timestamp}`);
+            const res = await apiClient.get<UserAccount[]>(`/users/list?_t=${timestamp}`);
             setUsers(res.data);
             setError("");
         } catch {
@@ -48,7 +44,7 @@ export default function UserManagementTab() {
         fetchUsers();
     }, []);
 
-    const handleOpen = (user?: User) => {
+    const handleOpen = (user?: UserAccount) => {
         if (user) {
             setForm({ id: user.id, username: user.username, password: "", is_admin: user.is_admin });
             setEditMode(true);
@@ -76,7 +72,7 @@ export default function UserManagementTab() {
 
         try {
             if (editMode) {
-                const payload: any = { username: form.username, is_admin: form.is_admin };
+                const payload: UserUpdatePayload = { username: form.username, is_admin: form.is_admin };
                 if (form.password) {
                     payload.password = form.password;
                 }
@@ -90,8 +86,8 @@ export default function UserManagementTab() {
             }
             handleClose();
             fetchUsers();
-        } catch (err: any) {
-            setError(err.response?.data?.detail || "Error saving user");
+        } catch (err: unknown) {
+            setError(getUserApiErrorMessage(err, "Error saving user"));
         }
     };
 
@@ -100,8 +96,8 @@ export default function UserManagementTab() {
         try {
             await apiClient.delete(`/users/${id}`);
             fetchUsers();
-        } catch (err: any) {
-            setError(err.response?.data?.detail || "Error deleting user");
+        } catch (err: unknown) {
+            setError(getUserApiErrorMessage(err, "Error deleting user"));
         }
     };
 

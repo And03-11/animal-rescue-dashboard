@@ -9,7 +9,16 @@ import dayjs from 'dayjs';
 import apiClient from '../api/axiosConfig';
 
 // Import shared types
-import type { Campaign, CampaignEmail, ScheduledSend } from '../types/scheduler.types';
+import type {
+  Campaign,
+  CampaignEmail,
+  ScheduledSend,
+  SchedulerBatchSendInput,
+  SchedulerCampaignFormData,
+  SchedulerCreatedResource,
+  SchedulerEvent,
+  SchedulerNodeInput,
+} from '../types/scheduler.types';
 
 // Import new components
 import { CampaignModal } from '../components/CampaignModal';
@@ -38,7 +47,7 @@ export const CampaignSchedulerPage = () => {
     setLoading(true);
     try {
       // Fetch campaigns
-      const campaignsRes = await apiClient.get('/scheduler/events', {
+      const campaignsRes = await apiClient.get<SchedulerEvent[]>('/scheduler/events', {
         params: {
           start: dayjs().subtract(6, 'month').toISOString(),
           end: dayjs().add(6, 'month').toISOString()
@@ -50,7 +59,7 @@ export const CampaignSchedulerPage = () => {
       const campaignMap = new Map<number, Campaign>();
 
       // First pass: create campaigns
-      events.forEach((event: any) => {
+      events.forEach((event) => {
         if (event.extendedProps.type === 'campaign') {
           const campaignId = event.extendedProps.campaign_id;
           campaignMap.set(campaignId, {
@@ -59,8 +68,8 @@ export const CampaignSchedulerPage = () => {
             category: event.extendedProps.category || 'Other',
             start_date: event.start,
             end_date: event.end || event.start,
-            notes: event.extendedProps.notes,
-            segmentation_mode: event.extendedProps.segmentation_mode,
+            notes: event.extendedProps.notes ?? undefined,
+            segmentation_mode: event.extendedProps.segmentation_mode ?? undefined,
             sendCount: 0,
             status: 'active',
             sends: []
@@ -69,10 +78,10 @@ export const CampaignSchedulerPage = () => {
       });
 
       // Second pass: add sends to campaigns
-      events.forEach((event: any) => {
+      events.forEach((event) => {
         if (event.extendedProps.type === 'send') {
           const campaignId = event.extendedProps.campaign_id;
-          const campaign = campaignMap.get(campaignId);
+          const campaign = campaignId === null ? undefined : campaignMap.get(campaignId);
           if (campaign) {
             campaign.sendCount = (campaign.sendCount || 0) + 1;
             campaign.sends = campaign.sends || [];
@@ -82,7 +91,7 @@ export const CampaignSchedulerPage = () => {
               send_at: dayjs(event.start),
               service: event.extendedProps.service || 'Other',
               status: event.extendedProps.status || 'pending',
-              segment_tag: event.extendedProps.segment_tag
+              segment_tag: event.extendedProps.segment_tag ?? undefined
             });
 
             // Set next send
@@ -99,7 +108,7 @@ export const CampaignSchedulerPage = () => {
       // For now, fetch all campaign emails
       for (const campaign of campaignsArray) {
         try {
-          const emailsRes = await apiClient.get(`/scheduler/campaigns/${campaign.id}/emails`);
+          const emailsRes = await apiClient.get<CampaignEmail[]>(`/scheduler/campaigns/${campaign.id}/emails`);
           if (emailsRes.data) {
             campaign.emails = emailsRes.data;
           }
@@ -112,28 +121,26 @@ export const CampaignSchedulerPage = () => {
       setCampaigns(campaignsArray);
 
       // Auto-select first campaign if none selected
-      if (!selectedCampaignId && campaignsArray.length > 0) {
-        setSelectedCampaignId(campaignsArray[0].id);
-      }
+      setSelectedCampaignId((currentId) => currentId ?? campaignsArray[0]?.id ?? null);
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error fetching data:', err);
-      setError(err.message || 'Failed to load campaigns');
+      setError(err instanceof Error ? err.message : 'Failed to load campaigns');
     } finally {
       setLoading(false);
     }
-  }, [selectedCampaignId]);
+  }, []);
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [fetchData]);
 
   // Handlers
   const handleCreateCampaign = () => {
     setIsCreateModalOpen(true);
   };
 
-  const handleSaveNewCampaign = async (formData: any) => {
+  const handleSaveNewCampaign = async (formData: SchedulerCampaignFormData) => {
     try {
       const newCampaignData = {
         title: formData.title,
@@ -144,7 +151,7 @@ export const CampaignSchedulerPage = () => {
         segmentation_mode: formData.segmentation_mode
       };
 
-      const res = await apiClient.post('/scheduler/events', newCampaignData);
+      const res = await apiClient.post<SchedulerCreatedResource>('/scheduler/events', newCampaignData);
       await fetchData();
       setSelectedCampaignId(res.data.id);
       setIsCreateModalOpen(false);
@@ -187,7 +194,7 @@ export const CampaignSchedulerPage = () => {
 
 
 
-  const handleBatchCreateSends = async (sends: any[]) => {
+  const handleBatchCreateSends = async (sends: SchedulerBatchSendInput[]) => {
     const campaign = selectedCampaign;
     if (!campaign) return;
 
@@ -205,7 +212,7 @@ export const CampaignSchedulerPage = () => {
           custom_links: baseEmail?.custom_links || ''
         };
 
-        const emailRes = await apiClient.post('/scheduler/emails', newEmailData);
+        const emailRes = await apiClient.post<SchedulerCreatedResource>('/scheduler/emails', newEmailData);
         const newEmailId = emailRes.data.id;
 
         await apiClient.post('/scheduler/sends', {
@@ -240,7 +247,7 @@ export const CampaignSchedulerPage = () => {
     }
   };
 
-  const handleCreateSend = async (campaignId: number, data: any) => {
+  const handleCreateSend = async (campaignId: number, data: SchedulerNodeInput) => {
     try {
       // 1. Create Campaign Email
       const newEmailData = {
@@ -253,7 +260,7 @@ export const CampaignSchedulerPage = () => {
         custom_links: ''
       };
 
-      const emailRes = await apiClient.post('/scheduler/emails', newEmailData);
+      const emailRes = await apiClient.post<SchedulerCreatedResource>('/scheduler/emails', newEmailData);
       const newEmailId = emailRes.data.id;
 
       // 2. Create Scheduled Send

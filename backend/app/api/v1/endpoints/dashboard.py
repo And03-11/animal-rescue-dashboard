@@ -153,7 +153,10 @@ def get_donation_sources(
         raise HTTPException(status_code=500, detail="Could not process donation sources")
 
 @router.get("/funnel-stats")
-def get_funnel_stats(data_service: DataService = Depends(get_data_service)):
+def get_funnel_stats(
+    data_service: DataService = Depends(get_data_service),
+    current_user: str = Depends(get_current_user),
+):
     try:
         return data_service.get_funnel_stats()
     except Exception as e:

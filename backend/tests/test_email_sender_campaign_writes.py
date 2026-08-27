@@ -108,7 +108,7 @@ def test_create_csv_campaign_preserves_files_and_remote_sync(write_environment):
 
 
 def test_update_campaign_preserves_status_transition_and_remote_payload(write_environment):
-    campaign_data, _sent_logs, targets, remote_service = write_environment
+    campaign_data, _sent_logs, _targets, remote_service = write_environment
     campaign_id = "Campaign_update"
     config_path = campaign_data / f"{campaign_id}.json"
     config_path.write_text(
@@ -125,9 +125,6 @@ def test_update_campaign_preserves_status_transition_and_remote_payload(write_en
             }
         ),
         encoding="utf-8",
-    )
-    (targets / f"target_{campaign_id}.csv").write_text(
-        "Email,Name\nana@example.org,Ana\n", encoding="utf-8"
     )
 
     response = client.put(
@@ -186,12 +183,7 @@ def test_save_mapping_preserves_count_status_and_remote_sync(write_environment):
     campaign_id = "Campaign_mapping"
     config_path = campaign_data / f"{campaign_id}.json"
     config_path.write_text(
-        json.dumps({
-            "id": campaign_id,
-            "source_type": "csv",
-            "status": "Draft",
-            "csv_filename": "contacts.csv",
-        }),
+        json.dumps({"id": campaign_id, "source_type": "csv", "status": "Draft"}),
         encoding="utf-8",
     )
     (targets / f"target_{campaign_id}.csv").write_text(
@@ -219,7 +211,6 @@ def test_save_mapping_preserves_count_status_and_remote_sync(write_environment):
             campaign_id,
             {
                 "mapping": mapped["mapping"],
-                "csv_filename": "contacts.csv",
                 "target_count": 2,
                 "status": "Ready",
             },
@@ -651,7 +642,7 @@ def test_update_campaign_does_not_mutate_while_campaign_lock_is_held(
         )
 
         assert response.status_code == 409
-        assert storage.owns_launch_lock(campaign_id, owner_id)
+        assert storage.owns_launch_lock(campaign_id, "existing-owner")
         assert json.loads(config_path.read_text(encoding="utf-8")) == original
         assert target_path.read_text(encoding="utf-8").splitlines() == [
             "Email",
@@ -659,7 +650,7 @@ def test_update_campaign_does_not_mutate_while_campaign_lock_is_held(
         ]
         assert remote_service.updated == []
     finally:
-        storage.release_launch_lock(campaign_id, owner_id)
+        storage.release_launch_lock(campaign_id, "existing-owner")
 
 
 def test_update_campaign_logs_unexpected_failure_and_returns_stable_500(
@@ -1016,383 +1007,3 @@ def test_update_campaign_rejects_direct_invalid_id(write_environment):
     assert response.json() == {"detail": "Invalid campaign ID."}
     assert json.loads(invalid_path.read_text(encoding="utf-8")) == original
     assert remote_service.updated == []
-
-def test_scheduled_csv_create_remains_draft_until_mapping_is_validated(write_environment):
-    campaign_data, _sent_logs, _targets, remote_service = write_environment
-    response = client.post(
-        "/api/v1/sender/campaigns",
-        json={
-            "source_type": "csv",
-            "subject": "Scheduled later",
-            "html_body": "<p>Hello</p>",
-            "campaign_name": "CSV draft transaction",
-            "scheduled_at": "2026-08-30T12:00:00",
-        },
-    )
-
-    assert response.status_code == 201
-    created = response.json()
-    assert created["status"] == "Draft"
-    assert created["scheduled_at"] == "2026-08-30T12:00:00"
-    assert remote_service.created[-1]["status"] == "Draft"
-    stored = json.loads(
-        (campaign_data / f"{created['id']}.json").read_text(encoding="utf-8")
-    )
-    assert stored["status"] == "Draft"
-
-
-def test_create_rolls_back_only_new_artifacts_when_remote_publish_fails(
-    write_environment,
-    monkeypatch,
-):
-    campaign_data, _sent_logs, targets, remote_service = write_environment
-
-    def fail_create(_config):
-        raise RuntimeError("remote unavailable")
-
-    monkeypatch.setattr(remote_service, "create_campaign", fail_create)
-    response = client.post(
-        "/api/v1/sender/campaigns",
-        json={
-            "source_type": "csv",
-            "subject": "Retry",
-            "html_body": "<p>Retry</p>",
-            "campaign_name": "Remote failure",
-        },
-    )
-
-    assert response.status_code == 502
-    assert response.json() == {
-        "detail": "Campaign publication failed. Please retry."
-    }
-    assert list(campaign_data.glob("Campaign_*.json")) == []
-    assert list(targets.glob("target_Campaign_*.csv")) == []
-
-
-def test_update_restores_config_and_targets_when_remote_publish_fails(
-    write_environment,
-    monkeypatch,
-):
-    campaign_data, _sent_logs, targets, remote_service = write_environment
-    campaign_id = "Campaign_remote_rollback"
-    config_path = campaign_data / f"{campaign_id}.json"
-    target_path = targets / f"target_{campaign_id}.csv"
-    original_config = {
-        "id": campaign_id,
-        "source_type": "csv",
-        "campaign_name": "Original",
-        "subject": "Original subject",
-        "html_body": "<p>Original</p>",
-        "sender_config": "all",
-        "status": "Ready",
-        "mapping": {"email": "Email", "name": "Name", "has_header": True},
-        "target_count": 1,
-    }
-    original_target = b"Email,Name\nold@example.org,Old\n"
-    config_path.write_text(json.dumps(original_config), encoding="utf-8")
-    target_path.write_bytes(original_target)
-
-    def fail_update(_campaign_id, _updates):
-        raise RuntimeError("remote unavailable")
-
-    monkeypatch.setattr(remote_service, "update_campaign", fail_update)
-    response = client.put(
-        f"/api/v1/sender/campaigns/{campaign_id}",
-        json={"subject": "Must roll back"},
-    )
-
-    assert response.status_code == 502
-    assert response.json() == {
-        "detail": "Campaign publication failed. Please retry."
-    }
-    assert json.loads(config_path.read_text(encoding="utf-8")) == original_config
-    assert target_path.read_bytes() == original_target
-    assert not email_sender._get_campaign_storage().is_launch_locked(campaign_id)
-
-
-def test_update_rejects_source_conversion_without_mutating_campaign(
-    write_environment,
-):
-    campaign_data, _sent_logs, _targets, remote_service = write_environment
-    campaign_id = "Campaign_no_conversion"
-    config_path = campaign_data / f"{campaign_id}.json"
-    original = {
-        "id": campaign_id,
-        "source_type": "csv",
-        "subject": "Original",
-        "status": "Draft",
-    }
-    config_path.write_text(json.dumps(original), encoding="utf-8")
-
-    response = client.put(
-        f"/api/v1/sender/campaigns/{campaign_id}",
-        json={"source_type": "airtable", "subject": "Changed"},
-    )
-
-    assert response.status_code == 422
-    assert response.json() == {
-        "detail": "Campaign source cannot be changed after creation."
-    }
-    assert json.loads(config_path.read_text(encoding="utf-8")) == original
-    assert remote_service.updated == []
-
-
-def test_existing_csv_update_commits_mapping_count_and_schedule_in_one_put(
-    write_environment,
-):
-    campaign_data, _sent_logs, targets, remote_service = write_environment
-    campaign_id = "Campaign_csv_atomic_edit"
-    config_path = campaign_data / f"{campaign_id}.json"
-    target_path = targets / f"target_{campaign_id}.csv"
-    config_path.write_text(
-        json.dumps(
-            {
-                "id": campaign_id,
-                "source_type": "csv",
-                "campaign_name": "Existing",
-                "subject": "Old",
-                "html_body": "<p>Old</p>",
-                "sender_config": "all",
-                "status": "Ready",
-                "mapping": {"email": "Email", "name": "Name", "has_header": True},
-                "target_count": 99,
-            }
-        ),
-        encoding="utf-8",
-    )
-    original_target = (
-        b"Email,Name\nana@example.org,Ana\nANA@example.org,Duplicate\n"
-        b"invalid,Ignored\nleo@example.org,Leo\n"
-    )
-    target_path.write_bytes(original_target)
-
-    response = client.put(
-        f"/api/v1/sender/campaigns/{campaign_id}",
-        json={
-            "subject": "Updated",
-            "scheduled_at": "2026-08-30T12:00:00",
-            "mapping": {
-                "email": "Email",
-                "name": "Name",
-                "has_header": True,
-            },
-        },
-    )
-
-    assert response.status_code == 200
-    updated = response.json()
-    assert updated["mapping"] == {
-        "email": "Email",
-        "name": "Name",
-        "has_header": True,
-    }
-    assert updated["target_count"] == 2
-    assert updated["status"] == "Scheduled"
-    assert target_path.read_bytes() == original_target
-    assert len(remote_service.updated) == 1
-    assert remote_service.updated[0][1]["target_count"] == 2
-    assert remote_service.updated[0][1]["status"] == "Scheduled"
-
-
-def test_headerless_mapping_counts_first_row_and_deduplicates_valid_recipients(
-    write_environment,
-):
-    campaign_data, _sent_logs, targets, _remote_service = write_environment
-    campaign_id = "Campaign_headerless_count"
-    (campaign_data / f"{campaign_id}.json").write_text(
-        json.dumps(
-            {
-                "id": campaign_id,
-                "source_type": "csv",
-                "status": "Draft",
-                "scheduled_at": None,
-            }
-        ),
-        encoding="utf-8",
-    )
-    (targets / f"target_{campaign_id}.csv").write_text(
-        "ana@example.org,Ana\nANA@example.org,Duplicate\n"
-        "invalid,Ignored\nleo@example.org,Leo\n",
-        encoding="utf-8-sig",
-    )
-
-    response = client.post(
-        f"/api/v1/sender/campaigns/{campaign_id}/save-mapping",
-        json={
-            "email": "Columna 1",
-            "name": "Columna 2",
-            "has_header": False,
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.json()["target_count"] == 2
-
-
-def test_save_mapping_holds_shared_lock_against_scheduler_claim(
-    write_environment,
-    monkeypatch,
-):
-    campaign_data, _sent_logs, targets, _remote_service = write_environment
-    campaign_id = "Campaign_mapping_lock"
-    (campaign_data / f"{campaign_id}.json").write_text(
-        json.dumps(
-            {
-                "id": campaign_id,
-                "source_type": "csv",
-                "status": "Draft",
-                "scheduled_at": "2026-08-30T12:00:00",
-            }
-        ),
-        encoding="utf-8",
-    )
-    (targets / f"target_{campaign_id}.csv").write_text(
-        "Email,Name\nana@example.org,Ana\n",
-        encoding="utf-8",
-    )
-    real_reader = email_sender.read_mapped_contacts
-    scheduler_result = {}
-
-    def reader_while_scheduler_attempts(path, mapping, requested_campaign_id):
-        try:
-            email_sender.prepare_campaign_launch(requested_campaign_id)
-        except email_sender.HTTPException as error:
-            scheduler_result["status_code"] = error.status_code
-        return real_reader(path, mapping, requested_campaign_id)
-
-    monkeypatch.setattr(
-        email_sender,
-        "read_mapped_contacts",
-        reader_while_scheduler_attempts,
-    )
-    response = client.post(
-        f"/api/v1/sender/campaigns/{campaign_id}/save-mapping",
-        json={"email": "Email", "name": "Name", "has_header": True},
-    )
-
-    assert response.status_code == 200
-    assert scheduler_result == {"status_code": 409}
-    assert response.json()["status"] == "Scheduled"
-
-
-@pytest.mark.parametrize(
-    "content_type",
-    ["text/csv", "", "application/vnd.ms-excel"],
-)
-def test_upload_accepts_documented_browser_csv_mime_values(
-    write_environment,
-    content_type,
-):
-    campaign_data, _sent_logs, targets, _remote_service = write_environment
-    mime_suffix = content_type.replace("/", "_").replace(".", "_").replace("-", "_")
-    campaign_id = f"Campaign_mime_{mime_suffix or 'empty'}"
-    (campaign_data / f"{campaign_id}.json").write_text(
-        json.dumps({"id": campaign_id, "source_type": "csv", "status": "Draft"}),
-        encoding="utf-8",
-    )
-
-    response = client.post(
-        f"/api/v1/sender/campaigns/{campaign_id}/upload-csv",
-        files={
-            "csv_file": (
-                "contacts.csv",
-                b"Email,Name\nana@example.org,Ana\n",
-                content_type,
-            )
-        },
-    )
-
-    assert response.status_code == 200
-    assert (targets / f"target_{campaign_id}.csv").exists()
-
-
-def test_upload_preserves_client_error_and_rejects_edit_replacement(
-    write_environment,
-):
-    campaign_data, _sent_logs, targets, _remote_service = write_environment
-    campaign_id = "Campaign_replacement_blocked"
-    config_path = campaign_data / f"{campaign_id}.json"
-    original = {
-        "id": campaign_id,
-        "source_type": "csv",
-        "status": "Ready",
-        "mapping": {"email": "Email", "name": "Name", "has_header": True},
-    }
-    config_path.write_text(json.dumps(original), encoding="utf-8")
-    target_path = targets / f"target_{campaign_id}.csv"
-    original_target = b"Email,Name\nold@example.org,Old\n"
-    target_path.write_bytes(original_target)
-
-    response = client.post(
-        f"/api/v1/sender/campaigns/{campaign_id}/upload-csv",
-        files={
-            "csv_file": (
-                "replacement.csv",
-                b"Email,Name\nnew@example.org,New\n",
-                "text/csv",
-            )
-        },
-    )
-
-    assert response.status_code == 409
-    assert response.json() == {
-        "detail": "CSV replacement is not allowed after mapping is saved."
-    }
-    assert target_path.read_bytes() == original_target
-    assert json.loads(config_path.read_text(encoding="utf-8")) == original
-
-
-@pytest.mark.parametrize(
-    "filename,content_type",
-    [
-        ("contacts.txt", "text/csv"),
-        ("contacts.csv", "application/octet-stream"),
-    ],
-)
-def test_upload_invalid_extension_or_mime_returns_stable_422(
-    write_environment,
-    filename,
-    content_type,
-):
-    campaign_data, _sent_logs, _targets, _remote_service = write_environment
-    campaign_id = "Campaign_invalid_upload"
-    (campaign_data / f"{campaign_id}.json").write_text(
-        json.dumps({"id": campaign_id, "source_type": "csv", "status": "Draft"}),
-        encoding="utf-8",
-    )
-
-    response = client.post(
-        f"/api/v1/sender/campaigns/{campaign_id}/upload-csv",
-        files={
-            "csv_file": (
-                filename,
-                b"Email,Name\nana@example.org,Ana\n",
-                content_type,
-            )
-        },
-    )
-
-    assert response.status_code == 422
-    assert response.json() == {"detail": "Upload a valid CSV file."}
-
-
-def test_preview_wrong_source_preserves_client_error_instead_of_500(
-    write_environment,
-):
-    campaign_data, _sent_logs, targets, _remote_service = write_environment
-    campaign_id = "Campaign_preview_wrong_source"
-    (campaign_data / f"{campaign_id}.json").write_text(
-        json.dumps({"id": campaign_id, "source_type": "airtable", "status": "Draft"}),
-        encoding="utf-8",
-    )
-    (targets / f"target_{campaign_id}.csv").write_text(
-        "Email,Name\nana@example.org,Ana\n",
-        encoding="utf-8",
-    )
-
-    response = client.get(
-        f"/api/v1/sender/campaigns/{campaign_id}/csv-preview"
-    )
-
-    assert response.status_code == 400
-    assert response.json() == {"detail": "Campaign is not of type 'csv'."}

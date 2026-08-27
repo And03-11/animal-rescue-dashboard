@@ -1,4 +1,16 @@
 # --- File: backend/app/main.py (Con Caching Activado) ---
+# On Windows, use the native certificate store before importing any module
+# that creates HTTPS clients. This keeps TLS verification enabled while also
+# trusting local/corporate certificate authorities installed in Windows.
+try:
+    import truststore
+
+    truststore.inject_into_ssl()
+except (ImportError, OSError):
+    # Linux containers and environments without truststore continue to use
+    # Python's standard CA bundle.
+    pass
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 # ✅ 1. IMPORTA las herramientas necesarias para el caché y el 'lifespan'
@@ -17,7 +29,8 @@ from backend.app.api.v1.endpoints import (
     websockets,
     scheduler,
     templates,  # Added for email templates
-    template_search  # Smart template search via n8n
+    template_search,  # Smart template search via n8n
+    funnel_intake,
 )
 from backend.app.api.v1.endpoints import campaigns_fast
 from backend.app.api.v1.endpoints.search import router as search_router
@@ -38,14 +51,13 @@ async def lifespan(app: FastAPI):
     FastAPICache.init(InMemoryBackend(), prefix="fastapi-cache")
     print("Sistema de caché inicializado.")
     
+    # ✅ Start email scheduler worker
     recovered_campaigns = email_sender.recover_interrupted_campaigns()
     if recovered_campaigns:
         print(
             "Recovered interrupted email campaigns: "
             + ", ".join(recovered_campaigns)
         )
-
-    # ✅ Start email scheduler worker after local lease recovery.
     start_scheduler()
     
     yield
@@ -105,6 +117,7 @@ app.include_router(scheduler.router, prefix="/api/v1")
 app.include_router(analytics_router, prefix="/api/v1/analytics", tags=["analytics"])
 app.include_router(templates.router, prefix="/api/v1", tags=["templates"])  # Email templates
 app.include_router(template_search.router, prefix="/api/v1", tags=["template-search"])  # Smart template search
+app.include_router(funnel_intake.router, prefix="/api/v1", tags=["funnel-intake"])
 
 # --- Health Check Endpoint (for Docker) ---
 @app.get("/health", tags=["health"])

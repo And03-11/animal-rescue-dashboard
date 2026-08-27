@@ -37,17 +37,12 @@ export interface CampaignWizardDraft {
   templateId?: string | number | null;
   /** Optional template object kept by edit hydration for consumers that use it. */
   template?: unknown;
-  /** CSV mapping/preview state belongs to the wizard and is committed only when supported. */
+  /** CSV mapping/preview state belongs to the wizard, but is not sent in the campaign payload. */
   csvPreview?: unknown;
   csvMapping?: unknown;
 }
 
-export type CampaignWizardPayload = Omit<
-  CampaignFormData,
-  'csvFile' | 'source_type'
-> & {
-  source_type?: CampaignSource;
-  mapping?: CsvColumnMapping;
+export type CampaignWizardPayload = Omit<CampaignFormData, 'csvFile'> & {
   csvFile?: File;
 };
 
@@ -75,79 +70,6 @@ export const CAMPAIGN_WIZARD_CSV_ERRORS = Object.freeze({
   readFailure: 'The CSV file could not be read. Try another file.',
   emptyFile: 'CSV file is empty.',
 } as const);
-export interface CampaignEditSourcePolicy {
-  sourceLocked: boolean;
-  csvUploadAllowed: boolean;
-  helperText: string | null;
-}
-
-const EDIT_SOURCE_HELPER = 'Source and CSV file are fixed after creation. You can still edit the mapping, content, senders, and schedule.';
-
-export function getCampaignEditSourcePolicy(
-  campaignId?: string | null,
-): CampaignEditSourcePolicy {
-  const sourceLocked = Boolean(campaignId);
-  return {
-    sourceLocked,
-    csvUploadAllowed: !sourceLocked,
-    helperText: sourceLocked ? EDIT_SOURCE_HELPER : null,
-  };
-}
-
-export interface TestDeliverySummary {
-  delivered: number;
-  failed: number;
-  isCompleteSuccess: boolean;
-  message: string;
-}
-
-export function summarizeTestDeliveryResponse(payload: unknown): TestDeliverySummary {
-  const resultItems = payload && typeof payload === 'object'
-    && 'results' in payload && Array.isArray(payload.results)
-    ? payload.results
-    : [];
-  const statuses = resultItems.flatMap((result) => (
-    result && typeof result === 'object' && 'status' in result
-      && typeof result.status === 'string'
-      ? [result.status]
-      : []
-  ));
-  const delivered = statuses.filter((status) => status === 'Sent').length;
-  const failed = statuses.length - delivered;
-
-  if (statuses.length === 0) {
-    return {
-      delivered: 0,
-      failed: 0,
-      isCompleteSuccess: false,
-      message: 'Test delivery response did not include recipient results.',
-    };
-  }
-  if (failed === 0) {
-    const recipientLabel = delivered === 1 ? 'recipient' : 'recipients';
-    return {
-      delivered,
-      failed,
-      isCompleteSuccess: true,
-      message: `Test email${delivered === 1 ? '' : 's'} sent to ${delivered} ${recipientLabel}.`,
-    };
-  }
-  if (delivered === 0) {
-    const recipientLabel = failed === 1 ? 'recipient' : 'recipients';
-    return {
-      delivered,
-      failed,
-      isCompleteSuccess: false,
-      message: `Test delivery failed for all ${failed} ${recipientLabel}.`,
-    };
-  }
-  return {
-    delivered,
-    failed,
-    isCompleteSuccess: false,
-    message: `Test delivery partially failed: ${delivered} sent, ${failed} failed.`,
-  };
-}
 
 type HydrationInput = Partial<CampaignFormData> & {
   id?: string | null;
@@ -348,21 +270,18 @@ export function invalidateAudiencePreview(draft: CampaignWizardDraft): CampaignW
 export function buildCampaignPayload(draft: CampaignWizardDraft): CampaignWizardPayload {
   const payload: CampaignWizardPayload = {
     campaign_name: draft.campaignName,
+    source_type: draft.sourceType,
     subject: draft.subject,
     html_body: draft.htmlBody,
     sender_config: senderConfigForDraft(draft),
     scheduled_at: normalizeScheduledAt(draft.scheduledAt),
   };
 
-  if (!draft.campaignId) payload.source_type = draft.sourceType;
-
   if (draft.sourceType === 'airtable') {
     payload.audiences = normalizeAudienceSelection(draft.audiences);
     payload.segment = draft.segment;
-  } else if (!draft.campaignId) {
-    if (draft.csvFile) payload.csvFile = draft.csvFile;
-  } else if (isCsvColumnMapping(draft.csvMapping)) {
-    payload.mapping = { ...draft.csvMapping };
+  } else if (!draft.campaignId && draft.csvFile) {
+    payload.csvFile = draft.csvFile;
   }
 
   return payload;

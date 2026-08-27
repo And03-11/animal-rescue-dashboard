@@ -1,8 +1,9 @@
 import {
-  Alert, Box, Chip, Divider, Paper, Skeleton, Stack, Typography, alpha, useTheme,
+  Alert, Box, Chip, Divider, Paper, Skeleton, Stack, Tooltip, Typography, alpha, useTheme,
 } from '@mui/material';
 import CalendarMonthRoundedIcon from '@mui/icons-material/CalendarMonthRounded';
 import GroupsRoundedIcon from '@mui/icons-material/GroupsRounded';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import InsightsRoundedIcon from '@mui/icons-material/InsightsRounded';
 import RepeatRoundedIcon from '@mui/icons-material/RepeatRounded';
 import StarsRoundedIcon from '@mui/icons-material/StarsRounded';
@@ -43,6 +44,7 @@ export interface StrategicInsights {
     donations: number;
     campaigns: number;
     averageGift: number;
+    sharePct: number;
   };
   generatedAt: string;
 }
@@ -63,10 +65,11 @@ interface InsightMetricProps {
   label: string;
   value: string;
   detail: string;
+  helpText?: string;
   tone?: 'primary' | 'success' | 'warning' | 'info';
 }
 
-const InsightMetric = ({ icon, label, value, detail, tone = 'primary' }: InsightMetricProps) => {
+const InsightMetric = ({ icon, label, value, detail, helpText, tone = 'primary' }: InsightMetricProps) => {
   const theme = useTheme();
   const color = theme.palette[tone].main;
 
@@ -76,7 +79,31 @@ const InsightMetric = ({ icon, label, value, detail, tone = 'primary' }: Insight
         <Box sx={{ width: 38, height: 38, display: 'grid', placeItems: 'center', borderRadius: 2.5, color, bgcolor: alpha(color, 0.1), flexShrink: 0 }}>
           {icon}
         </Box>
-        <Typography variant="body2" color="text.secondary" fontWeight={600}>{label}</Typography>
+        <Stack direction="row" spacing={0.75} alignItems="center" minWidth={0}>
+          <Typography variant="body2" color="text.secondary" fontWeight={600}>{label}</Typography>
+          {helpText && (
+            <Tooltip title={helpText} arrow>
+              <Box
+                component="span"
+                tabIndex={0}
+                aria-label={helpText}
+                sx={{
+                  display: 'grid',
+                  placeItems: 'center',
+                  width: 44,
+                  height: 44,
+                  ml: -1,
+                  color: 'text.secondary',
+                  cursor: 'help',
+                  borderRadius: 1,
+                  '&:focus-visible': { outline: `2px solid ${theme.palette.primary.main}`, outlineOffset: 2 },
+                }}
+              >
+                <InfoOutlinedIcon sx={{ fontSize: 16 }} />
+              </Box>
+            </Tooltip>
+          )}
+        </Stack>
       </Stack>
       <Typography variant="h3" sx={{ mb: 0.75 }}>{value}</Typography>
       <Typography variant="body2" color="text.secondary">{detail}</Typography>
@@ -107,6 +134,10 @@ export const StrategicInsightsPanel = ({ data, loading, error }: Props) => {
   const MomentumIcon = momentumPositive ? TrendingUpRoundedIcon : TrendingDownRoundedIcon;
   const momentumTone = momentumPositive ? 'success' : 'warning';
   const signedChange = `${data.period.amountChangePct > 0 ? '+' : ''}${data.period.amountChangePct.toFixed(1)}%`;
+  const generatedAt = new Date(data.generatedAt);
+  const updatedLabel = Number.isNaN(generatedAt.getTime())
+    ? 'Updated recently'
+    : `Updated ${new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(generatedAt)}`;
 
   return (
     <Paper sx={{ overflow: 'hidden' }}>
@@ -120,7 +151,7 @@ export const StrategicInsightsPanel = ({ data, loading, error }: Props) => {
             Signals for growth, retention and campaign planning.
           </Typography>
         </Box>
-        <Chip size="small" variant="outlined" label="Derived from synced Airtable data" />
+        <Chip size="small" variant="outlined" label={updatedLabel} />
       </Box>
 
       <Divider />
@@ -128,7 +159,7 @@ export const StrategicInsightsPanel = ({ data, loading, error }: Props) => {
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', xl: 'repeat(4, 1fr)' }, '& > *:not(:last-child)': { borderBottom: { xs: `1px solid ${theme.palette.divider}`, xl: 0 } }, '& > *:nth-of-type(odd)': { borderRight: { sm: `1px solid ${theme.palette.divider}`, xl: 0 } }, '& > * + *': { borderLeft: { xl: `1px solid ${theme.palette.divider}` } } }}>
         <InsightMetric
           icon={<MomentumIcon fontSize="small" />}
-          label="30-day momentum"
+          label="Last 30 days vs prior 30"
           value={signedChange}
           detail={`${currencyFormat.format(data.period.amount)} raised · average gift ${data.period.averageGiftChangePct > 0 ? '+' : ''}${data.period.averageGiftChangePct.toFixed(1)}%`}
           tone={momentumTone}
@@ -151,31 +182,30 @@ export const StrategicInsightsPanel = ({ data, loading, error }: Props) => {
           icon={<CalendarMonthRoundedIcon fontSize="small" />}
           label="Strongest weekday"
           value={data.timing.bestWeekday}
-          detail={`${currencyFormat.format(data.timing.averageDailyAmount)} average per ${data.timing.bestWeekday} · zero-revenue days included`}
+          detail={`${currencyFormat.format(data.timing.averageDailyAmount)} average · ${data.timing.averageDailyDonations.toFixed(1)} gifts per day`}
+          helpText="The weekday average includes days with no revenue so the comparison is not inflated."
           tone="info"
         />
       </Box>
 
-      <Box sx={{ mx: { xs: 2.5, md: 3 }, mb: 3, mt: 0.5, p: 2.25, borderRadius: 3, bgcolor: alpha(theme.palette.primary.main, 0.07), border: `1px solid ${alpha(theme.palette.primary.main, 0.16)}`, display: 'flex', alignItems: { xs: 'flex-start', md: 'center' }, justifyContent: 'space-between', gap: 2, flexDirection: { xs: 'column', md: 'row' } }}>
-        <Stack direction="row" spacing={1.5} alignItems="flex-start">
-          <StarsRoundedIcon color="primary" sx={{ mt: 0.25 }} />
-          <Box>
-            <Typography variant="subtitle2" fontWeight={700}>Top channel · last {data.channel.periodDays} days</Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.4 }}>
-              {data.channel.topSource} generated {currencyFormat.format(data.channel.amount)} from {numberFormat.format(data.channel.donations)} donations.
+      <Box sx={{ mx: { xs: 2.5, md: 3 }, mb: 3, mt: 0.5, p: { xs: 2.25, md: 2.5 }, borderRadius: 3, bgcolor: alpha(theme.palette.primary.main, 0.07), border: `1px solid ${alpha(theme.palette.primary.main, 0.16)}`, display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'minmax(0, 1fr) auto' }, alignItems: 'center', gap: { xs: 2.5, md: 4 } }}>
+        <Stack direction="row" spacing={1.5} alignItems="flex-start" minWidth={0}>
+          <StarsRoundedIcon color="primary" sx={{ mt: 0.25, flexShrink: 0 }} />
+          <Box minWidth={0}>
+            <Typography variant="overline" color="primary.main">Top channel · last {data.channel.periodDays} days</Typography>
+            <Typography variant="h5" sx={{ mt: 0.25 }}>{data.channel.topSource}</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+              {numberFormat.format(data.channel.donations)} gifts across {numberFormat.format(data.channel.campaigns)} campaigns · {currencyFormat.format(data.channel.averageGift)} average gift
             </Typography>
           </Box>
         </Stack>
-        <Stack direction="row" spacing={3} sx={{ pl: { xs: 4.5, md: 0 } }}>
-          <Box>
-            <Typography variant="caption" color="text.secondary">Avg. gift</Typography>
-            <Typography fontWeight={700}>{currencyFormat.format(data.channel.averageGift)}</Typography>
-          </Box>
-          <Box>
-            <Typography variant="caption" color="text.secondary">Campaigns</Typography>
-            <Typography fontWeight={700}>{numberFormat.format(data.channel.campaigns)}</Typography>
-          </Box>
-        </Stack>
+        <Box sx={{ minWidth: { md: 205 }, textAlign: { xs: 'left', md: 'right' }, pl: { xs: 4.5, md: 0 } }}>
+          <Typography variant="caption" color="text.secondary">Attributed revenue</Typography>
+          <Typography className="dashboard-data-value" variant="h3" sx={{ mt: 0.2 }}>{currencyFormat.format(data.channel.amount)}</Typography>
+          <Typography variant="caption" color="primary.main" fontWeight={700}>
+            {(data.channel.sharePct ?? 0).toFixed(1)}% of {data.channel.periodDays}-day channel revenue
+          </Typography>
+        </Box>
       </Box>
     </Paper>
   );

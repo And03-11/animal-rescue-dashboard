@@ -1,10 +1,16 @@
 """Make both legacy ``app`` and canonical ``backend.app`` imports testable."""
 
+import os
 import sys
 from pathlib import Path
 
 from fastapi_cache import FastAPICache
 from fastapi_cache.backends.inmemory import InMemoryBackend
+
+
+os.environ.setdefault(
+    "SECRET_KEY", "test-only-jwt-secret-key-32-characters-minimum"
+)
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]

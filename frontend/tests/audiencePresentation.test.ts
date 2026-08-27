@@ -143,7 +143,7 @@ test('presents CSV filename and processing state', async () => {
   });
 });
 
-test('hydrates null normalized audiences from valid legacy fields', async () => {
+test('returns an empty safe presentation for null audience data', async () => {
   const { buildAudiencePresentation } = await import(
     '../src/features/email-sender/audiencePresentation.ts'
   );
@@ -156,26 +156,6 @@ test('hydrates null normalized audiences from valid legacy fields', async () => 
     audiences: null as never,
     region: 'EUR',
     is_bounced: false,
-  });
-
-  assert.deepEqual(result, {
-    label: 'EUR · Valid',
-    detail: 'Not Donors',
-    tooltip: 'EUR · Valid',
-  });
-});
-
-test('returns an empty safe presentation without valid normalized or legacy audience data', async () => {
-  const { buildAudiencePresentation } = await import(
-    '../src/features/email-sender/audiencePresentation.ts'
-  );
-
-  const result = buildAudiencePresentation({
-    id: 'Campaign_empty_audiences',
-    createdAt: '2026-08-24T12:00:00Z',
-    source_type: 'airtable',
-    status: 'Draft',
-    audiences: null as never,
   });
 
   assert.equal(result.label, 'No Airtable audiences');

@@ -67,8 +67,17 @@ jobs:
           path: frontend/node_modules
           key: ${{ runner.os }}-node-${{ hashFiles('frontend/package-lock.json') }}
 
-      - name: Install and build frontend
+      - name: Install frontend dependencies
         run: |
           cd frontend
           npm ci
+
+      - name: Lint frontend
+        run: |
+          cd frontend
+          npm run lint:ci
+
+      - name: Build frontend
+        run: |
+          cd frontend
           npm run build

@@ -2,9 +2,10 @@
 import React from 'react';
 import { Card, CardContent, Typography, Box, List, ListItem, ListItemText, ListItemAvatar, Avatar } from '@mui/material';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
+import type { AirtableDonationProfile } from '../types/analytics.types';
 
 interface DonationSummaryCardProps {
-  airtableProfile: any;
+  airtableProfile: AirtableDonationProfile | null | undefined;
 }
 
 export const DonationSummaryCard: React.FC<DonationSummaryCardProps> = ({ airtableProfile }) => {
@@ -29,7 +30,7 @@ export const DonationSummaryCard: React.FC<DonationSummaryCardProps> = ({ airtab
         </Box>
         <Typography sx={{ mt: 2 }} color="text.secondary">History:</Typography>
         <List dense>
-          {summary.donations.map((donation: any, index: number) => (
+          {summary.donations.map((donation, index) => (
             <ListItem key={index}>
               <ListItemAvatar>
                 <Avatar sx={{ bgcolor: 'primary.light' }}>

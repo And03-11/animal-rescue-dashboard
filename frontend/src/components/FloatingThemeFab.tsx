@@ -13,7 +13,7 @@ import Brightness7Icon from '@mui/icons-material/Brightness7';
 import Brightness4Icon from '@mui/icons-material/Brightness4';
 import GrassIcon from '@mui/icons-material/Grass';
 import BoltIcon from '@mui/icons-material/Bolt';
-import { useThemeMode } from '../theme/ThemeToggleProvider';
+import { useThemeMode } from '../theme/themeModeContext';
 
 const themeOptions = [
   { key: 'light', label: 'Light', icon: <Brightness7Icon fontSize="small" /> },

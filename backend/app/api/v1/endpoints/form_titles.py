@@ -19,7 +19,7 @@ class DonationDetail(BaseModel):
     date: datetime
 
 class FormTitlesDonationsRequest(BaseModel):
-    form_title_ids: List[str] = Field(..., min_items=1)
+    form_title_ids: List[str] = Field(..., min_length=1)
     start_date: Optional[str] = None  # YYYY-MM-DD
     end_date: Optional[str] = None    # YYYY-MM-DD
     # PAGINACIÓN: Añadir parámetros opcionales al request POST

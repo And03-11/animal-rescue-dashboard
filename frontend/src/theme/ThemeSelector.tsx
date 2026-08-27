@@ -1,33 +1,20 @@
 // src/components/ThemeSelector.tsx
-import { useState, useEffect } from 'react';
-import { Select, MenuItem, FormControl, InputLabel } from '@mui/material';
-import { useThemeMode } from '../theme/ThemeToggleProvider';
+import { Select, MenuItem, FormControl, InputLabel, type SelectChangeEvent } from '@mui/material';
+import { useThemeMode, type ThemeMode } from './themeModeContext';
 
 const themeOptions = ['light', 'dark', 'lime', 'violet'] as const;
 
 export const ThemeSelector = () => {
   const { mode, setCustomMode } = useThemeMode();
-  const [theme, setTheme] = useState<string>(mode);
 
-  useEffect(() => {
-    const stored = localStorage.getItem('custom-theme');
-    if (stored && themeOptions.includes(stored as typeof themeOptions[number])) {
-      setTheme(stored);
-      setCustomMode(stored as typeof themeOptions[number]);
-    }
-  }, []);
-
-  const handleChange = (e: any) => {
-    const selected = e.target.value;
-    setTheme(selected);
-    setCustomMode(selected);
-    localStorage.setItem('custom-theme', selected);
+  const handleChange = (event: SelectChangeEvent<ThemeMode>) => {
+    setCustomMode(event.target.value as ThemeMode);
   };
 
   return (
     <FormControl variant="outlined" size="small" sx={{ minWidth: 120 }}>
       <InputLabel>Theme</InputLabel>
-      <Select value={theme} onChange={handleChange} label="Theme">
+      <Select<ThemeMode> value={mode} onChange={handleChange} label="Theme">
         {themeOptions.map((opt) => (
           <MenuItem key={opt} value={opt}>{opt.charAt(0).toUpperCase() + opt.slice(1)}</MenuItem>
         ))}

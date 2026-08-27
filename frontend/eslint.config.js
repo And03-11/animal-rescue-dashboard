@@ -19,6 +19,10 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
+      // The current application still has a typed-API migration in progress.
+      // Keep the existing explicit `any` usage visible and budgeted in CI
+      // while treating all other lint findings as blocking errors.
+      '@typescript-eslint/no-explicit-any': 'warn',
       'react-refresh/only-export-components': [
         'warn',
         { allowConstantExport: true },

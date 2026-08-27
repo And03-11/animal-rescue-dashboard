@@ -8,10 +8,11 @@ import {
 } from 'recharts';
 import { motion } from 'framer-motion';
 import dayjs from 'dayjs';
+import type { AnalyticsBreakdownItem, Donation } from '../../types/analytics.types';
 
 interface AnalyticsChartsProps {
-    chartData: any[];
-    donations?: any[];
+    chartData: AnalyticsBreakdownItem[];
+    donations?: Donation[];
 }
 
 const itemVariants = {
@@ -38,7 +39,7 @@ export const AnalyticsCharts: React.FC<AnalyticsChartsProps> = ({ chartData, don
     const trendData = useMemo(() => {
         if (!donations || donations.length === 0) return [];
 
-        const grouped = donations.reduce((acc: any, curr: any) => {
+        const grouped = donations.reduce<Record<string, number>>((acc, curr) => {
             const date = dayjs(curr.date).format('YYYY-MM-DD');
             if (!acc[date]) {
                 acc[date] = 0;

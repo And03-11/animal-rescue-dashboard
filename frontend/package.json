@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "lint:ci": "eslint . --max-warnings 10",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -19,8 +20,11 @@
     "axios": "^1.9.0",
     "dayjs": "^1.11.19",
     "framer-motion": "^12.23.6",
+    "grapesjs": "^0.22.14",
+    "grapesjs-preset-newsletter": "^1.0.2",
     "jwt-decode": "^4.0.0",
     "lodash-es": "^4.17.21",
+    "motion": "^12.42.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-router-dom": "^7.6.2",

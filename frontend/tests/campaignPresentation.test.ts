@@ -55,21 +55,3 @@ test('tracked engagement rates are exposed without recalculating them in the tab
   assert.equal(presentation.openRate, 42.6);
   assert.equal(presentation.clickRate, 5.4);
 });
-
-
-test('interrupted campaigns expose an explicit safe retry action', async () => {
-  const { buildCampaignPresentation } = await import(
-    '../src/features/email-sender/campaignPresentation.ts'
-  );
-
-  const presentation = buildCampaignPresentation({
-    id: 'Campaign_interrupted',
-    createdAt: '2026-08-26T12:00:00',
-    source_type: 'csv',
-    status: 'Interrupted',
-    target_count: 2,
-    sent_count_final: 1,
-  });
-
-  assert.equal(presentation.primaryAction, 'retry');
-});

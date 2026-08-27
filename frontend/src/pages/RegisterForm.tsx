@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Alert, Box, Button, CircularProgress, Container, IconButton, InputAdornment,
-  Paper, Stack, TextField, Typography,
+  Paper, Stack, TextField, Typography, useTheme,
 } from '@mui/material';
 import { motion } from 'framer-motion';
 import ArrowBackRoundedIcon from '@mui/icons-material/ArrowBackRounded';
@@ -11,7 +11,8 @@ import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
 import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import apiClient from '../api/axiosConfig';
-import logo from '../assets/Logo.png';
+import logoLight from '../assets/branding/animal-love-logo.svg';
+import logoDark from '../assets/branding/animal-love-logo-dark.svg';
 
 const getRequestMessage = (error: unknown, fallback: string) => {
   if (typeof error !== 'object' || error === null || !('response' in error)) return fallback;
@@ -20,6 +21,8 @@ const getRequestMessage = (error: unknown, fallback: string) => {
 };
 
 export default function RegisterForm() {
+  const theme = useTheme();
+  const interfaceLogo = theme.palette.mode === 'dark' ? logoDark : logoLight;
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -52,13 +55,12 @@ export default function RegisterForm() {
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
           <Button startIcon={<ArrowBackRoundedIcon />} color="inherit" onClick={() => navigate('/login')} sx={{ mb: 2 }}>Back to sign in</Button>
           <Paper elevation={0} sx={{ p: { xs: 3, sm: 5 } }}>
-            <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 4 }}>
-              <Box component="img" src={logo} alt="Animal Love" sx={{ width: 44, height: 44, objectFit: 'contain' }} />
-              <Box>
-                <Typography variant="h6">Animal Love</Typography>
-                <Typography variant="caption" color="text.secondary">Rescue operations</Typography>
-              </Box>
-            </Stack>
+            <Box
+              component="img"
+              src={interfaceLogo}
+              alt="Animal love Rescue Center Costa Rica"
+              sx={{ display: 'block', width: 260, maxWidth: '82%', height: 'auto', mb: 4 }}
+            />
 
             <Typography variant="overline" color="primary.main">Team access</Typography>
             <Typography variant="h2" sx={{ mt: 1, mb: 1 }}>Create your account</Typography>

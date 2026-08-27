@@ -41,17 +41,24 @@ import InboxOutlinedIcon from '@mui/icons-material/InboxOutlined';
 import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded';
 import SendOutlinedIcon from '@mui/icons-material/SendOutlined';
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
+import DesignServicesRoundedIcon from '@mui/icons-material/DesignServicesRounded';
+import FileUploadRoundedIcon from '@mui/icons-material/FileUploadRounded';
+import { Link as RouterLink } from 'react-router-dom';
 
 import apiClient from '../api/axiosConfig';
 import { EmailPreview } from '../components/EmailPreview';
 import { WorkspacePageHeader } from '../components/WorkspacePageHeader';
 import { WorkspaceStatePanel } from '../components/WorkspaceStatePanel';
 
-interface Template {
+interface TemplateSummary {
   id: number;
   name: string;
-  content: string;
   created_at: string;
+}
+
+interface Template extends TemplateSummary {
+  content: string;
+  design_json?: string | null;
 }
 
 const emptyTemplate = {
@@ -69,6 +76,9 @@ const formatCreatedAt = (value: string) => {
 
 const getApiErrorMessage = (error: unknown, fallback: string) => {
   if (!axios.isAxiosError<{ detail?: string }>(error)) return fallback;
+  if (error.code === 'ECONNABORTED') {
+    return 'The template database took too long to respond. Check the backend database connection and retry.';
+  }
   return error.response?.data?.detail || fallback;
 };
 
@@ -76,7 +86,7 @@ export default function TemplatesPage() {
   const theme = useTheme();
   const isSmallScreen = useMediaQuery(theme.breakpoints.down('sm'));
 
-  const [templates, setTemplates] = useState<Template[]>([]);
+  const [templates, setTemplates] = useState<TemplateSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -86,13 +96,14 @@ export default function TemplatesPage() {
   const [editMode, setEditMode] = useState(false);
   const [saving, setSaving] = useState(false);
   const [viewMode, setViewMode] = useState<'code' | 'preview'>('code');
+  const [loadingTemplateId, setLoadingTemplateId] = useState<number | null>(null);
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [templateToDelete, setTemplateToDelete] = useState<Template | null>(null);
+  const [templateToDelete, setTemplateToDelete] = useState<TemplateSummary | null>(null);
   const [deleting, setDeleting] = useState(false);
 
   const [sendTestDialogOpen, setSendTestDialogOpen] = useState(false);
-  const [templateToTest, setTemplateToTest] = useState<Template | null>(null);
+  const [templateToTest, setTemplateToTest] = useState<TemplateSummary | null>(null);
   const [testEmails, setTestEmails] = useState('');
   const [testSubject, setTestSubject] = useState('Test Email');
   const [sendingTest, setSendingTest] = useState(false);
@@ -100,11 +111,11 @@ export default function TemplatesPage() {
   const fetchTemplates = async () => {
     try {
       setLoading(true);
-      const response = await apiClient.get<Template[]>('/templates');
+      const response = await apiClient.get<TemplateSummary[]>('/templates', { timeout: 15_000 });
       setTemplates(response.data);
       setError('');
-    } catch {
-      setError('Templates could not be loaded. Check the connection and try again.');
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, 'Templates could not be loaded. Please try again.'));
     } finally {
       setLoading(false);
     }
@@ -114,14 +125,29 @@ export default function TemplatesPage() {
     fetchTemplates();
   }, []);
 
-  const handleOpenForm = (template?: Template) => {
-    setForm(template
-      ? { id: template.id, name: template.name, content: template.content }
-      : emptyTemplate);
-    setEditMode(Boolean(template));
-    setViewMode('code');
+  const handleOpenForm = async (template?: TemplateSummary) => {
     setError('');
-    setFormOpen(true);
+
+    if (!template) {
+      setForm(emptyTemplate);
+      setEditMode(false);
+      setViewMode('code');
+      setFormOpen(true);
+      return;
+    }
+
+    setLoadingTemplateId(template.id);
+    try {
+      const response = await apiClient.get<Template>(`/templates/${template.id}`, { timeout: 15_000 });
+      setForm({ id: response.data.id, name: response.data.name, content: response.data.content });
+      setEditMode(true);
+      setViewMode('code');
+      setFormOpen(true);
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, 'Template details could not be loaded.'));
+    } finally {
+      setLoadingTemplateId(null);
+    }
   };
 
   const handleCloseForm = () => {
@@ -160,7 +186,7 @@ export default function TemplatesPage() {
     }
   };
 
-  const handleDeleteClick = (template: Template) => {
+  const handleDeleteClick = (template: TemplateSummary) => {
     setTemplateToDelete(template);
     setError('');
     setDeleteDialogOpen(true);
@@ -182,7 +208,7 @@ export default function TemplatesPage() {
     }
   };
 
-  const handleSendTestClick = (template: Template) => {
+  const handleSendTestClick = (template: TemplateSummary) => {
     setTemplateToTest(template);
     setTestEmails('');
     setTestSubject(`Test: ${template.name}`);
@@ -215,11 +241,29 @@ export default function TemplatesPage() {
     }
   };
 
-  const templateActions = (template: Template) => (
+  const templateActions = (template: TemplateSummary) => (
     <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+      <Tooltip title="Open in Email Studio">
+        <IconButton
+          component={RouterLink}
+          to={`/email-studio?template=${template.id}`}
+          aria-label={`Open ${template.name} in Email Studio`}
+          size="small"
+          color="primary"
+        >
+          <DesignServicesRoundedIcon fontSize="small" />
+        </IconButton>
+      </Tooltip>
       <Tooltip title="Edit template">
-        <IconButton aria-label={`Edit ${template.name}`} onClick={() => handleOpenForm(template)} size="small">
-          <EditOutlinedIcon fontSize="small" />
+        <IconButton
+          aria-label={`Edit ${template.name}`}
+          onClick={() => handleOpenForm(template)}
+          size="small"
+          disabled={loadingTemplateId === template.id}
+        >
+          {loadingTemplateId === template.id
+            ? <CircularProgress size={18} />
+            : <EditOutlinedIcon fontSize="small" />}
         </IconButton>
       </Tooltip>
       <Tooltip title="Send a test">
@@ -252,7 +296,7 @@ export default function TemplatesPage() {
         title="Email templates"
         description="Create, preview and validate reusable messages before they enter a donor campaign."
         icon={<ArticleOutlinedIcon />}
-        meta={!loading && (
+        meta={!loading && !error && (
           <Chip
             size="small"
             variant="outlined"
@@ -260,9 +304,24 @@ export default function TemplatesPage() {
           />
         )}
         actions={(
-          <Button variant="contained" startIcon={<AddRoundedIcon />} onClick={() => handleOpenForm()}>
-            New template
-          </Button>
+          <Stack direction={{ xs: 'column', sm: 'row' }} gap={1}>
+            <Button
+              component={RouterLink}
+              to="/email-studio?mode=import"
+              variant="outlined"
+              startIcon={<FileUploadRoundedIcon />}
+            >
+              Import HTML
+            </Button>
+            <Button
+              component={RouterLink}
+              to="/email-studio?mode=blank"
+              variant="contained"
+              startIcon={<DesignServicesRoundedIcon />}
+            >
+              Create from scratch
+            </Button>
+          </Stack>
         )}
       />
 
@@ -294,16 +353,24 @@ export default function TemplatesPage() {
             ))}
           </Stack>
         </Paper>
-      ) : templates.length === 0 ? (
+      ) : error && templates.length === 0 ? null : templates.length === 0 ? (
         <WorkspaceStatePanel
           dashed
           icon={<InboxOutlinedIcon />}
           title="No templates yet"
           description="Create a reusable email template to keep campaign messaging consistent and easier to test."
           action={(
-            <Button variant="contained" startIcon={<AddRoundedIcon />} onClick={() => handleOpenForm()}>
-              Create first template
-            </Button>
+            <Stack direction={{ xs: 'column', sm: 'row' }} gap={1}>
+              <Button component={RouterLink} to="/email-studio?mode=blank" variant="contained" startIcon={<DesignServicesRoundedIcon />}>
+                Create from scratch
+              </Button>
+              <Button component={RouterLink} to="/email-studio?mode=import" variant="outlined" startIcon={<FileUploadRoundedIcon />}>
+                Import HTML
+              </Button>
+              <Button variant="text" startIcon={<AddRoundedIcon />} onClick={() => handleOpenForm()}>
+                Use HTML code
+              </Button>
+            </Stack>
           )}
         />
       ) : (

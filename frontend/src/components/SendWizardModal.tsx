@@ -21,11 +21,12 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import CloseIcon from '@mui/icons-material/Close';
 import dayjs, { Dayjs } from 'dayjs';
+import type { SchedulerBatchSendInput } from '../types/scheduler.types';
 
 interface SendWizardModalProps {
     open: boolean;
     onClose: () => void;
-    onSave: (sends: any[]) => Promise<void>;
+    onSave: (sends: SchedulerBatchSendInput[]) => Promise<void>;
     campaignCategory: string;
     segmentationMode: string;
 }
@@ -34,7 +35,6 @@ export const SendWizardModal: React.FC<SendWizardModalProps> = ({
     open,
     onClose,
     onSave,
-    campaignCategory: _campaignCategory,
     segmentationMode
 }) => {
     const theme = useTheme();
@@ -68,7 +68,7 @@ export const SendWizardModal: React.FC<SendWizardModalProps> = ({
     const handleSave = async () => {
         setLoading(true);
         try {
-            const sends: any[] = [];
+            const sends: SchedulerBatchSendInput[] = [];
 
             if (segmentationMode === 'bc_single') {
                 // Create 5 sends at the same time

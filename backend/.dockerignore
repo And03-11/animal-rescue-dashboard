@@ -33,7 +33,17 @@ htmlcov
 *.db
 db.sqlite3
 
-# Credentials (should be passed via env vars)
+# Credentials (must be mounted or passed via environment variables)
+.env
+.env.*
+gmail_credentials/
+credentials_account*.json
+token_*.json
+
+# Runtime-generated data
+campaign_data/
+campaign_targets/
+sent_logs/
 
 # Misc
 .DS_Store

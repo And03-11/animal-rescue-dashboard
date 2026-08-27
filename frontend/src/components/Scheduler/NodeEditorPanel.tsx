@@ -23,13 +23,14 @@ import dayjs, { Dayjs } from 'dayjs';
 import CloseIcon from '@mui/icons-material/Close';
 import SaveIcon from '@mui/icons-material/Save';
 import DeleteIcon from '@mui/icons-material/Delete';
+import type { SchedulerNodeData } from '../../types/scheduler.types';
 
 interface NodeEditorPanelProps {
     open: boolean;
-    nodeData: any;
+    nodeData: SchedulerNodeData | null;
     nodeType: 'campaign' | 'email' | null;
     onClose: () => void;
-    onSave: (newData: any) => void;
+    onSave: (newData: SchedulerNodeData) => void;
     onDelete?: () => void;
     onDuplicate?: () => void;
 }
@@ -44,7 +45,7 @@ export const NodeEditorPanel: React.FC<NodeEditorPanelProps> = ({
     onDuplicate
 }) => {
     const theme = useTheme();
-    const [formData, setFormData] = useState<any>({});
+    const [formData, setFormData] = useState<SchedulerNodeData>({});
 
     useEffect(() => {
         if (nodeData) {
@@ -52,8 +53,11 @@ export const NodeEditorPanel: React.FC<NodeEditorPanelProps> = ({
         }
     }, [nodeData]);
 
-    const handleChange = (field: string, value: any) => {
-        setFormData((prev: any) => ({ ...prev, [field]: value }));
+    const handleChange = <Key extends keyof SchedulerNodeData>(
+        field: Key,
+        value: SchedulerNodeData[Key]
+    ) => {
+        setFormData((prev) => ({ ...prev, [field]: value }));
     };
 
     const handleSave = () => {

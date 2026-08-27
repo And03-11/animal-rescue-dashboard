@@ -2,10 +2,13 @@ import { memo } from 'react';
 import { Handle, Position, type NodeProps } from 'reactflow';
 import { Box, Typography, Paper, Chip, Tooltip } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
+import type { Theme } from '@mui/material/styles';
 import EmailIcon from '@mui/icons-material/Email';
 import ScheduleIcon from '@mui/icons-material/Schedule';
+import dayjs from 'dayjs';
+import type { SchedulerNodeData } from '../../../types/scheduler.types';
 
-const getStatusColor = (status: string, theme: any) => {
+const getStatusColor = (status: string, theme: Theme) => {
     switch (status) {
         case 'sent': return theme.palette.success.main;
         case 'scheduled': return theme.palette.info.main;
@@ -15,7 +18,7 @@ const getStatusColor = (status: string, theme: any) => {
     }
 };
 
-const EmailNode = ({ data, isConnectable }: NodeProps) => {
+const EmailNode = ({ data, isConnectable }: NodeProps<SchedulerNodeData>) => {
     const theme = useTheme();
     const statusColor = getStatusColor(data.status || 'pending', theme);
 
@@ -92,7 +95,7 @@ const EmailNode = ({ data, isConnectable }: NodeProps) => {
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'text.secondary' }}>
                         <ScheduleIcon sx={{ fontSize: 14 }} />
                         <Typography variant="caption">
-                            {data.sendDate ? new Date(data.sendDate).toLocaleString('en-GB', {
+                            {data.sendDate ? dayjs(data.sendDate).toDate().toLocaleString('en-GB', {
                                 day: 'numeric',
                                 month: 'numeric',
                                 year: '2-digit',

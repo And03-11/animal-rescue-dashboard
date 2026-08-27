@@ -8,7 +8,8 @@ import psycopg2
 from psycopg2 import pool
 from psycopg2.extras import RealDictCursor
 from typing import Optional, List, Dict, Any
-from datetime import datetime, date
+from datetime import datetime, date, timedelta, timezone
+from uuid import UUID
 from dotenv import load_dotenv
 from backend.app.core.funnel_email_config import get_verified_new_comer_tags
 
@@ -539,6 +540,7 @@ class SupabaseService:
             SELECT
                 COALESCE(c.source, 'Unknown') AS source,
                 COALESCE(SUM(d.amount), 0) AS total_amount,
+                COALESCE(SUM(SUM(d.amount)) OVER (), 0) AS overall_amount,
                 COUNT(d.id) AS donation_count,
                 COUNT(DISTINCT c.id) AS campaign_count
             FROM campaigns c
@@ -566,6 +568,7 @@ class SupabaseService:
         donors_with_gifts = int(audience.get('donors_with_gifts') or 0)
         repeat_donors = int(audience.get('repeat_donors') or 0)
         channel_amount = float(channel.get('total_amount') or 0)
+        channel_overall_amount = float(channel.get('overall_amount') or 0)
         channel_count = int(channel.get('donation_count') or 0)
 
         return {
@@ -602,6 +605,7 @@ class SupabaseService:
                 "donations": channel_count,
                 "campaigns": int(channel.get('campaign_count') or 0),
                 "averageGift": round(channel_amount / channel_count, 2) if channel_count else 0,
+                "sharePct": round((channel_amount / channel_overall_amount) * 100, 1) if channel_overall_amount else 0,
             },
             "generatedAt": datetime.now().isoformat(),
         }
@@ -1249,26 +1253,59 @@ class SupabaseService:
 
     def get_shared_view(self, token: str) -> Optional[Dict[str, Any]]:
         """
-        Get a shared view configuration by token.
+        Get an active, non-expired shared view configuration by token.
         """
+        try:
+            UUID(token)
+        except (TypeError, ValueError, AttributeError):
+            return None
+
         query = """
-            SELECT configuration, is_active
+            SELECT configuration, is_active, created_at
             FROM analytics_shared_views
             WHERE token = %s
         """
-        
-        # We need to cast token to UUID in the query if it's passed as string, 
-        # but psycopg2 usually handles it if the column is UUID.
-        # However, to be safe against invalid UUID strings, we should try/catch or validate.
+
         try:
             result = self._execute_one(query, (token,))
-            
-            if result and result['is_active']:
-                return result['configuration']
+            if not result or not result['is_active']:
+                return None
+
+            created_at = result.get('created_at')
+            if isinstance(created_at, str):
+                created_at = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+            if not isinstance(created_at, datetime):
+                return None
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+
+            ttl_days = max(1, int(os.getenv("SHARED_VIEW_TTL_DAYS", "30")))
+            if datetime.now(timezone.utc) - created_at > timedelta(days=ttl_days):
+                return None
+
+            return result['configuration']
+        except (ValueError, TypeError, psycopg2.Error):
             return None
-        except Exception as e:
-            print(f"Error fetching shared view {token}: {e}")
-            return None
+
+    def revoke_shared_view(self, token: str, revoked_by: str) -> bool:
+        """Deactivate a shared view, restricted to the user who created it."""
+        try:
+            UUID(token)
+        except (TypeError, ValueError, AttributeError):
+            return False
+
+        query = """
+            UPDATE analytics_shared_views
+            SET is_active = FALSE
+            WHERE token = %s
+              AND created_by = %s
+              AND is_active = TRUE
+            RETURNING token
+        """
+        try:
+            return self._execute_one(query, (token, revoked_by)) is not None
+        except psycopg2.Error:
+            return False
 
     def close(self):
         """Close database connection"""

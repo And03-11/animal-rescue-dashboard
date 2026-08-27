@@ -3,49 +3,58 @@ import {
   Box, Drawer, List, ListItem, ListItemButton,
   ListItemIcon, ListItemText, Toolbar,
   useMediaQuery, AppBar, IconButton, Typography,
-  Avatar, Tooltip, useTheme, Divider, Menu, MenuItem
+  Avatar, Tooltip, useTheme, Divider, Menu, MenuItem,
+  Button, Chip, alpha,
 } from '@mui/material';
 import { Link as RouterLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'motion/react';
 
 // Icons
 import HomeRoundedIcon from '@mui/icons-material/HomeRounded';
 import AnalyticsRoundedIcon from '@mui/icons-material/AnalyticsRounded';
 import CompareArrowsRoundedIcon from '@mui/icons-material/CompareArrowsRounded';
 import PersonSearchRoundedIcon from '@mui/icons-material/PersonSearchRounded';
-import EventNoteRoundedIcon from '@mui/icons-material/EventNoteRounded';
 import EmailRoundedIcon from '@mui/icons-material/EmailRounded';
 import ArticleRoundedIcon from '@mui/icons-material/ArticleRounded'; // For Templates
-import ManageSearchRoundedIcon from '@mui/icons-material/ManageSearchRounded'; // For Template Search
 import FilterAltRoundedIcon from '@mui/icons-material/FilterAltRounded'; // For Funnel
 import SettingsRoundedIcon from '@mui/icons-material/SettingsRounded'; // ✅ Nuevo icono
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded';
 import MenuIcon from '@mui/icons-material/Menu';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import SearchRoundedIcon from '@mui/icons-material/SearchRounded';
+import FiberManualRecordRoundedIcon from '@mui/icons-material/FiberManualRecordRounded';
 
-import logo from '../assets/Logo.png';
 import { DarkModeToggleButton } from './DarkModeToggleButton';
 import { logout } from '../auth';
+import { useWebSocket } from '../context/webSocketContext';
+import logoLight from '../assets/branding/animal-love-logo.svg';
+import logoDark from '../assets/branding/animal-love-logo-dark.svg';
+import brandMark from '../assets/branding/animal-love-mark.svg';
+import { sidebarSections, type SidebarIconName } from '../navigation/sidebarNavigation';
 
-const DRAWER_WIDTH = 260;
-const COLLAPSED_DRAWER_WIDTH = 72;
+const DRAWER_WIDTH = 280;
+const COLLAPSED_DRAWER_WIDTH = 80;
 
 const routeLabels: Record<string, { title: string; eyebrow: string }> = {
-  '/dashboard': { title: 'Dashboard', eyebrow: 'Overview' },
+  '/dashboard': { title: 'Impact overview', eyebrow: 'Mission control' },
   '/funnel': { title: 'New Comer Funnel', eyebrow: 'CRM' },
   '/analytics': { title: 'Campaign Analytics', eyebrow: 'Insights' },
   '/comparison': { title: 'Campaign Comparison', eyebrow: 'Insights' },
   '/contact-search': { title: 'Contact Search', eyebrow: 'CRM' },
   '/email-sender': { title: 'Email Campaigns', eyebrow: 'Email Marketing' },
   '/templates': { title: 'Templates', eyebrow: 'Email Marketing' },
+  '/email-studio': { title: 'Email Studio', eyebrow: 'Email Marketing' },
   '/template-search': { title: 'Template Search', eyebrow: 'Email Marketing' },
   '/settings': { title: 'Settings', eyebrow: 'Workspace' },
 };
 
 export const Layout: React.FC = () => {
   const theme = useTheme();
+  const brandLogo = theme.palette.mode === 'dark' ? logoDark : logoLight;
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const reduceMotion = Boolean(useReducedMotion());
+  const { isConnected } = useWebSocket();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const location = useLocation();
@@ -53,7 +62,7 @@ export const Layout: React.FC = () => {
   const currentRoute = routeLabels[location.pathname] ?? (
     location.pathname.startsWith('/campaign/')
       ? { title: 'Campaign Details', eyebrow: 'Insights' }
-      : { title: 'Animal Love', eyebrow: 'Operations' }
+      : { title: 'Animal love', eyebrow: 'Operations' }
   );
 
   // Profile Menu State
@@ -82,62 +91,57 @@ export const Layout: React.FC = () => {
     logout();
   };
 
-  // Menu sections for organized navigation
-  const menuSections = [
-    {
-      title: 'CRM',
-      items: [
-        { text: 'Dashboard', icon: <HomeRoundedIcon />, path: '/dashboard' },
-        { text: 'New Comer Funnel', icon: <FilterAltRoundedIcon />, path: '/funnel' },
-        { text: 'Analytics', icon: <AnalyticsRoundedIcon />, path: '/analytics' },
-        { text: 'Comparison', icon: <CompareArrowsRoundedIcon />, path: '/comparison' },
-        { text: 'Contacts', icon: <PersonSearchRoundedIcon />, path: '/contact-search' },
-      ]
-    },
-    {
-      title: 'Email Marketing',
-      items: [
-        { text: 'Scheduler', icon: <EventNoteRoundedIcon />, path: '/scheduler' },
-        { text: 'Email', icon: <EmailRoundedIcon />, path: '/email-sender' },
-        { text: 'Templates', icon: <ArticleRoundedIcon />, path: '/templates' },
-        { text: 'Template Search', icon: <ManageSearchRoundedIcon />, path: '/template-search' },
-      ]
-    }
-  ];
+  const sidebarIcons: Record<SidebarIconName, React.ReactNode> = {
+    dashboard: <HomeRoundedIcon />,
+    funnel: <FilterAltRoundedIcon />,
+    analytics: <AnalyticsRoundedIcon />,
+    comparison: <CompareArrowsRoundedIcon />,
+    contacts: <PersonSearchRoundedIcon />,
+    email: <EmailRoundedIcon />,
+    templates: <ArticleRoundedIcon />,
+  };
 
   const drawerContent = (
     <Box sx={{
       height: '100%',
       display: 'flex',
       flexDirection: 'column',
-      background: 'background.paper'
+      background: theme.palette.mode === 'dark'
+        ? `linear-gradient(180deg, ${alpha(theme.palette.background.paper, 0.98)}, ${theme.palette.background.default})`
+        : `linear-gradient(180deg, ${theme.palette.background.paper}, ${alpha(theme.palette.primary.main, 0.025)})`
     }}>
       <Toolbar sx={{
         display: 'flex',
         alignItems: 'center',
         justifyContent: collapsed ? 'center' : 'space-between',
         px: 2,
-        minHeight: '80px !important',
+        minHeight: '88px !important',
         flexDirection: collapsed ? 'column' : 'row',
         gap: collapsed ? 1 : 0,
         py: collapsed ? 2 : 0
       }}>
         {!collapsed && (
           <motion.div
-            initial={{ opacity: 0 }}
+            initial={reduceMotion ? false : { opacity: 0 }}
             animate={{ opacity: 1 }}
-            transition={{ duration: 0.5 }}
+            transition={{ duration: reduceMotion ? 0 : 0.3 }}
           >
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
-              <Box component="img" src={logo} alt="Animal Love" sx={{ width: 36, height: 36, objectFit: 'contain' }} />
-              <Box>
-                <Typography sx={{ fontWeight: 700, lineHeight: 1.1, letterSpacing: '-0.02em' }}>Animal Love</Typography>
-                <Typography variant="caption" color="text.secondary">Rescue operations</Typography>
-              </Box>
-            </Box>
+            <Box
+              component="img"
+              src={brandLogo}
+              alt="Animal love Rescue Center Costa Rica"
+              sx={{ display: 'block', width: 178, height: 'auto' }}
+            />
           </motion.div>
         )}
-        {collapsed && <Box component="img" src={logo} alt="Animal Love" sx={{ width: 32, height: 32, objectFit: 'contain' }} />}
+        {collapsed && (
+          <Box
+            component="img"
+            src={brandMark}
+            alt="Animal love"
+            sx={{ display: 'block', width: 44, height: 44, objectFit: 'contain' }}
+          />
+        )}
 
         {!isMobile && (
           <IconButton onClick={() => setCollapsed(!collapsed)} size="small">
@@ -146,15 +150,15 @@ export const Layout: React.FC = () => {
         )}
       </Toolbar>
 
-      <Box sx={{ px: 1.5, flexGrow: 1, overflowY: 'auto' }}>
-        {menuSections.map((section, sectionIndex) => (
+      <Box sx={{ px: 1.5, flexGrow: 1, overflowY: 'auto', scrollbarWidth: 'thin' }}>
+        {sidebarSections.map((section, sectionIndex) => (
           <Box key={section.title}>
             {/* Section Header */}
             {!collapsed && (
               <Typography
                 variant="overline"
                 color="text.secondary"
-                sx={{ fontWeight: 700, letterSpacing: 1.2, px: 1, mt: sectionIndex > 0 ? 2 : 0, display: 'block' }}
+                sx={{ fontWeight: 700, letterSpacing: 1.25, px: 1.25, mt: sectionIndex > 0 ? 2.5 : 0, mb: 0.75, display: 'block' }}
               >
                 {section.title}
               </Typography>
@@ -170,20 +174,22 @@ export const Layout: React.FC = () => {
                       <ListItemButton
                         component={RouterLink}
                         to={item.path}
+                        onClick={() => isMobile && setMobileOpen(false)}
                         sx={{
-                          minHeight: 44,
+                          minHeight: 46,
                           justifyContent: collapsed ? 'center' : 'initial',
                           px: 2,
-                          borderRadius: '10px',
+                          borderRadius: '13px',
                           backgroundColor: isActive ? 'action.selected' : 'transparent',
                           color: isActive ? 'primary.main' : 'text.primary',
                           position: 'relative',
                           '&::before': isActive ? {
-                            content: '""', position: 'absolute', left: 5, width: 3, height: 20,
+                            content: '""', position: 'absolute', left: 4, width: 3, height: 22,
                             borderRadius: 3, bgcolor: 'primary.main',
                           } : undefined,
                           '&:hover': {
                             backgroundColor: 'action.hover',
+                            transform: collapsed ? 'none' : 'translateX(2px)',
                           },
                           transition: 'all 0.2s ease-in-out',
                         }}
@@ -196,7 +202,7 @@ export const Layout: React.FC = () => {
                             color: isActive ? 'inherit' : 'text.secondary',
                           }}
                         >
-                          {item.icon}
+                          {sidebarIcons[item.icon]}
                         </ListItemIcon>
                         {!collapsed && (
                           <ListItemText
@@ -218,12 +224,13 @@ export const Layout: React.FC = () => {
       </Box>
 
       {/* ✅ Logout button at bottom of sidebar remains as quick access */}
-      <Box sx={{ p: 2 }}>
-        <Divider sx={{ mb: 2 }} />
+      <Box sx={{ p: 1.5 }}>
+        <Divider sx={{ mb: 1.25 }} />
         <ListItemButton
           onClick={handleLogout}
           sx={{
-            borderRadius: '12px',
+            minHeight: 44,
+            borderRadius: '13px',
             justifyContent: collapsed ? 'center' : 'initial',
             color: 'error.main',
             '&:hover': { backgroundColor: 'rgba(200,71,71,0.09)' }
@@ -247,7 +254,8 @@ export const Layout: React.FC = () => {
         sx={{
           width: { md: `calc(100% - ${collapsed ? COLLAPSED_DRAWER_WIDTH : DRAWER_WIDTH}px)` },
           ml: { md: `${collapsed ? COLLAPSED_DRAWER_WIDTH : DRAWER_WIDTH}px` },
-          bgcolor: 'background.default',
+          bgcolor: alpha(theme.palette.background.default, 0.84),
+          backdropFilter: 'blur(18px) saturate(140%)',
           boxShadow: 'none',
           borderBottom: '1px solid',
           borderColor: 'divider',
@@ -257,7 +265,7 @@ export const Layout: React.FC = () => {
           }),
         }}
       >
-        <Toolbar sx={{ minHeight: { xs: 64, md: 72 }, px: { xs: 2, md: 3 } }}>
+        <Toolbar sx={{ minHeight: { xs: 64, md: 76 }, px: { xs: 2, md: 3.5 } }}>
           <IconButton
             color="inherit"
             aria-label="open drawer"
@@ -277,7 +285,29 @@ export const Layout: React.FC = () => {
             </Typography>
           </Box>
 
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, color: 'text.primary' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 0.75, sm: 1.25 }, color: 'text.primary' }}>
+            <Chip
+              size="small"
+              icon={<FiberManualRecordRoundedIcon />}
+              label={isConnected ? 'Live' : 'Offline'}
+              variant="outlined"
+              sx={{
+                display: { xs: 'none', lg: 'inline-flex' },
+                color: isConnected ? 'success.main' : 'text.secondary',
+                borderColor: alpha(isConnected ? theme.palette.success.main : theme.palette.text.secondary, 0.28),
+                '& .MuiChip-icon': { color: 'inherit', fontSize: 10 },
+              }}
+            />
+            <Button
+              component={RouterLink}
+              to="/contact-search"
+              color="inherit"
+              variant="outlined"
+              startIcon={<SearchRoundedIcon />}
+              sx={{ display: { xs: 'none', sm: 'inline-flex' }, borderColor: 'divider', color: 'text.secondary', bgcolor: alpha(theme.palette.background.paper, 0.62) }}
+            >
+              Find donor
+            </Button>
             <DarkModeToggleButton />
 
             {/* ✅ Profile Menu Trigger */}
@@ -403,14 +433,14 @@ export const Layout: React.FC = () => {
           px: { xs: 2, sm: 3, xl: 4 },
           py: { xs: 2.5, md: 3.5 },
           width: { md: `calc(100% - ${collapsed ? COLLAPSED_DRAWER_WIDTH : DRAWER_WIDTH}px)` },
-          mt: { xs: 8, md: 9 },
+          mt: { xs: 8, md: 9.5 },
           transition: theme.transitions.create('width', {
             easing: theme.transitions.easing.sharp,
             duration: theme.transitions.duration.enteringScreen,
           }),
         }}
       >
-        <Box sx={{ mx: 'auto', width: '100%', maxWidth: 1440 }}>
+        <Box sx={{ mx: 'auto', width: '100%', maxWidth: 1540 }}>
           <Outlet />
         </Box>
       </Box>

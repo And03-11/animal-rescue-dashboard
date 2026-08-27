@@ -109,8 +109,7 @@ export const CampaignDetailsPanel: React.FC<CampaignDetailsPanelProps> = ({
         return colors[category] || '#5D4037';
     };
 
-    const getServiceColor = (service: any) => {
-        if (typeof service !== 'string') return '#757575';
+    const getServiceColor = (service: string) => {
         const colors: Record<string, string> = {
             'Mailchimp': '#fbb254',
             'Brevo': '#0b996e',

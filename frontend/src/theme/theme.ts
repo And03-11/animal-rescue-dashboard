@@ -6,32 +6,32 @@ export const prefersDarkMode = Boolean(
   window.matchMedia?.('(prefers-color-scheme: dark)').matches,
 );
 
-const fontStack = 'Inter, Manrope, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+const fontStack = 'Manrope, Inter, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
 
 const brandPalettes = {
   light: {
     primary: '#087A70',
-    primaryLight: '#14A395',
+    primaryLight: '#19A995',
     primaryDark: '#075E57',
-    secondary: '#B5652A',
-    canvas: '#F4F7F6',
+    secondary: '#D96F45',
+    canvas: '#F1F6F3',
     paper: '#FFFFFF',
-    raised: '#F8FAF9',
-    text: '#17211F',
-    muted: '#60706C',
-    divider: '#DCE5E2',
+    raised: '#F7FAF8',
+    text: '#14201D',
+    muted: '#62736D',
+    divider: '#DCE8E3',
   },
   dark: {
-    primary: '#4FD1C2',
-    primaryLight: '#81E6D9',
-    primaryDark: '#2AA89C',
-    secondary: '#E6A066',
-    canvas: '#0C1211',
-    paper: '#131B19',
-    raised: '#192321',
+    primary: '#54D6BD',
+    primaryLight: '#8DE8D5',
+    primaryDark: '#2BAF98',
+    secondary: '#FF9A6A',
+    canvas: '#07110E',
+    paper: '#0E1916',
+    raised: '#14231E',
     text: '#F3F8F6',
-    muted: '#9AAEAA',
-    divider: '#293633',
+    muted: '#9BAEA7',
+    divider: '#24362F',
   },
 } as const;
 
@@ -66,7 +66,7 @@ const makeTheme = (mode: PaletteMode, primaryOverride?: string) => {
     },
     typography: {
       fontFamily: fontStack,
-      h1: { fontSize: '2.25rem', lineHeight: 1.15, fontWeight: 700, letterSpacing: '-0.035em' },
+      h1: { fontSize: '2.5rem', lineHeight: 1.08, fontWeight: 700, letterSpacing: '-0.045em' },
       h2: { fontSize: '1.875rem', lineHeight: 1.2, fontWeight: 700, letterSpacing: '-0.03em' },
       h3: { fontSize: '1.5rem', lineHeight: 1.25, fontWeight: 700, letterSpacing: '-0.025em' },
       h4: { fontSize: '1.25rem', lineHeight: 1.3, fontWeight: 650, letterSpacing: '-0.015em' },
@@ -78,7 +78,7 @@ const makeTheme = (mode: PaletteMode, primaryOverride?: string) => {
       overline: { fontSize: '0.6875rem', lineHeight: 1.5, fontWeight: 700, letterSpacing: '0.1em' },
       button: { fontWeight: 650, letterSpacing: '-0.005em', textTransform: 'none' },
     },
-    shape: { borderRadius: 14 },
+    shape: { borderRadius: 16 },
     shadows: [
       'none',
       `0 1px 2px ${alpha('#000', isDark ? 0.24 : 0.05)}, 0 8px 24px ${alpha('#000', isDark ? 0.16 : 0.04)}`,
@@ -94,8 +94,8 @@ const makeTheme = (mode: PaletteMode, primaryOverride?: string) => {
             minWidth: 320,
             backgroundColor: colors.canvas,
             backgroundImage: isDark
-              ? `radial-gradient(circle at 15% -10%, ${alpha(primary, 0.08)}, transparent 32rem)`
-              : `linear-gradient(180deg, ${colors.raised} 0, ${colors.canvas} 28rem)`,
+              ? `radial-gradient(circle at 18% -8%, ${alpha(primary, 0.11)}, transparent 34rem), radial-gradient(circle at 92% 18%, ${alpha(colors.secondary, 0.055)}, transparent 30rem)`
+              : `radial-gradient(circle at 16% -8%, ${alpha(primary, 0.09)}, transparent 32rem), linear-gradient(180deg, ${colors.raised} 0, ${colors.canvas} 30rem)`,
             backgroundAttachment: 'fixed',
             scrollbarColor: `${alpha(colors.muted, 0.45)} transparent`,
           },
@@ -121,14 +121,14 @@ const makeTheme = (mode: PaletteMode, primaryOverride?: string) => {
       MuiPaper: {
         styleOverrides: {
           root: { backgroundImage: 'none', border: `1px solid ${colors.divider}` },
-          rounded: { borderRadius: 18 },
+          rounded: { borderRadius: 20 },
           elevation0: { boxShadow: 'none' },
           elevation1: { boxShadow: isDark ? '0 1px 0 rgba(255,255,255,0.025) inset' : '0 1px 2px rgba(15,35,30,0.025)' },
         },
       },
       MuiCard: {
         styleOverrides: {
-          root: { borderRadius: 18, border: `1px solid ${colors.divider}`, boxShadow: 'none', backgroundImage: `linear-gradient(180deg, ${alpha(colors.raised, 0.72)}, ${colors.paper} 36%)` },
+          root: { borderRadius: 20, border: `1px solid ${colors.divider}`, boxShadow: 'none', backgroundImage: `linear-gradient(180deg, ${alpha(colors.raised, 0.78)}, ${colors.paper} 42%)` },
         },
       },
       MuiCardContent: { styleOverrides: { root: { padding: 24, '&:last-child': { paddingBottom: 24 } } } },

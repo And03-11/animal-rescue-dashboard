@@ -102,21 +102,25 @@ export default function TemplateSearchPage() {
   const [results, setResults] = useState<TemplateResult[]>([]);
   const [resultCount, setResultCount] = useState<number | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
+  const [activeQuery, setActiveQuery] = useState<string | null>(null);
   const [snackbar, setSnackbar] = useState<string | null>(null);
 
-  const handleSearch = useCallback(async () => {
-    const trimmed = query.trim();
+  const handleSearch = useCallback(async (queryOverride?: string) => {
+    const trimmed = (queryOverride ?? query).trim();
 
     setLoading(true);
     setError("");
     setResults([]);
     setResultCount(null);
-    setHasSearched(true);
+    setHasSearched(false);
+    setActiveQuery(null);
 
     try {
       const res = await apiClient.post<SearchResponse>("/template-search", { query: trimmed });
       setResults(res.data.results);
       setResultCount(res.data.count);
+      setActiveQuery(trimmed);
+      setHasSearched(true);
     } catch (err: unknown) {
       setError(getSearchErrorMessage(err));
     } finally {
@@ -190,14 +194,16 @@ export default function TemplateSearchPage() {
             <Button
               id="template-search-button"
               variant="contained"
-              onClick={handleSearch}
+              onClick={() => handleSearch()}
               disabled={loading}
               sx={{
                 minWidth: { sm: 132 },
                 minHeight: 48,
               }}
             >
-              {loading ? <CircularProgress size={24} color="inherit" /> : "Search"}
+              {loading
+                ? <CircularProgress size={24} color="inherit" />
+                : query.trim() ? "Search" : "Browse all"}
             </Button>
           </Stack>
         </Stack>
@@ -244,7 +250,7 @@ export default function TemplateSearchPage() {
       )}
 
       {/* --- Results Header --- */}
-      {!loading && resultCount !== null && (
+      {!loading && !error && resultCount !== null && (
         <Fade in>
           <Box
             sx={{
@@ -261,7 +267,7 @@ export default function TemplateSearchPage() {
                 : "No templates found"}
             </Typography>
               <Chip
-                label={query.trim() ? `Query: "${query}"` : "All Templates"}
+                label={activeQuery ? `Query: "${activeQuery}"` : "All templates"}
                 variant="outlined"
                 size="small"
                 onDelete={() => {
@@ -269,6 +275,7 @@ export default function TemplateSearchPage() {
                   setResults([]);
                   setResultCount(null);
                   setHasSearched(false);
+                  setActiveQuery(null);
                 }}
                 sx={{ maxWidth: 300 }}
               />
@@ -276,17 +283,23 @@ export default function TemplateSearchPage() {
         </Fade>
       )}
 
-      {!loading && hasSearched && results.length === 0 && (
+      {!loading && !error && hasSearched && results.length === 0 && (
         <Fade in>
           <Box>
             <WorkspaceStatePanel
               icon={<SearchRoundedIcon />}
-              title="No close matches"
-              description={query.trim()
+              title={activeQuery ? "No close matches" : "No templates available"}
+              description={activeQuery
                 ? "Try a broader need, species or campaign goal. Shorter descriptions often produce better matches."
                 : "The template library is currently empty."}
-              action={query.trim() ? (
-                <Button variant="outlined" onClick={() => setQuery("")}>
+              action={activeQuery ? (
+                <Button variant="outlined" onClick={() => {
+                  setQuery("");
+                  setResults([]);
+                  setResultCount(null);
+                  setHasSearched(false);
+                  setActiveQuery(null);
+                }}>
                   Clear search
                 </Button>
               ) : undefined}
@@ -296,7 +309,7 @@ export default function TemplateSearchPage() {
       )}
 
       {/* --- Initial State --- */}
-      {!loading && !hasSearched && (
+      {!loading && !error && !hasSearched && (
         <Fade in>
           <Box>
             <WorkspaceStatePanel
@@ -305,7 +318,7 @@ export default function TemplateSearchPage() {
               title="Explore the message library"
               description="Search by animal, diagnosis, urgency or donor action. You can also load every template to browse the full collection."
               action={(
-                <Button variant="outlined" onClick={() => handleSearch()} startIcon={<SearchRoundedIcon />}>
+                <Button variant="outlined" onClick={() => handleSearch("")} startIcon={<SearchRoundedIcon />}>
                   Browse all templates
                 </Button>
               )}
@@ -315,7 +328,7 @@ export default function TemplateSearchPage() {
       )}
 
       {/* --- Results List --- */}
-      {!loading && results.length > 0 && (
+      {!loading && !error && results.length > 0 && (
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
           {results.map((template) => (
             <Fade in key={template.id} timeout={200}>
@@ -334,14 +347,16 @@ export default function TemplateSearchPage() {
               >
                 <Box sx={{ display: "flex", alignItems: "stretch" }}>
                   {/* Similarity Score Bar */}
-                  <Box
-                    sx={{
-                      width: 6,
-                      minHeight: "100%",
-                      backgroundColor: theme.palette[getSimilarityTone(template.similarity)].main,
-                      flexShrink: 0,
-                    }}
-                  />
+                  {activeQuery && (
+                    <Box
+                      sx={{
+                        width: 6,
+                        minHeight: "100%",
+                        backgroundColor: theme.palette[getSimilarityTone(template.similarity)].main,
+                        flexShrink: 0,
+                      }}
+                    />
+                  )}
 
                   {/* Content */}
                   <Box
@@ -368,20 +383,22 @@ export default function TemplateSearchPage() {
                         >
                           {template.title}
                         </Typography>
-                        <Chip
-                          size="small"
-                          label={`${getSimilarityPercent(template.similarity)}% match`}
-                          sx={{
-                            fontWeight: 700,
-                            fontSize: "0.7rem",
-                            height: 22,
-                            backgroundColor: alpha(theme.palette[getSimilarityTone(template.similarity)].main, 0.12),
-                            color: theme.palette[getSimilarityTone(template.similarity)].main,
-                            border: "1px solid",
-                            borderColor: alpha(theme.palette[getSimilarityTone(template.similarity)].main, 0.28),
-                            flexShrink: 0,
-                          }}
-                        />
+                        {activeQuery && (
+                          <Chip
+                            size="small"
+                            label={`${getSimilarityPercent(template.similarity)}% match`}
+                            sx={{
+                              fontWeight: 700,
+                              fontSize: "0.7rem",
+                              height: 22,
+                              backgroundColor: alpha(theme.palette[getSimilarityTone(template.similarity)].main, 0.12),
+                              color: theme.palette[getSimilarityTone(template.similarity)].main,
+                              border: "1px solid",
+                              borderColor: alpha(theme.palette[getSimilarityTone(template.similarity)].main, 0.28),
+                              flexShrink: 0,
+                            }}
+                          />
+                        )}
                       </Box>
 
                       {/* Summary */}

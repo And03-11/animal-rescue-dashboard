@@ -24,10 +24,15 @@ if not SQLALCHEMY_DATABASE_URL:
 else:
     # Configuración para PostgreSQL
     print("✅ Connecting to Supabase PostgreSQL...")
-    connect_args = {} # PostgreSQL no necesita check_same_thread
+    connect_args = {
+        # Keep API requests bounded when DNS or Supabase is unavailable.
+        "connect_timeout": int(os.getenv("DB_CONNECT_TIMEOUT_SECONDS", "8")),
+    }
 
 engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args=connect_args
+    SQLALCHEMY_DATABASE_URL,
+    connect_args=connect_args,
+    pool_pre_ping=True,
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()

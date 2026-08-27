@@ -27,95 +27,49 @@ async def check_and_launch_scheduled_campaigns():
     try:
         # Import here to avoid circular imports
         from backend.app.services.email_sender_service import get_email_sender_service
-        from backend.app.api.v1.endpoints.email_sender import (
-            _get_campaign_storage,
-            prepare_campaign_launch,
-            run_campaign_task,
-        )
-        
+        from backend.app.api.v1.endpoints.email_sender import run_campaign_task
+
         service = get_email_sender_service()
-        storage = _get_campaign_storage()
         pending = service.get_pending_scheduled_campaigns()
-        
+
         if not pending:
             return
-        
+
         print(f"[Scheduler Worker] Found {len(pending)} campaigns ready to launch")
-        
+
         for campaign in pending:
             campaign_id = campaign['id']
-            claimed = None
             try:
-                try:
-                    campaign_exists = storage.campaign_exists(campaign_id)
-                except ValueError:
-                    continue
-                if not campaign_exists:
+                # Check if the config file exists locally BEFORE marking it as launching.
+                # This prevents a local instance from stealing campaigns created on the production server.
+                import os
+                campaign_file_path = os.path.join("campaign_data", f"{campaign_id}.json")
+                if not os.path.exists(campaign_file_path):
+                    # Do not print an error to avoid spam, just skip it.
+                    # Another server instance will pick it up.
                     continue
 
                 print(f"[Scheduler Worker] Launching campaign: {campaign_id}")
 
-                rollback_config = {}
-                try:
-                    launch_id = prepare_campaign_launch(
-                        campaign_id,
-                        refresh_airtable=False,
-                        rollback_config=rollback_config,
-                    )
-                except Exception as error:
-                    print(
-                        f"[Scheduler Worker] Campaign {campaign_id} is not "
-                        f"launch-ready: {getattr(error, 'detail', error)}"
-                    )
-                    continue
-
-                try:
-                    claimed = service.mark_campaign_launching(campaign_id)
-                except Exception:
-                    try:
-                        storage.save_campaign_owned(
-                            campaign_id,
-                            rollback_config,
-                            lease=launch_id,
-                            serialize_unknown=True,
-                        )
-                    finally:
-                        storage.release_launch_lock(campaign_id, launch_id)
-                    continue
+                claimed = service.mark_campaign_launching(campaign_id)
                 if not claimed:
-                    storage.save_campaign_owned(
-                        campaign_id,
-                        rollback_config,
-                        lease=launch_id,
-                        serialize_unknown=True,
-                    )
-                    storage.release_launch_lock(campaign_id, launch_id)
                     continue
 
+                # The task acquires a persistent local launch lock before sending.
+                # Run the synchronous campaign task without blocking the event loop.
                 loop = asyncio.get_event_loop()
                 try:
-                    loop.run_in_executor(
-                        None, run_campaign_task, campaign_id, launch_id
-                    )
+                    loop.run_in_executor(None, run_campaign_task, campaign_id)
                 except Exception:
-                    try:
-                        service.update_campaign(campaign_id, {"status": "Scheduled"})
-                        storage.save_campaign_owned(
-                            campaign_id,
-                            rollback_config,
-                            lease=launch_id,
-                            serialize_unknown=True,
-                        )
-                    finally:
-                        storage.release_launch_lock(campaign_id, launch_id)
+                    service.update_campaign(campaign_id, {"status": "Scheduled"})
                     raise
-                
+
                 print(f"[Scheduler Worker] Campaign {campaign_id} launch initiated")
-                
+
             except Exception as e:
                 print(f"[Scheduler Worker] Error launching {campaign_id}: {e}")
                 traceback.print_exc()
-                
+
     except Exception as e:
         print(f"[Scheduler Worker] Error in check_and_launch: {e}")
         traceback.print_exc()
@@ -129,10 +83,10 @@ async def run_data_sync():
     print("[Scheduler Worker] 🔄 Starting Data Sync (Airtable -> Supabase)...")
     try:
         from backend.app.scripts.incremental_sync import run_sync
-        
+
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, run_sync)
-        
+
         print("[Scheduler Worker] ✅ Data Sync finished successfully")
     except Exception as e:
         print(f"[Scheduler Worker] ❌ Error in Data Sync: {e}")
@@ -158,13 +112,13 @@ async def run_brevo_stats_sync():
 def init_scheduler():
     """Initialize the APScheduler"""
     global _scheduler
-    
+
     if _scheduler is not None:
         print("[Scheduler Worker] Scheduler already initialized")
         return _scheduler
-    
+
     _scheduler = AsyncIOScheduler()
-    
+
     # 1. Email Campaign Check (Every 1 minute)
     _scheduler.add_job(
         check_and_launch_scheduled_campaigns,
@@ -175,7 +129,7 @@ def init_scheduler():
         max_instances=1,
         misfire_grace_time=60
     )
-    
+
     # 2. Airtable data sync. Keep the cadence conservative because Supabase is
     # shared with other automations.
     data_sync_minutes = max(10, int(os.getenv("DATA_SYNC_INTERVAL_MINUTES", "15")))
@@ -203,7 +157,7 @@ def init_scheduler():
         misfire_grace_time=300,
         coalesce=True,
     )
-    
+
     print(
         "[Scheduler Worker] Scheduler initialized "
         f"(Emails: 1min, Airtable: {data_sync_minutes}min, "
@@ -217,7 +171,7 @@ def start_scheduler():
     global _scheduler
     if _scheduler is None:
         init_scheduler()
-    
+
     if not _scheduler.running:
         _scheduler.start()
         print("[Scheduler Worker] ✅ Scheduler started")
@@ -228,6 +182,8 @@ def start_scheduler():
 def stop_scheduler():
     """Stop the scheduler"""
     global _scheduler
-    if _scheduler is not None and _scheduler.running:
-        _scheduler.shutdown()
+    scheduler = _scheduler
+    _scheduler = None
+    if scheduler is not None and scheduler.running:
+        scheduler.shutdown()
         print("[Scheduler Worker] Scheduler stopped")

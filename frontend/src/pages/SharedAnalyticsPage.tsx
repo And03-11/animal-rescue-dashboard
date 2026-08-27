@@ -7,34 +7,16 @@ import { motion } from 'framer-motion';
 
 import apiClient from '../api/axiosConfig';
 import { DonationsTable } from '../components/analytics/DonationsTable';
-import { useWebSocket } from '../context/WebSocketProvider';
-
-
-interface SharedViewConfig {
-    source: string;
-    source_name?: string;
-    campaign_id?: string;
-    campaign_name?: string;
-    form_title_id?: string;
-}
-
-interface Donation { id: string; date: string; amount: number; donorName: string; donorEmail: string; }
-interface AnalyticsStats {
-    total_amount: number;
-    total_count: number;
-    breakdown: {
-        id: string;
-        name: string;
-        total_amount: number;
-        donation_count: number;
-        start_date?: string;
-    }[];
-}
-
-interface PaginatedDonationsResponse {
-    donations: Donation[];
-    total_count: number;
-}
+import { useWebSocket } from '../context/webSocketContext';
+import { isCanceledRequest, normalizeAnalyticsStats } from '../features/analytics/normalizers';
+import type {
+    AnalyticsStats,
+    AnalyticsStatsResponse,
+    Donation,
+    PaginatedDonationsResponse,
+    SharedAnalyticsConfig,
+    SharedAnalyticsConfigResponse,
+} from '../types/analytics.types';
 
 const DONATIONS_PAGE_SIZE = 50;
 
@@ -51,7 +33,7 @@ const SharedAnalyticsPage: React.FC = () => {
     const theme = useTheme();
     const { subscribe } = useWebSocket();
 
-    const [config, setConfig] = useState<SharedViewConfig | null>(null);
+    const [config, setConfig] = useState<SharedAnalyticsConfig | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
 
@@ -78,7 +60,7 @@ const SharedAnalyticsPage: React.FC = () => {
             return;
         }
 
-        apiClient.get<any>(`/analytics/share/${token}`)
+        apiClient.get<SharedAnalyticsConfigResponse>(`/analytics/share/${token}`)
             .then(res => {
                 // Normalize config from backend format to frontend format
                 const rawConfig = res.data;
@@ -88,7 +70,7 @@ const SharedAnalyticsPage: React.FC = () => {
                 const formTitles = Array.isArray(rawConfig.form_titles) ? rawConfig.form_titles : [];
                 const singleFormTitle = formTitles.length === 1 ? formTitles[0] : undefined;
 
-                const normalizedConfig: SharedViewConfig = {
+                const normalizedConfig: SharedAnalyticsConfig = {
                     source: rawConfig.source_id || rawConfig.source || '',
                     source_name: rawConfig.source_name || rawConfig.source_id || '',
                     campaign_id: rawConfig.campaign_id,
@@ -97,7 +79,7 @@ const SharedAnalyticsPage: React.FC = () => {
                 };
                 setConfig(normalizedConfig);
             })
-            .catch(err => {
+            .catch((err: unknown) => {
                 console.error(err);
                 setError('Shared view not found or expired.');
             })
@@ -123,27 +105,12 @@ const SharedAnalyticsPage: React.FC = () => {
 
         try {
             // --- Fetch Stats using PUBLIC endpoint ---
-            const statsRes = await apiClient.get(`/analytics/share/${token}/stats`, {
+            const statsRes = await apiClient.get<AnalyticsStatsResponse>(`/analytics/share/${token}/stats`, {
                 signal: statsController.signal
             });
 
             // Normalize stats data
-            const rawBreakdown = statsRes.data?.stats_by_campaign ?? statsRes.data?.stats_by_form_title ?? [];
-            const breakdown = Array.isArray(rawBreakdown) ? rawBreakdown.map((item: any) => ({
-                id: item?.campaign_id ?? item?.form_title_id ?? '',
-                name: item?.campaign_name ?? item?.form_title_name ?? 'Unknown',
-                total_amount: typeof item?.total_amount === 'number' ? item.total_amount : 0,
-                donation_count: typeof item?.donation_count === 'number' ? item.donation_count : 0,
-                start_date: item?.start_date ?? item?.createdTime,
-            })) : [];
-
-            setStats({
-                total_amount: typeof statsRes.data?.source_total_amount === 'number' ? statsRes.data.source_total_amount :
-                    typeof statsRes.data?.campaign_total_amount === 'number' ? statsRes.data.campaign_total_amount : 0,
-                total_count: typeof statsRes.data?.source_total_count === 'number' ? statsRes.data.source_total_count :
-                    typeof statsRes.data?.campaign_total_count === 'number' ? statsRes.data.campaign_total_count : 0,
-                breakdown: breakdown
-            });
+            setStats(normalizeAnalyticsStats(statsRes.data));
 
             // --- Fetch Donations using PUBLIC endpoint ---
             const donationsRes = await apiClient.get<PaginatedDonationsResponse>(
@@ -161,8 +128,8 @@ const SharedAnalyticsPage: React.FC = () => {
             setCurrentOffset(newDonations.length);
             setHasMoreDonations(newDonations.length < total_count);
 
-        } catch (err: any) {
-            if (err?.name === 'CanceledError') return;
+        } catch (err: unknown) {
+            if (isCanceledRequest(err)) return;
             console.error(err);
         }
     }, [config, token]);

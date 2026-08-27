@@ -17,11 +17,12 @@ import ArticleIcon from '@mui/icons-material/Article';
 import CodeIcon from '@mui/icons-material/Code';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import { EmailPreview } from '../components/EmailPreview';
+import type { CampaignDetailsResponse } from '../features/email-sender/types';
 
 
 export const CampaignDetailPage = () => {
   const { campaignId } = useParams<{ campaignId: string }>();
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<CampaignDetailsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'preview' | 'code'>('preview'); // Por defecto en preview
@@ -31,9 +32,9 @@ export const CampaignDetailPage = () => {
     // No mostramos el 'loading' en los refrescos para una experiencia más suave
     // setLoading(true); 
     try {
-      const response = await apiClient.get(`/sender/campaigns/${campaignId}/details`);
+      const response = await apiClient.get<CampaignDetailsResponse>(`/sender/campaigns/${campaignId}/details`);
       setData(response.data);
-    } catch (err) {
+    } catch {
       setError('Failed to load campaign details.');
     } finally {
       setLoading(false);
@@ -107,7 +108,7 @@ export const CampaignDetailPage = () => {
                   </TableHead>
                   <TableBody>
                     {contacts.length > 0 ? (
-                      contacts.map((contact: any, index: number) => (
+                      contacts.map((contact, index) => (
                         <TableRow key={index} hover>
                           <TableCell>{contact.email}</TableCell>
                           <TableCell align="right"><Chip label={contact.status} color={contact.status === 'Sent' ? 'success' : 'default'} size="small" /></TableCell>
@@ -142,7 +143,7 @@ export const CampaignDetailPage = () => {
                 />
                 <CardContent>
                     {viewMode === 'preview' ? (
-                        <EmailPreview subject={details?.subject} htmlBody={details?.html_body} />
+                        <EmailPreview subject={details?.subject ?? ''} htmlBody={details?.html_body ?? ''} />
                     ) : (
                         <TextField fullWidth multiline InputProps={{ readOnly: true }} rows={15} value={details?.html_body} variant="outlined" />
                     )}

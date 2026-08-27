@@ -10,14 +10,13 @@ const apiClient = axios.create({
 apiClient.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem("token");
-    config.headers = config.headers || {};
 
     if (token) {
-      (config.headers as any).Authorization = `Bearer ${token}`;
+      config.headers.set("Authorization", `Bearer ${token}`);
     }
 
     // --- Content-Type correcto según el cuerpo ---
-    if (!config.headers["Content-Type"]) {
+    if (!config.headers.get("Content-Type")) {
       const method = (config.method || "").toLowerCase();
 
       if (method === "post" || method === "put" || method === "patch") {
@@ -29,28 +28,30 @@ apiClient.interceptors.request.use(
 
         if (isUrlSearchParams) {
           // Solo urlencoded si el body es URLSearchParams
-          (config.headers as any)["Content-Type"] =
-            "application/x-www-form-urlencoded";
+          config.headers.set(
+            "Content-Type",
+            "application/x-www-form-urlencoded"
+          );
         } else if (isFormData) {
           // Dejar que el navegador ponga el boundary automáticamente
           // No seteamos Content-Type aquí.
         } else {
           // JSON por defecto
-          (config.headers as any)["Content-Type"] = "application/json";
+          config.headers.set("Content-Type", "application/json");
         }
       }
     }
 
     return config;
   },
-  (error) => Promise.reject(error)
+  (error: unknown) => Promise.reject(error)
 );
 
 // 401 global
 apiClient.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
+  (error: unknown) => {
+    if (axios.isAxiosError(error) && error.response?.status === 401) {
       localStorage.removeItem("token");
       window.location.href = "/login";
     }

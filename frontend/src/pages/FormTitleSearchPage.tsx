@@ -11,7 +11,7 @@ import apiClient from '../api/axiosConfig';
 import { StatCard } from '../components/StatCard';
 import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
-import { useWebSocket } from '../context/WebSocketProvider';
+import { useWebSocket } from '../context/webSocketContext';
 
 // --- Interfaces (sin cambios) ---
 interface ApiListItem { id: string; name: string; }
@@ -100,7 +100,7 @@ export const FormTitleSearchPage = () => {
 
       const response = await apiClient.get<DonationData>(`/form-titles/donations?${params.toString()}`);
       setDonationData(response.data);
-    } catch (err) {
+    } catch {
       setError('Failed to fetch donation data.');
     } finally {
       setLoading(prev => ({ ...prev, donations: false }));

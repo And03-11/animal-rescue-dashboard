@@ -23,13 +23,16 @@ def test_strongest_weekday_includes_zero_revenue_calendar_days():
 
     result = service.get_strategic_insights()
     timing_query = next(query for query in executed_queries if "WITH calendar_days" in query)
+    channel_query = next(query for query in executed_queries if "FROM campaigns c" in query)
 
     assert "GENERATE_SERIES" in timing_query
     assert "LEFT JOIN daily_metrics" in timing_query
     assert "COALESCE(daily_metrics.total_amount, 0)" in timing_query
+    assert "SUM(SUM(d.amount)) OVER ()" in channel_query
     assert result["timing"] == {
         "periodDays": 90,
         "bestWeekday": "Sunday",
         "averageDailyAmount": 3200.0,
         "averageDailyDonations": 64.0,
     }
+    assert result["channel"]["sharePct"] == 0

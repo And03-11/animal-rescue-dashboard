@@ -4,19 +4,19 @@ import {
   Alert,
   Box,
   Button,
-  CircularProgress,
+  Chip,
   Container,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogContentText,
-  DialogTitle,
   Snackbar,
   Typography,
 } from '@mui/material';
-import axios from 'axios';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import apiClient from '../api/axiosConfig';
+import {
+  getApiErrorMessage,
+  getCampaignSaveErrorMessage,
+  isAbortError,
+} from '../features/email-sender/apiErrors';
+import { CampaignDeleteDialog } from '../features/email-sender/CampaignDeleteDialog';
 import { CampaignTable } from '../features/email-sender/CampaignTableWorkspace';
 import { CampaignWizard } from '../features/email-sender/CampaignWizard';
 import {
@@ -24,46 +24,21 @@ import {
   executeCampaignSavePlan,
   planCampaignSave,
 } from '../features/email-sender/campaignWizardOrchestration';
-import type { CampaignWizardPayload } from '../features/email-sender/campaignWizardState';
 import type {
   CampaignLaunchResponse,
+  CampaignFormData,
   CreateCampaignResponse,
   CsvColumnMapping,
   EmailCampaign,
+  PaginatedCampaignsResponse,
 } from '../features/email-sender/types';
-
-interface ApiErrorPayload {
-  detail?: string;
-}
-
-const isAbortError = (error: unknown): boolean => (
-  axios.isCancel(error) || (error instanceof Error && error.name === 'AbortError')
-);
-
-const getApiErrorMessage = (error: unknown, fallback: string): string => {
-  if (axios.isAxiosError<ApiErrorPayload>(error)) {
-    return error.response?.data?.detail || fallback;
-  }
-
-  return fallback;
-};
-
-const getCampaignSaveErrorMessage = (error: unknown): string => {
-  if (axios.isAxiosError<ApiErrorPayload>(error)) {
-    if (error.response) {
-      return error.response.data?.detail || `Server error: ${error.response.status}`;
-    }
-    if (error.request) return 'No response from server.';
-  }
-
-  return error instanceof Error ? `Error: ${error.message}` : 'Failed operation.';
-};
 
 // --- Componente Principal de la Página (SIN CAMBIOS RESPECTO AL CÓDIGO QUE YA TENÍAS) ---
 export const EmailSenderPage = () => {
-  const [campaigns, setCampaigns] = useState<EmailCampaign[]>([]);
+  const [totalCampaigns, setTotalCampaigns] = useState(0);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(15);
+  const [campaigns, setCampaigns] = useState<EmailCampaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -83,31 +58,49 @@ export const EmailSenderPage = () => {
     wizardCampaignIdRef.current = editingCampaignId;
   }, [editingCampaignId, isModalOpen]);
 
-  const fetchCampaigns = useCallback(async () => {
-    // No mostramos spinner principal en refrescos automáticos
+  const fetchCampaigns = useCallback(async (
+    signal?: AbortSignal,
+    showLoading = true,
+  ) => {
+    if (showLoading) setLoading(true);
+
     try {
-      const response = await apiClient.get<EmailCampaign[]>('/sender/campaigns', {
-        headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache', 'Expires': '0' }
+      const response = await apiClient.get<PaginatedCampaignsResponse>('/sender/campaigns', {
+        params: {
+          page_size: rowsPerPage,
+          offset: page * rowsPerPage,
+        },
+        signal,
+        timeout: 15_000,
+        headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache', 'Expires': '0' },
       });
-      setCampaigns(response.data);
-      if (loading) setError(null); // Limpia error solo si era carga inicial
+      const { items, total } = response.data;
+      const lastPage = Math.max(0, Math.ceil(total / rowsPerPage) - 1);
+
+      setTotalCampaigns(total);
+      if (page > lastPage) {
+        setPage(lastPage);
+        return;
+      }
+
+      setCampaigns(items);
+      setError(null);
     } catch (err: unknown) {
-      // Solo muestra error si no es un error de cancelación (AbortError)
-      // y si es la carga inicial o ya no hay campañas en la lista (para evitar parpadeo)
-      if (!isAbortError(err) && (loading || campaigns.length === 0)) {
+      if (!isAbortError(err) && showLoading) {
         setError('Failed to load campaigns.');
         console.error(err);
       }
     } finally {
-      if (loading) setLoading(false); // Desactiva loading inicial solo la primera vez
+      if (showLoading && !signal?.aborted) setLoading(false);
     }
-  }, [loading, campaigns.length]); // Depende de loading y campaigns.length
+  }, [page, rowsPerPage]);
 
-  // Carga inicial
   useEffect(() => {
-    fetchCampaigns();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Solo una vez
+    const controller = new AbortController();
+    void fetchCampaigns(controller.signal);
+
+    return () => controller.abort();
+  }, [fetchCampaigns]);
 
   // Polling para campañas 'Sending'
   useEffect(() => {
@@ -117,7 +110,7 @@ export const EmailSenderPage = () => {
     console.log("Polling active for sending campaigns...");
     const intervalId = setInterval(() => {
       console.log("Polling for campaign updates...");
-      fetchCampaigns(); // Llama a fetchCampaigns sin activar el loading principal
+      void fetchCampaigns(undefined, false);
     }, 5000);
 
     return () => {
@@ -128,24 +121,15 @@ export const EmailSenderPage = () => {
 
 
   const handleSaveCampaign = async (
-    campaignDataFromForm: CampaignWizardPayload,
+    campaignDataFromForm: CampaignFormData,
     mapping?: CsvColumnMapping,
     signal?: AbortSignal,
   ) => {
-    const {
-      csvFile,
-      source_type: requestedSourceType,
-      ...campaignRequestData
-    } = campaignDataFromForm;
+    const { csvFile, ...campaignBaseData } = campaignDataFromForm;
+    const sourceType = campaignBaseData.source_type;
     const saveSignal = signal ?? new AbortController().signal;
     const saveState = campaignSaveSessionRef.current;
     const campaignIdForSave = saveState.resolveCampaignId(saveSignal, editingCampaignId);
-    const existingSourceType = campaignIdForSave
-      ? campaigns.find((campaign) => campaign.id === campaignIdForSave)?.source_type
-      : undefined;
-    const sourceType = requestedSourceType
-      ?? existingSourceType
-      ?? (mapping ? 'csv' : 'airtable');
     const operations = planCampaignSave({
       existingCampaignId: campaignIdForSave,
       sourceType,
@@ -169,10 +153,7 @@ export const EmailSenderPage = () => {
             setSnackbarMessage('Saving campaign configuration…');
             const response = await apiClient.post<CreateCampaignResponse>(
               '/sender/campaigns',
-              {
-                ...campaignRequestData,
-                source_type: sourceType,
-              },
+              campaignBaseData,
               { signal: operationSignal },
             );
             return response.data.id;
@@ -184,7 +165,7 @@ export const EmailSenderPage = () => {
             setSnackbarMessage('Updating campaign configuration…');
             await apiClient.put(
               `/sender/campaigns/${currentCampaignId}`,
-              campaignRequestData,
+              campaignBaseData,
               { signal: operationSignal },
             );
           } else if (operation === 'upload-csv') {
@@ -212,18 +193,18 @@ export const EmailSenderPage = () => {
       saveState.complete(saveSignal);
       setSnackbarMessage(
         sourceType === 'csv'
-          ? 'CSV campaign saved successfully!'
+          ? `CSV campaign ${campaignId} saved successfully!`
           : `Airtable campaign ${campaignId} saved successfully!`,
       );
       setIsModalOpen(false);
       setEditingCampaignId(null);
       void fetchCampaigns();
-    } catch (err: unknown) {
-      if (isAbortError(err)) return;
-      console.error('Error saving campaign:', err);
-      setError(getCampaignSaveErrorMessage(err));
+    } catch (saveError: unknown) {
+      if (isAbortError(saveError)) return;
+      console.error('Error saving campaign:', saveError);
+      setError(getCampaignSaveErrorMessage(saveError));
       setSnackbarMessage(null);
-      throw err;
+      throw saveError;
     }
   };
 
@@ -315,30 +296,43 @@ export const EmailSenderPage = () => {
     }
   };
 
-  const lastPage = Math.max(0, Math.ceil(campaigns.length / rowsPerPage) - 1);
-  const visiblePage = Math.min(page, lastPage);
-  useEffect(() => {
-    if (page !== visiblePage) setPage(visiblePage);
-  }, [page, visiblePage]);
-  const visibleCampaigns = campaigns.slice(
-    visiblePage * rowsPerPage,
-    (visiblePage + 1) * rowsPerPage,
-  );
-
 
   // --- Renderizado ---
-  if (loading && campaigns.length === 0) return (
-    <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' }}>
-      <CircularProgress />
-    </Box>
-  );
-
   return (
-    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4" component="h1">Campaign Manager</Typography>
-        <Button variant="contained" startIcon={<AddCircleOutlineIcon />} onClick={() => { setEditingCampaignId(null); setError(null); setIsModalOpen(true); }}>
-          Create New Campaign
+    <Container maxWidth="xl" sx={{ py: { xs: 3, md: 4 } }}>
+      <Box
+        sx={{
+          display: 'flex',
+          flexDirection: { xs: 'column', sm: 'row' },
+          justifyContent: 'space-between',
+          alignItems: { xs: 'flex-start', sm: 'center' },
+          gap: 2,
+          mb: 3,
+        }}
+      >
+        <Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, flexWrap: 'wrap' }}>
+            <Typography variant="h3" component="h1">Email campaigns</Typography>
+            <Chip
+              label={loading && totalCampaigns === 0
+                ? 'Loading campaigns…'
+                : `${totalCampaigns.toLocaleString()} campaigns`}
+              size="small"
+              variant="outlined"
+              sx={{ color: 'text.secondary' }}
+            />
+          </Box>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
+            Create, send, and measure campaign performance from one workspace.
+          </Typography>
+        </Box>
+        <Button
+          variant="contained"
+          startIcon={<AddCircleOutlineIcon />}
+          onClick={() => { setEditingCampaignId(null); setError(null); setIsModalOpen(true); }}
+          sx={{ flexShrink: 0 }}
+        >
+          Create campaign
         </Button>
       </Box>
 
@@ -346,11 +340,11 @@ export const EmailSenderPage = () => {
       {error && !isModalOpen && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
       <CampaignTable
-        campaigns={visibleCampaigns}
-        total={campaigns.length}
-        page={visiblePage}
+        campaigns={campaigns}
+        total={totalCampaigns}
+        page={page}
         rowsPerPage={rowsPerPage}
-        onPageChange={setPage}
+        onPageChange={(nextPage) => setPage(nextPage)}
         onRowsPerPageChange={(nextRowsPerPage) => {
           setRowsPerPage(nextRowsPerPage);
           setPage(0);
@@ -382,35 +376,13 @@ export const EmailSenderPage = () => {
         onSave={handleSaveCampaign}
       />
 
-      <Dialog
+      <CampaignDeleteDialog
+        campaign={campaignToDelete}
+        deleting={deleting}
         open={deleteConfirmOpen}
         onClose={handleDeleteClose}
-        aria-labelledby="delete-confirm-title"
-        aria-describedby="delete-confirm-description"
-      >
-        <DialogTitle id="delete-confirm-title">Confirm Deletion</DialogTitle>
-        <DialogContent>
-          <DialogContentText id="delete-confirm-description">
-            {/* --- INICIO MODIFICACIÓN --- */}
-            {['Sending', 'Paused'].includes(campaignToDelete?.status ?? '')
-              ? `Are you sure you want to cancel and permanently delete the campaign `
-              : `Are you sure you want to permanently delete the campaign `
-            }
-            <strong>"{campaignToDelete?.subject || 'this campaign'}"</strong>?
-            {['Sending', 'Paused'].includes(campaignToDelete?.status ?? '') && ` The sending process will be stopped.`}
-            This action cannot be undone.
-            {/* --- FIN MODIFICACIÓN --- */}
-          </DialogContentText>
-          {deleting && <CircularProgress size={20} sx={{ display: 'block', mx: 'auto', mt: 2 }} />}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleDeleteClose} disabled={deleting}>Cancel</Button>
-          {/* Cambia el texto del botón de confirmación */}
-          <Button onClick={handleDeleteConfirm} color="error" disabled={deleting} autoFocus>
-            {['Sending', 'Paused'].includes(campaignToDelete?.status ?? '') ? 'Cancel & Delete' : 'Delete'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+        onConfirm={handleDeleteConfirm}
+      />
 
       {/* Snackbar para notificaciones */}
       <Snackbar

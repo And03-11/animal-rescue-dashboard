@@ -1,7 +1,7 @@
 # --- File: backend/app/api/v1/endpoints/users.py (Refactorizado) ---
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import List
 from fastapi_cache.decorator import cache
 
@@ -15,12 +15,11 @@ router = APIRouter()
 
 # Schema para la respuesta pública, NUNCA incluye la contraseña.
 class UserPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     username: str
     is_admin: bool
-
-    class Config:
-        orm_mode = True
 
 class UserCreate(BaseModel):
     username: str

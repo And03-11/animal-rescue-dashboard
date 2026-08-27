@@ -15,27 +15,14 @@ import SearchIcon from '@mui/icons-material/Search';
 import EventIcon from '@mui/icons-material/Event';
 import { motion } from 'framer-motion';
 import dayjs from 'dayjs';
-
-interface Campaign {
-    id: number;
-    title: string;
-    category: string;
-    start_date: string;
-    end_date: string;
-    sendCount: number;
-    nextSend?: string;
-    status: 'active' | 'completed' | 'pending';
-}
+import type { Campaign, FilterState } from '../types/scheduler.types';
 
 interface CampaignListPanelProps {
     campaigns: Campaign[];
     selectedId: number | null;
     onSelect: (id: number) => void;
-    filters: {
-        search: string;
-        categories: string[];
-    };
-    onFilterChange: (filters: any) => void;
+    filters: FilterState;
+    onFilterChange: (filters: FilterState) => void;
 }
 
 export const CampaignListPanel: React.FC<CampaignListPanelProps> = ({

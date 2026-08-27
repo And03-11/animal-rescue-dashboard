@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional, Dict, Any
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from backend.app.db.database import get_db
 from backend.app.db.models import ScheduledCampaign, CampaignEmail, ScheduledSend
@@ -59,9 +59,9 @@ class ScheduledCampaignUpdate(BaseModel):
     segmentation_mode: Optional[str] = None
 
 class ScheduledCampaignResponse(ScheduledCampaignBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
-    class Config: 
-        orm_mode = True
 
 # --- Nivel 2: Email (Contenido) ---
 class CampaignEmailBase(BaseModel):
@@ -84,10 +84,10 @@ class CampaignEmailUpdate(BaseModel):
     custom_links: Optional[str] = None
 
 class CampaignEmailResponse(CampaignEmailBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     campaign_id: int
-    class Config: 
-        orm_mode = True
 
 # --- Nivel 3: Envío (Horario/Segmento) ---
 class ScheduledSendBase(BaseModel):
@@ -112,10 +112,10 @@ class ScheduledSendUpdate(BaseModel):
     dnr_date: Optional[datetime] = None
 
 class ScheduledSendResponse(ScheduledSendBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     campaign_email_id: int
-    class Config: 
-        orm_mode = True
 
 # --- Evento del Calendario (Genérico) ---
 class CalendarEvent(BaseModel):

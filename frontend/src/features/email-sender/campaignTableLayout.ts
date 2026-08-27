@@ -18,14 +18,3 @@ export function allocateCampaignColumnWidths(containerWidth: number): number[] {
 
 export const campaignColumnPercentages = allocateCampaignColumnWidths(100)
   .map((width) => `${width}%`);
-
-export type CampaignListLayout = 'cards' | 'table';
-
-export function resolveCampaignListLayout(
-  viewportWidth: number,
-  zoomFactor = 1,
-): CampaignListLayout {
-  const normalizedWidth = Number.isFinite(viewportWidth) ? Math.max(0, viewportWidth) : 0;
-  const normalizedZoom = Number.isFinite(zoomFactor) && zoomFactor > 0 ? zoomFactor : 1;
-  return normalizedWidth / normalizedZoom < 900 ? 'cards' : 'table';
-}

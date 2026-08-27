@@ -37,7 +37,7 @@ import apiClient from '../api/axiosConfig';
 import { StatCard } from '../components/StatCard';
 import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
-import { useWebSocket } from '../context/WebSocketProvider';
+import { useWebSocket } from '../context/webSocketContext';
 
 // --- Interfaces ---
 interface ApiListItem {

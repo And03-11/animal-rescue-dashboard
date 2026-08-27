@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&display=swap');
 
 html {
   min-width: 320px;
@@ -28,6 +28,12 @@ svg {
 
 :focus-visible {
   outline-offset: 3px;
+}
+
+.dashboard-data-value {
+  font-family: 'DM Mono', 'SFMono-Regular', Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.045em;
 }
 
 @media (prefers-reduced-motion: reduce) {

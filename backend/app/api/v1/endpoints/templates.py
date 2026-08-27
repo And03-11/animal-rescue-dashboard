@@ -1,21 +1,24 @@
 # --- File: backend/app/api/v1/endpoints/templates.py ---
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from typing import List
+from sqlalchemy.orm import Session, load_only
+from sqlalchemy.exc import SQLAlchemyError
+from typing import List, Optional
 from pydantic import BaseModel
 
 from backend.app.db.database import get_db
 from backend.app.db.models import EmailTemplate
-from backend.app.schemas import TemplateCreate, TemplateResponse
+from backend.app.schemas import TemplateCreate, TemplateListResponse, TemplateResponse
 from backend.app.services.gmail_service import GmailService
 from backend.app.services.credentials_manager import credentials_manager_instance
+from backend.app.core.security import get_current_user
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 class TemplateUpdate(BaseModel):
-    name: str = None
-    content: str = None
+    name: Optional[str] = None
+    content: Optional[str] = None
+    design_json: Optional[str] = None
 
 
 class SendTestRequest(BaseModel):
@@ -23,13 +26,23 @@ class SendTestRequest(BaseModel):
     subject: str = "Test Email"
 
 
-@router.get("/templates", response_model=List[TemplateResponse])
+@router.get("/templates", response_model=List[TemplateListResponse])
 def get_templates(db: Session = Depends(get_db)):
     """
     Retrieve all saved email templates.
     """
-    templates = db.query(EmailTemplate).order_by(EmailTemplate.created_at.desc()).all()
-    return templates
+    try:
+        return (
+            db.query(EmailTemplate)
+            .options(load_only(EmailTemplate.id, EmailTemplate.name, EmailTemplate.created_at))
+            .order_by(EmailTemplate.created_at.desc())
+            .all()
+        )
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Template database is unavailable. Check the database connection and try again.",
+        ) from exc
 
 
 @router.get("/templates/{template_id}", response_model=TemplateResponse)
@@ -52,7 +65,11 @@ def create_template(template: TemplateCreate, db: Session = Depends(get_db)):
     if existing:
         raise HTTPException(status_code=400, detail="Template with this name already exists")
     
-    db_template = EmailTemplate(name=template.name, content=template.content)
+    db_template = EmailTemplate(
+        name=template.name,
+        content=template.content,
+        design_json=template.design_json,
+    )
     db.add(db_template)
     db.commit()
     db.refresh(db_template)
@@ -80,6 +97,9 @@ def update_template(template_id: int, template_update: TemplateUpdate, db: Sessi
     
     if template_update.content is not None:
         template.content = template_update.content
+
+    if template_update.design_json is not None:
+        template.design_json = template_update.design_json
     
     db.commit()
     db.refresh(template)

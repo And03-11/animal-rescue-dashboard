@@ -90,4 +90,6 @@ class EmailTemplate(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True, index=True, nullable=False)
     content = Column(Text, nullable=False)
+    # GrapesJS project state. ``content`` remains the portable, send-ready HTML.
+    design_json = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

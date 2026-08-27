@@ -4,15 +4,10 @@ import {
     useTheme, Chip, alpha, CircularProgress
 } from '@mui/material';
 import { motion } from 'framer-motion';
-import Logo from '../../assets/Logo.png';
-
-interface Donation {
-    id: string;
-    date: string;
-    amount: number;
-    donorName: string;
-    donorEmail: string;
-}
+import logoLight from '../../assets/branding/animal-love-logo.svg';
+import logoDark from '../../assets/branding/animal-love-logo-dark.svg';
+import type { SxProps, Theme } from '@mui/material/styles';
+import type { Donation } from '../../types/analytics.types';
 
 interface DonationsTableProps {
     donations: Donation[];
@@ -23,7 +18,7 @@ interface DonationsTableProps {
     loadMoreRef: React.RefObject<HTMLDivElement | null>;
     maxHeight?: string | number;
     hideEmail?: boolean;
-    sx?: any;
+    sx?: SxProps<Theme>;
 }
 
 const itemVariants = {
@@ -50,11 +45,12 @@ export const DonationsTable: React.FC<DonationsTableProps> = ({
     sx = {}
 }) => {
     const theme = useTheme();
+    const brandLogo = theme.palette.mode === 'dark' ? logoDark : logoLight;
 
     return (
         <motion.div variants={itemVariants} style={{ height: '100%' }}>
             <Paper
-                sx={{
+                sx={[{
                     p: 4,
                     borderRadius: '24px',
                     background: `linear-gradient(145deg, ${alpha(theme.palette.background.paper, 0.6)} 0%, ${alpha(theme.palette.background.paper, 0.9)} 100%)`,
@@ -65,20 +61,20 @@ export const DonationsTable: React.FC<DonationsTableProps> = ({
                     height: '100%',
                     display: 'flex',
                     flexDirection: 'column',
-                    ...sx
-                }}
+                }, ...(sx ? (Array.isArray(sx) ? sx : [sx]) : [])]}
             >
 
 
                 <Box sx={{ mb: 4, display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' }}>
                     <Box
                         component="img"
-                        src={Logo}
-                        alt="Animal Love"
+                        src={brandLogo}
+                        alt="Animal love Rescue Center Costa Rica"
                         sx={{
-                            height: 60,
+                            width: 260,
+                            maxWidth: '80%',
+                            height: 'auto',
                             mb: 2,
-                            filter: 'drop-shadow(0 4px 8px rgba(0,0,0,0.2))'
                         }}
                     />
                     <Box sx={{ textAlign: 'center' }}>

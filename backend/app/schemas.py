@@ -28,16 +28,20 @@ class MailchimpDetail(BaseModel):
     email: str
     found: bool
     tags: List[str]
+    error: Optional[str] = None
 
 class BrevoDetail(BaseModel):
     email: str
     found: bool
     details: Dict[str, Any]
+    error: Optional[str] = None
 
 class AirtableSummary(BaseModel):
     total: float
     count: int
     first_date: Optional[str]
+    last_date: Optional[str] = None
+    largest: float = 0.0
 
 class SearchResponse(BaseModel):
     email_searched: str
@@ -50,11 +54,18 @@ class SearchResponse(BaseModel):
 class TemplateCreate(BaseModel):
     name: str
     content: str
+    design_json: Optional[str] = None
 
 class TemplateResponse(BaseModel):
     id: int
     name: str
     content: str
+    design_json: Optional[str] = None
+    created_at: Any # DateTime
+
+class TemplateListResponse(BaseModel):
+    id: int
+    name: str
     created_at: Any # DateTime
 
 # Ventajas de este esquema:

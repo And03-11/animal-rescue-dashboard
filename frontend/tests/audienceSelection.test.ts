@@ -19,15 +19,17 @@ test('audience shortcuts replace the selection with exact branches', () => {
   assert.deepEqual(audienceSelection.applyAudienceShortcut('Clear'), []);
 });
 
-test('legacy campaign filters hydrate when normalized audiences are absent or empty', () => {
+test('legacy campaign filters hydrate one selected branch only when audiences are absent', () => {
   assert.ok(audienceSelection, 'audience selection module is missing');
-  for (const audiences of [undefined, []]) {
-    assert.deepEqual(audienceSelection.hydrateAudienceSelection({
-      audiences,
-      region: 'USA',
-      is_bounced: true,
-    }), [{ region: 'USA', is_bounced: true }]);
-  }
+  assert.deepEqual(audienceSelection.hydrateAudienceSelection({
+    region: 'USA',
+    is_bounced: true,
+  }), [{ region: 'USA', is_bounced: true }]);
+  assert.deepEqual(audienceSelection.hydrateAudienceSelection({
+    audiences: [],
+    region: 'USA',
+    is_bounced: true,
+  }), []);
 });
 
 test('checkbox toggles preserve arbitrary subsets and normalize ordering', () => {

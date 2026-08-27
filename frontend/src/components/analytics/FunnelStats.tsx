@@ -8,6 +8,7 @@ import {
 } from 'recharts';
 import { motion } from 'framer-motion';
 import axios from 'axios';
+import apiClient from '../../api/axiosConfig';
 
 interface FunnelData {
     total_funnel: number;
@@ -37,12 +38,15 @@ export const FunnelStats: React.FC = () => {
     useEffect(() => {
         const fetchData = async () => {
             try {
-                const response = await axios.get('/api/v1/dashboard/funnel-stats');
+                const response = await apiClient.get('/dashboard/funnel-stats');
                 setData(response.data);
-            } catch (err: any) {
+            } catch (err: unknown) {
                 console.error('Funnel stats error:', err);
-                const detail = err.response?.data?.detail || err.message || 'Unknown error';
-                setError(`Failed to load: ${detail} (Status: ${err.response?.status})`);
+                const detail = axios.isAxiosError(err)
+                    ? err.response?.data?.detail || err.message
+                    : err instanceof Error ? err.message : 'Unknown error';
+                const status = axios.isAxiosError(err) ? err.response?.status : undefined;
+                setError(`Failed to load: ${detail}${status ? ` (Status: ${status})` : ''}`);
             } finally {
                 setLoading(false);
             }

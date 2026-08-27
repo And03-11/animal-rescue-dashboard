@@ -11,7 +11,8 @@ import {
   Tooltip,
   Avatar,
   useTheme,
-  alpha
+  alpha,
+  Stack,
 } from '@mui/material';
 import WorkspacePremiumIcon from '@mui/icons-material/WorkspacePremium';
 
@@ -47,7 +48,37 @@ export const TopDonorsTable: React.FC<TopDonorsTableProps> = ({ donors }) => {
   };
 
   return (
-    <TableContainer sx={{ maxHeight: 440 }}>
+    <>
+      <Stack spacing={0} sx={{ display: { xs: 'flex', sm: 'none' } }}>
+        {donors.slice(0, 10).map((donor, index) => (
+          <Box
+            key={donor.email}
+            sx={{
+              px: 2.25,
+              py: 1.75,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1.5,
+              borderBottom: index < donors.length - 1 ? `1px solid ${theme.palette.divider}` : 0,
+            }}
+          >
+            <Typography className="dashboard-data-value" color="text.secondary" sx={{ width: 22, fontSize: '0.78rem' }}>{String(index + 1).padStart(2, '0')}</Typography>
+            <Avatar sx={{ bgcolor: alpha(theme.palette.primary.main, 0.12), color: 'primary.main', width: 38, height: 38, fontSize: '0.82rem', fontWeight: 700 }}>
+              {(donor.name || donor.email).charAt(0).toUpperCase()}
+            </Avatar>
+            <Box sx={{ minWidth: 0, flex: 1 }}>
+              <Typography variant="body2" fontWeight={650} noWrap>{donor.name || 'Unnamed donor'}</Typography>
+              <Typography variant="caption" color="text.secondary" noWrap display="block">{donor.email}</Typography>
+            </Box>
+            <Box sx={{ textAlign: 'right' }}>
+              <Typography className="dashboard-data-value" variant="body2" fontWeight={600}>{formatAmount(donor.totalAmount)}</Typography>
+              <Typography variant="caption" color="text.secondary">{donor.donationsCount} gifts</Typography>
+            </Box>
+          </Box>
+        ))}
+      </Stack>
+
+      <TableContainer sx={{ maxHeight: 440, display: { xs: 'none', sm: 'block' } }}>
       <Table stickyHeader aria-label="top donors table">
         <TableHead>
           <TableRow>
@@ -83,11 +114,11 @@ export const TopDonorsTable: React.FC<TopDonorsTableProps> = ({ donors }) => {
               </TableCell>
               <TableCell>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                  <Avatar sx={{ bgcolor: theme.palette.primary.main, width: 32, height: 32, fontSize: '0.875rem' }}>
-                    {donor.name.charAt(0).toUpperCase()}
+                  <Avatar sx={{ bgcolor: alpha(theme.palette.primary.main, 0.12), color: 'primary.main', width: 34, height: 34, fontSize: '0.82rem', fontWeight: 700 }}>
+                    {(donor.name || donor.email).charAt(0).toUpperCase()}
                   </Avatar>
                   <Box>
-                    <Typography variant="body2" fontWeight="600">{donor.name}</Typography>
+                    <Typography variant="body2" fontWeight="600">{donor.name || 'Unnamed donor'}</Typography>
                     <Typography variant="caption" color="text.secondary">{donor.email}</Typography>
                   </Box>
                 </Box>
@@ -100,7 +131,7 @@ export const TopDonorsTable: React.FC<TopDonorsTableProps> = ({ donors }) => {
                 </Typography>
               </TableCell>
               <TableCell>
-                <Typography variant="body2" fontWeight="700" color="success.main">
+                <Typography className="dashboard-data-value" variant="body2" fontWeight="600">
                   {formatAmount(donor.totalAmount)}
                 </Typography>
               </TableCell>
@@ -113,6 +144,7 @@ export const TopDonorsTable: React.FC<TopDonorsTableProps> = ({ donors }) => {
           ))}
         </TableBody>
       </Table>
-    </TableContainer>
+      </TableContainer>
+    </>
   );
 };

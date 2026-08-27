@@ -1,51 +1,139 @@
 // frontend/src/pages/CampaignAnalyticsPage.tsx
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
-    Box, Typography, Paper, Divider, Button, CircularProgress, Alert,
-    FormControl, InputLabel, Select, MenuItem, Collapse,
-    Table, TableBody, TableCell, TableContainer, TableHead, TableRow, useTheme, Chip, alpha, Card, CardContent, Grid,
-    Dialog, DialogTitle, DialogContent, DialogActions, TextField, IconButton, InputAdornment
+    Box, Typography, Paper, Button, CircularProgress, Alert,
+    FormControl, Select, MenuItem,
+    Table, TableBody, TableCell, TableContainer, TableHead, TableRow, useTheme, alpha, Grid, Card, CardContent,
+    Dialog, DialogTitle, DialogContent, DialogActions, TextField, IconButton, InputAdornment, Tabs, Tab,
+    ToggleButton, ToggleButtonGroup, Stack
 } from '@mui/material';
-import TuneIcon from '@mui/icons-material/Tune';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import BarChartIcon from '@mui/icons-material/BarChart';
 import ShareIcon from '@mui/icons-material/Share';
 import CloseIcon from '@mui/icons-material/Close';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import ArrowForwardRoundedIcon from '@mui/icons-material/ArrowForwardRounded';
+import RestartAltRoundedIcon from '@mui/icons-material/RestartAltRounded';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import dayjs, { Dayjs } from 'dayjs';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import apiClient from '../api/axiosConfig';
-import MonetizationOnIcon from '@mui/icons-material/MonetizationOn';
-import VolunteerActivismIcon from '@mui/icons-material/VolunteerActivism';
-import { useWebSocket } from '../context/WebSocketProvider';
+import { useWebSocket } from '../context/webSocketContext';
 import { FormTitleSelector } from '../components/FormTitleSelector';
-
-interface ApiListItem {
-    id: string;
-    name: string;
-    createdTime?: string;
-}
-interface Donation { id: string; date: string; amount: number; donorName: string; donorEmail: string; }
-interface AnalyticsStats {
-    total_amount: number;
-    total_count: number;
-    breakdown: {
-        id: string;
-        name: string;
-        total_amount: number;
-        donation_count: number;
-        start_date?: string;
-    }[];
-}
-
-interface PaginatedDonationsResponse {
-    donations: Donation[];
-    total_count: number;
-}
+import {
+    getErrorMessage,
+    getResponseStatus,
+    isCanceledRequest,
+    normalizeAnalyticsStats,
+    normalizeFormTitles,
+} from '../features/analytics/normalizers';
+import type {
+    AnalyticsBreakdownItem,
+    AnalyticsListItem as ApiListItem,
+    AnalyticsStats,
+    AnalyticsStatsResponse,
+    Donation,
+    PaginatedDonationsResponse,
+    ShareLinkPayload,
+    ShareLinkResponse,
+} from '../types/analytics.types';
 
 const DONATIONS_PAGE_SIZE = 50;
+type RevenueChartView = 'top10' | 'all';
+const currencyFormatter = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+});
+const DNR_SUFFIX_PATTERN = /\s+DNR\s*$/i;
+const isDnrTitle = (name: string) => DNR_SUFFIX_PATTERN.test(name);
+const getBaseTitle = (name: string) => name.replace(DNR_SUFFIX_PATTERN, '').trim();
+const sortNewestFirst = <T extends { createdTime?: string; name: string },>(items: T[]) => (
+    [...items].sort((a, b) => {
+        const firstTime = a.createdTime ? Date.parse(a.createdTime) : Number.NEGATIVE_INFINITY;
+        const secondTime = b.createdTime ? Date.parse(b.createdTime) : Number.NEGATIVE_INFINITY;
+        const safeFirstTime = Number.isFinite(firstTime) ? firstTime : Number.NEGATIVE_INFINITY;
+        const safeSecondTime = Number.isFinite(secondTime) ? secondTime : Number.NEGATIVE_INFINITY;
+
+        if (safeFirstTime !== safeSecondTime) return safeSecondTime - safeFirstTime;
+        return a.name.localeCompare(b.name);
+    })
+);
+
+const VariantMetricsPanel: React.FC<{
+    variant: 'original' | 'dnr';
+    item?: AnalyticsBreakdownItem;
+}> = ({ variant, item }) => {
+    const dnr = variant === 'dnr';
+
+    if (!item) {
+        return (
+            <Box
+                sx={(theme) => ({
+                    minHeight: 76,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: '12px',
+                    border: `1px dashed ${alpha(theme.palette.text.secondary, 0.2)}`,
+                    bgcolor: alpha(theme.palette.background.default, 0.12),
+                })}
+            >
+                <Typography variant="caption" color="text.secondary">
+                    No DNR variant
+                </Typography>
+            </Box>
+        );
+    }
+
+    return (
+    <Box
+        sx={(theme) => ({
+            minHeight: 76,
+            display: 'grid',
+            gridTemplateColumns: 'minmax(92px, 1fr) minmax(72px, 0.75fr) minmax(104px, 1fr)',
+            alignItems: 'center',
+            gap: 1.5,
+            px: 1.75,
+            py: 1.25,
+            borderRadius: '12px',
+            border: `1px solid ${dnr
+                ? alpha(theme.palette.primary.main, 0.24)
+                : alpha(theme.palette.divider, 0.92)}`,
+            bgcolor: dnr
+                ? alpha(theme.palette.primary.main, 0.055)
+                : alpha(theme.palette.background.default, 0.18),
+        })}
+    >
+        <Box>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.35 }}>
+                Date
+            </Typography>
+            <Typography variant="body2" fontWeight={600} sx={{ whiteSpace: 'nowrap' }}>
+                {item.start_date ? dayjs(item.start_date).format('DD/MM/YYYY') : 'N/A'}
+            </Typography>
+        </Box>
+        <Box>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.35 }}>
+                Donations
+            </Typography>
+            <Typography variant="body2" fontWeight={600}>
+                {item.donation_count.toLocaleString('en-US')}
+            </Typography>
+        </Box>
+        <Box sx={{ textAlign: 'right' }}>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.35 }}>
+                Raised
+            </Typography>
+            <Typography variant="body2" fontWeight={700} sx={{ whiteSpace: 'nowrap' }}>
+                {currencyFormatter.format(item.total_amount)}
+            </Typography>
+        </Box>
+    </Box>
+    );
+};
 
 const containerVariants = {
     hidden: { opacity: 0 },
@@ -69,8 +157,26 @@ const itemVariants = {
     }
 };
 
+const FilterFieldLabel: React.FC<{ label: string; optional?: boolean }> = ({ label, optional }) => (
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.9, minWidth: 0 }}>
+        <Typography
+            component="span"
+            variant="body2"
+            sx={{ fontWeight: 600, lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+        >
+            {label}
+        </Typography>
+        {optional && (
+            <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 'auto', flexShrink: 0 }}>
+                Optional
+            </Typography>
+        )}
+    </Box>
+);
+
 export const CampaignAnalyticsPage: React.FC = () => {
     const theme = useTheme();
+    const reduceMotion = Boolean(useReducedMotion());
     const { subscribe } = useWebSocket();
     const scrollObserver = useRef<IntersectionObserver | null>(null);
     const loadMoreRef = useRef(null);
@@ -98,6 +204,8 @@ export const CampaignAnalyticsPage: React.FC = () => {
     const [shareDialogOpen, setShareDialogOpen] = useState(false);
     const [generatedShareUrl, setGeneratedShareUrl] = useState('');
     const [copySuccess, setCopySuccess] = useState(false);
+    const [detailTab, setDetailTab] = useState(0);
+    const [revenueChartView, setRevenueChartView] = useState<RevenueChartView>('top10');
 
     const handleShareClick = async () => {
         if (!selectedSource) return;
@@ -108,7 +216,7 @@ export const CampaignAnalyticsPage: React.FC = () => {
             const sourceName = sources.find(s => s.id === selectedSource)?.name || selectedSource;
             const campaignName = campaigns.find(c => c.id === selectedCampaign)?.name || '';
 
-            const payload: any = {
+            const payload: ShareLinkPayload = {
                 source_id: selectedSource,
                 source_name: sourceName
             };
@@ -120,7 +228,7 @@ export const CampaignAnalyticsPage: React.FC = () => {
             if (endDate) payload.end_date = endDate.toISOString();
             if (selectedTitles.length > 0) payload.form_titles = selectedTitles.join(',');
 
-            const response = await apiClient.post('/analytics/share-link', payload);
+            const response = await apiClient.post<ShareLinkResponse>('/analytics/share-link', payload);
             console.log('Share API Response:', response.data);
 
             const { share_id } = response.data;
@@ -136,12 +244,12 @@ export const CampaignAnalyticsPage: React.FC = () => {
             try {
                 await navigator.clipboard.writeText(shareUrl);
                 setCopySuccess(true);
-            } catch (clipboardErr) {
+            } catch {
                 console.warn('Auto-copy failed, user can copy manually from dialog');
             }
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('Failed to generate share link:', err);
-            setError(err.message || 'Failed to generate share link');
+            setError(getErrorMessage(err, 'Failed to generate share link'));
         } finally {
             setIsGeneratingLink(false);
         }
@@ -188,20 +296,8 @@ export const CampaignAnalyticsPage: React.FC = () => {
     const inFlightDonations = useRef<AbortController | null>(null);
     const wsDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    const normalizeFormTitles = (data: any): ApiListItem[] => {
-        if (!Array.isArray(data)) return [];
-        const mapped = data
-            .map((t: any) => ({
-                id: t?.id ?? t?.form_title_id ?? t?.value ?? t?.key ?? '',
-                name: t?.name ?? t?.title ?? t?.label ?? t?.form_title_name ?? '(Untitled)',
-                createdTime: t?.createdTime,
-            }))
-            .filter((x: ApiListItem) => x.id);
-        return Array.from(new Map(mapped.map(x => [x.id, x])).values());
-    };
-
     useEffect(() => {
-        apiClient.get('/campaigns/sources')
+        apiClient.get<string[]>('/campaigns/sources')
             .then(res => setSources(res.data.map((s: string) => ({ id: s, name: s }))))
             .catch(() => setError('Failed to load sources.'))
             .finally(() => setLoading(prev => ({ ...prev, initial: false })));
@@ -216,11 +312,7 @@ export const CampaignAnalyticsPage: React.FC = () => {
         setLoading(prev => ({ ...prev, dependent: true }));
         apiClient.get<ApiListItem[]>(`/campaigns?source=${selectedSource}`)
             .then(res => {
-                const sortedCampaigns = res.data.sort((a, b) => {
-                    if (!a.createdTime || !b.createdTime) return 0;
-                    return new Date(a.createdTime).getTime() - new Date(b.createdTime).getTime();
-                });
-                setCampaigns(sortedCampaigns);
+                setCampaigns(sortNewestFirst(res.data));
             })
             .catch(() => setError('Failed to load campaigns for the selected source.'))
             .finally(() => setLoading(prev => ({ ...prev, dependent: false })));
@@ -235,7 +327,7 @@ export const CampaignAnalyticsPage: React.FC = () => {
         }
         setLoading(prev => ({ ...prev, dependent: true }));
 
-        apiClient.get(`/form-titles?campaign_id=${selectedCampaign}`)
+        apiClient.get<unknown>(`/form-titles?campaign_id=${selectedCampaign}`)
             .then(res => {
                 const normalized = normalizeFormTitles(res.data);
                 normalized.sort((a, b) => {
@@ -244,17 +336,12 @@ export const CampaignAnalyticsPage: React.FC = () => {
                 });
                 setFormTitles(normalized);
             })
-            .catch(async (err) => {
-                const status = err?.response?.status;
+            .catch(async (err: unknown) => {
+                const status = getResponseStatus(err);
                 if (status === 404) {
                     try {
-                        const statsRes = await apiClient.get(`/campaigns/${selectedCampaign}/stats`);
-                        const titlesFromStats = normalizeFormTitles(
-                            (statsRes.data?.stats_by_form_title ?? []).map((i: any) => ({
-                                form_title_id: i.form_title_id,
-                                form_title_name: i.form_title_name ?? i.campaign_name ?? i.form_title_id,
-                            }))
-                        );
+                        const statsRes = await apiClient.get<AnalyticsStatsResponse>(`/campaigns/${selectedCampaign}/stats`);
+                        const titlesFromStats = normalizeFormTitles(statsRes.data.stats_by_form_title ?? []);
                         setFormTitles(titlesFromStats);
                     } catch {
                         setError('Failed to load form titles (fallback).');
@@ -328,8 +415,8 @@ export const CampaignAnalyticsPage: React.FC = () => {
             setHasMoreDonations(nextOffset < total_count);
             setTotalDonationsCount(total_count);
 
-        } catch (err: any) {
-            if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') return;
+        } catch (err: unknown) {
+            if (isCanceledRequest(err)) return;
             setError(prev => prev || 'Failed to load more donations.');
         } finally {
             if (inFlightDonations.current === controller) {
@@ -379,26 +466,12 @@ export const CampaignAnalyticsPage: React.FC = () => {
                 ? `/campaigns/${selectedCampaign}/stats?${statsQuery}`
                 : `/campaigns/source/${selectedSource}/stats?${statsQuery}`;
 
-            const statsRes = await apiClient.get(statsUrl, { signal: statsController.signal });
-            const rawBreakdown = statsRes.data?.stats_by_campaign ?? statsRes.data?.stats_by_form_title ?? [];
-            const breakdown = Array.isArray(rawBreakdown) ? rawBreakdown.map((item: any) => ({
-                id: item?.campaign_id ?? item?.form_title_id ?? '',
-                name: item?.campaign_name ?? item?.form_title_name ?? 'Unknown',
-                total_amount: typeof item?.total_amount === 'number' ? item.total_amount : 0,
-                donation_count: typeof item?.donation_count === 'number' ? item.donation_count : 0,
-                start_date: item?.start_date ?? item?.createdTime,
-            })) : [];
-            const newStats: AnalyticsStats = {
-                total_amount: typeof statsRes.data?.source_total_amount === 'number' ? statsRes.data.source_total_amount :
-                    typeof statsRes.data?.campaign_total_amount === 'number' ? statsRes.data.campaign_total_amount : 0,
-                total_count: typeof statsRes.data?.source_total_count === 'number' ? statsRes.data.source_total_count :
-                    typeof statsRes.data?.campaign_total_count === 'number' ? statsRes.data.campaign_total_count : 0,
-                breakdown: breakdown
-            };
+            const statsRes = await apiClient.get<AnalyticsStatsResponse>(statsUrl, { signal: statsController.signal });
+            const newStats = normalizeAnalyticsStats(statsRes.data);
             setAnalyticsStats(newStats);
 
-        } catch (err: any) {
-            if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') return;
+        } catch (err: unknown) {
+            if (isCanceledRequest(err)) return;
             setError(prev => prev || 'Failed to load analytics stats.');
             setAnalyticsStats(null);
         } finally {
@@ -474,8 +547,8 @@ export const CampaignAnalyticsPage: React.FC = () => {
                 setHasMoreDonations(nextOffset < total_count);
                 setTotalDonationsCount(total_count);
 
-            } catch (err: any) {
-                if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') return;
+            } catch (err: unknown) {
+                if (isCanceledRequest(err)) return;
                 setError(prev => prev || 'Failed to load initial donations.');
                 setDonations([]);
                 setTotalDonationsCount(0);
@@ -512,12 +585,9 @@ export const CampaignAnalyticsPage: React.FC = () => {
     }, [subscribe, fetchData]);
 
     useEffect(() => {
-        const currentTableContainer = tableContainerRef.current;
-        if (!currentTableContainer) return;
-
         const options = {
-            root: currentTableContainer,
-            rootMargin: '0px',
+            root: tableContainerRef.current,
+            rootMargin: '240px 0px',
             threshold: 0.1
         };
 
@@ -540,7 +610,7 @@ export const CampaignAnalyticsPage: React.FC = () => {
                 scrollObserver.current.unobserve(currentLoadMoreRef);
             }
         };
-    }, [fetchMoreDonations, isLoadingMore, hasMoreDonations]);
+    }, [detailTab, fetchMoreDonations, isLoadingMore, hasMoreDonations]);
 
     const handleClearAllFilters = () => {
         setSelectedSource('');
@@ -563,23 +633,113 @@ export const CampaignAnalyticsPage: React.FC = () => {
     const totalAmount = stats?.total_amount ?? 0;
     const totalCount = stats?.total_count ?? 0;
     const chartData = stats?.breakdown;
+    const rankedChartData = useMemo(
+        () => [...(chartData ?? [])].sort((a, b) => b.total_amount - a.total_amount),
+        [chartData]
+    );
+    const chronologicalTitleGroups = useMemo(() => {
+        const sourceItems = chartData ?? [];
+        const titleGroups = new Map<string, typeof sourceItems>();
 
-    const [showFloatingStats, setShowFloatingStats] = useState(false);
+        sourceItems.forEach(item => {
+            const pairKey = getBaseTitle(item.name).toLocaleLowerCase();
+            const existingItems = titleGroups.get(pairKey) ?? [];
+            titleGroups.set(pairKey, [...existingItems, item]);
+        });
 
-    useEffect(() => {
-        const handleScroll = () => {
-            const threshold = 300; // Show floating stats after scrolling 300px
-            setShowFloatingStats(window.scrollY > threshold);
-        };
+        return Array.from(titleGroups.entries())
+            .map(([pairKey, items]) => {
+                const orderedItems = [...items].sort((a, b) => {
+                    const dnrOrder = Number(isDnrTitle(a.name)) - Number(isDnrTitle(b.name));
+                    if (dnrOrder !== 0) return dnrOrder;
 
-        window.addEventListener('scroll', handleScroll);
-        return () => window.removeEventListener('scroll', handleScroll);
-    }, []);
+                    const firstDate = a.start_date ? dayjs(a.start_date) : null;
+                    const secondDate = b.start_date ? dayjs(b.start_date) : null;
+                    const firstTime = firstDate?.isValid() ? firstDate.valueOf() : Number.MAX_SAFE_INTEGER;
+                    const secondTime = secondDate?.isValid() ? secondDate.valueOf() : Number.MAX_SAFE_INTEGER;
 
-    // Generate gradient colors for chart bars
-    const getBarColor = (index: number, total: number) => {
-        const hue = (index / total) * 360;
-        return `hsl(${hue}, 70%, 60%)`;
+                    if (firstTime !== secondTime) return firstTime - secondTime;
+                    return a.name.localeCompare(b.name);
+                });
+                const originalItem = orderedItems.find(item => !isDnrTitle(item.name));
+                const anchorItem = originalItem ?? orderedItems[0];
+                const anchorDate = anchorItem?.start_date ? dayjs(anchorItem.start_date) : null;
+
+                return {
+                    pairKey,
+                    baseTitle: getBaseTitle(anchorItem?.name ?? pairKey),
+                    anchorTime: anchorDate?.isValid() ? anchorDate.valueOf() : Number.MAX_SAFE_INTEGER,
+                    dateKey: anchorDate?.isValid() ? anchorDate.format('YYYY-MM-DD') : 'date-unavailable',
+                    items: orderedItems,
+                };
+            })
+            .sort((a, b) => {
+                if (a.anchorTime !== b.anchorTime) return a.anchorTime - b.anchorTime;
+                return a.baseTitle.localeCompare(b.baseTitle);
+            });
+    }, [chartData]);
+    const pairedChartData = useMemo(
+        () => chronologicalTitleGroups.flatMap(group => group.items),
+        [chronologicalTitleGroups]
+    );
+    const topRevenueData = useMemo(() => {
+        const topItems = rankedChartData.slice(0, 10);
+        const groupedItems = new Map<string, typeof topItems>();
+
+        topItems.forEach(item => {
+            const pairKey = getBaseTitle(item.name).toLocaleLowerCase();
+            const existingItems = groupedItems.get(pairKey) ?? [];
+            groupedItems.set(pairKey, [...existingItems, item]);
+        });
+
+        return Array.from(groupedItems.values()).flatMap(items => (
+            [...items].sort((a, b) => Number(isDnrTitle(a.name)) - Number(isDnrTitle(b.name)))
+        ));
+    }, [rankedChartData]);
+    const displayedChartData = revenueChartView === 'top10' ? topRevenueData : pairedChartData;
+    const chartHeight = revenueChartView === 'top10'
+        ? Math.max(400, topRevenueData.length * 42)
+        : selectedCampaign ? 560 : 420;
+    const chartMinWidth = selectedCampaign
+        ? Math.max(760, displayedChartData.length * 30)
+        : 720;
+    const viewTransition = {
+        duration: reduceMotion ? 0 : 0.22,
+        ease: [0.22, 1, 0.36, 1] as const,
+    };
+    const filterSelectSx = {
+        height: 48,
+        borderRadius: '12px',
+        bgcolor: alpha(theme.palette.background.default, 0.28),
+        transition: 'background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease',
+        '& .MuiSelect-select': {
+            display: 'flex',
+            alignItems: 'center',
+            minWidth: 0,
+            fontSize: '0.9rem',
+            fontWeight: 500,
+        },
+        '& .MuiOutlinedInput-notchedOutline': { borderColor: alpha(theme.palette.divider, 0.95) },
+        '&:hover': { bgcolor: alpha(theme.palette.background.default, 0.42) },
+        '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: alpha(theme.palette.primary.main, 0.45) },
+        '&.Mui-focused': { boxShadow: `0 0 0 3px ${alpha(theme.palette.primary.main, 0.14)}` },
+        '&.Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: theme.palette.primary.main, borderWidth: 1 },
+        '& .MuiSelect-icon': { color: theme.palette.text.secondary },
+    };
+    const filterTextFieldSx = {
+        '& .MuiOutlinedInput-root': {
+            minHeight: 48,
+            borderRadius: '12px',
+            bgcolor: alpha(theme.palette.background.default, 0.28),
+            transition: 'background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease',
+            '& fieldset': { borderColor: alpha(theme.palette.divider, 0.95) },
+            '&:hover': { bgcolor: alpha(theme.palette.background.default, 0.42) },
+            '&:hover fieldset': { borderColor: alpha(theme.palette.primary.main, 0.45) },
+            '&.Mui-focused': { boxShadow: `0 0 0 3px ${alpha(theme.palette.primary.main, 0.14)}` },
+            '&.Mui-focused fieldset': { borderColor: theme.palette.primary.main, borderWidth: 1 },
+        },
+        '& .MuiInputBase-input': { fontSize: '0.9rem', fontWeight: 500 },
+        '& .MuiSvgIcon-root': { color: theme.palette.text.secondary },
     };
 
     return (
@@ -590,121 +750,41 @@ export const CampaignAnalyticsPage: React.FC = () => {
             animate="visible"
             sx={{ width: '100%', maxWidth: '1600px', mx: 'auto', p: { xs: 2, md: 4 } }}
         >
-            {/* Floating Stats Pill (Sticky) - Centered in Content */}
-            <AnimatePresence>
-                {showFloatingStats && stats && (
-                    <Box
-                        component={motion.div}
-                        initial={{ y: -100, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        exit={{ y: -100, opacity: 0 }}
-                        transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-                        sx={{
-                            position: 'sticky',
-                            top: 80, // Below navbar
-                            zIndex: 1100,
-                            mx: 'auto', // Center horizontally in the content container
-                            mb: -10, // Negative margin to not take up space (approx height)
-                            background: alpha(theme.palette.background.paper, 0.8),
-                            backdropFilter: 'blur(16px)',
-                            borderRadius: '50px',
-                            boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
-                            border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
-                            px: 4,
-                            py: 1.5,
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 4,
-                            width: 'fit-content',
-                            pointerEvents: 'auto'
-                        }}
-                    >
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                            <Box sx={{
-                                p: 1,
-                                borderRadius: '50%',
-                                background: alpha(theme.palette.primary.main, 0.1),
-                                color: theme.palette.primary.main,
-                                display: 'flex'
-                            }}>
-                                <MonetizationOnIcon />
-                            </Box>
-                            <Box>
-                                <Typography variant="caption" sx={{ color: theme.palette.text.secondary, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block' }}>
-                                    Raised
-                                </Typography>
-                                <Typography variant="h6" sx={{ color: theme.palette.text.primary, fontWeight: 800, lineHeight: 1 }}>
-                                    ${totalAmount.toFixed(2)}
-                                </Typography>
-                            </Box>
-                        </Box>
-
-                        <Divider orientation="vertical" flexItem sx={{ height: '32px', alignSelf: 'center' }} />
-
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                            <Box sx={{
-                                p: 1,
-                                borderRadius: '50%',
-                                background: alpha(theme.palette.secondary.main, 0.1),
-                                color: theme.palette.secondary.main,
-                                display: 'flex'
-                            }}>
-                                <VolunteerActivismIcon />
-                            </Box>
-                            <Box>
-                                <Typography variant="caption" sx={{ color: theme.palette.text.secondary, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block' }}>
-                                    Donations
-                                </Typography>
-                                <Typography variant="h6" sx={{ color: theme.palette.text.primary, fontWeight: 800, lineHeight: 1 }}>
-                                    {totalCount}
-                                </Typography>
-                            </Box>
-                        </Box>
-                    </Box>
-                )}
-            </AnimatePresence>
-
             {/* Combined Header & Stats Container */}
             <Box
                 sx={{
-                    mb: 4,
-                    p: 4,
+                    mb: 3,
+                    p: { xs: 2.5, md: 3 },
                     borderRadius: '20px',
-                    background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.05)} 0%, ${alpha(theme.palette.secondary.main, 0.05)} 100%)`,
-                    backdropFilter: 'blur(20px)',
-                    border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
-                    boxShadow: theme.shadows[1],
+                    bgcolor: theme.palette.background.paper,
+                    border: `1px solid ${theme.palette.divider}`,
+                    boxShadow: 'none',
                 }}
             >
                 {/* Header Title & Description */}
-                <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <Box sx={{ mb: stats ? 3 : 0, display: 'flex', justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'flex-start' }, gap: 2, flexDirection: { xs: 'column', sm: 'row' } }}>
                     <Box>
                         <Typography
-                            variant="h3"
+                            variant="h4"
                             component={motion.h1}
-                            initial={{ opacity: 0, y: -20 }}
+                            initial={{ opacity: 0, y: -8 }}
                             animate={{ opacity: 1, y: 0 }}
                             sx={{
-                                fontWeight: 800,
-                                background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
-                                WebkitBackgroundClip: 'text',
-                                WebkitTextFillColor: 'transparent',
-                                backgroundClip: 'text',
-                                mb: 1,
-                                textShadow: '0 2px 10px rgba(0,0,0,0.1)'
+                                fontWeight: 700,
+                                color: theme.palette.text.primary,
+                                mb: 0.75,
                             }}
                         >
                             Campaign Analytics
                         </Typography>
                         <Typography
-                            variant="h6"
+                            variant="body1"
                             component={motion.p}
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
-                            transition={{ delay: 0.2 }}
                             sx={{
                                 color: theme.palette.text.secondary,
-                                fontWeight: 500,
+                                fontWeight: 400,
                                 maxWidth: '600px',
                             }}
                         >
@@ -712,16 +792,16 @@ export const CampaignAnalyticsPage: React.FC = () => {
                         </Typography>
                     </Box>
                     <Button
-                        variant="contained"
+                        variant="outlined"
                         startIcon={isGeneratingLink ? <CircularProgress size={20} color="inherit" /> : <ShareIcon />}
                         onClick={handleShareClick}
                         disabled={isGeneratingLink || !selectedSource}
                         sx={{
                             borderRadius: '12px',
                             textTransform: 'none',
-                            fontWeight: 700,
-                            boxShadow: theme.shadows[4],
-                            background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
+                            fontWeight: 600,
+                            boxShadow: 'none',
+                            alignSelf: { xs: 'stretch', sm: 'flex-start' },
                         }}
                     >
                         Share View
@@ -735,25 +815,22 @@ export const CampaignAnalyticsPage: React.FC = () => {
                             <motion.div variants={itemVariants}>
                                 <Card
                                     sx={{
-                                        background: alpha(theme.palette.background.paper, 0.6),
-                                        backdropFilter: 'blur(10px)',
-                                        border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+                                        background: alpha(theme.palette.background.default, 0.38),
+                                        border: `1px solid ${alpha(theme.palette.divider, 0.85)}`,
                                         boxShadow: 'none',
                                         borderRadius: '16px',
-                                        transition: 'all 0.3s ease',
+                                        transition: 'border-color 180ms ease',
                                         '&:hover': {
-                                            transform: 'translateY(-2px)',
-                                            boxShadow: theme.shadows[2],
                                             borderColor: alpha(theme.palette.primary.main, 0.2)
                                         }
                                     }}
                                 >
-                                    <CardContent sx={{ p: 3, '&:last-child': { pb: 3 } }}>
-                                        <Typography variant="caption" sx={{ color: theme.palette.text.secondary, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                                            Total Raised
+                                    <CardContent sx={{ p: 2.25, '&:last-child': { pb: 2.25 } }}>
+                                        <Typography variant="body2" sx={{ color: theme.palette.text.secondary, fontWeight: 600 }}>
+                                            Total raised
                                         </Typography>
-                                        <Typography variant="h4" sx={{ color: theme.palette.text.primary, fontWeight: 800, mt: 1 }}>
-                                            ${totalAmount.toFixed(2)}
+                                        <Typography variant="h5" sx={{ color: theme.palette.text.primary, fontWeight: 700, mt: 0.75 }}>
+                                            {currencyFormatter.format(totalAmount)}
                                         </Typography>
                                     </CardContent>
                                 </Card>
@@ -763,25 +840,22 @@ export const CampaignAnalyticsPage: React.FC = () => {
                             <motion.div variants={itemVariants}>
                                 <Card
                                     sx={{
-                                        background: alpha(theme.palette.background.paper, 0.6),
-                                        backdropFilter: 'blur(10px)',
-                                        border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+                                        background: alpha(theme.palette.background.default, 0.38),
+                                        border: `1px solid ${alpha(theme.palette.divider, 0.85)}`,
                                         boxShadow: 'none',
                                         borderRadius: '16px',
-                                        transition: 'all 0.3s ease',
+                                        transition: 'border-color 180ms ease',
                                         '&:hover': {
-                                            transform: 'translateY(-2px)',
-                                            boxShadow: theme.shadows[2],
                                             borderColor: alpha(theme.palette.primary.main, 0.2)
                                         }
                                     }}
                                 >
-                                    <CardContent sx={{ p: 3, '&:last-child': { pb: 3 } }}>
-                                        <Typography variant="caption" sx={{ color: theme.palette.text.secondary, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                    <CardContent sx={{ p: 2.25, '&:last-child': { pb: 2.25 } }}>
+                                        <Typography variant="body2" sx={{ color: theme.palette.text.secondary, fontWeight: 600 }}>
                                             Donations
                                         </Typography>
-                                        <Typography variant="h4" sx={{ color: theme.palette.text.primary, fontWeight: 800, mt: 1 }}>
-                                            {totalCount}
+                                        <Typography variant="h5" sx={{ color: theme.palette.text.primary, fontWeight: 700, mt: 0.75 }}>
+                                            {totalCount.toLocaleString('en-US')}
                                         </Typography>
                                     </CardContent>
                                 </Card>
@@ -791,25 +865,22 @@ export const CampaignAnalyticsPage: React.FC = () => {
                             <motion.div variants={itemVariants}>
                                 <Card
                                     sx={{
-                                        background: alpha(theme.palette.background.paper, 0.6),
-                                        backdropFilter: 'blur(10px)',
-                                        border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+                                        background: alpha(theme.palette.background.default, 0.38),
+                                        border: `1px solid ${alpha(theme.palette.divider, 0.85)}`,
                                         boxShadow: 'none',
                                         borderRadius: '16px',
-                                        transition: 'all 0.3s ease',
+                                        transition: 'border-color 180ms ease',
                                         '&:hover': {
-                                            transform: 'translateY(-2px)',
-                                            boxShadow: theme.shadows[2],
                                             borderColor: alpha(theme.palette.primary.main, 0.2)
                                         }
                                     }}
                                 >
-                                    <CardContent sx={{ p: 3, '&:last-child': { pb: 3 } }}>
-                                        <Typography variant="caption" sx={{ color: theme.palette.text.secondary, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                                            Avg. Donation
+                                    <CardContent sx={{ p: 2.25, '&:last-child': { pb: 2.25 } }}>
+                                        <Typography variant="body2" sx={{ color: theme.palette.text.secondary, fontWeight: 600 }}>
+                                            Average donation
                                         </Typography>
-                                        <Typography variant="h4" sx={{ color: theme.palette.text.primary, fontWeight: 800, mt: 1 }}>
-                                            ${totalCount > 0 ? (totalAmount / totalCount).toFixed(2) : '0.00'}
+                                        <Typography variant="h5" sx={{ color: theme.palette.text.primary, fontWeight: 700, mt: 0.75 }}>
+                                            {currencyFormatter.format(totalCount > 0 ? totalAmount / totalCount : 0)}
                                         </Typography>
                                     </CardContent>
                                 </Card>
@@ -819,24 +890,21 @@ export const CampaignAnalyticsPage: React.FC = () => {
                             <motion.div variants={itemVariants}>
                                 <Card
                                     sx={{
-                                        background: alpha(theme.palette.background.paper, 0.6),
-                                        backdropFilter: 'blur(10px)',
-                                        border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
+                                        background: alpha(theme.palette.background.default, 0.38),
+                                        border: `1px solid ${alpha(theme.palette.divider, 0.85)}`,
                                         boxShadow: 'none',
                                         borderRadius: '16px',
-                                        transition: 'all 0.3s ease',
+                                        transition: 'border-color 180ms ease',
                                         '&:hover': {
-                                            transform: 'translateY(-2px)',
-                                            boxShadow: theme.shadows[2],
                                             borderColor: alpha(theme.palette.primary.main, 0.2)
                                         }
                                     }}
                                 >
-                                    <CardContent sx={{ p: 3, '&:last-child': { pb: 3 } }}>
-                                        <Typography variant="caption" sx={{ color: theme.palette.text.secondary, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                                            Emails
+                                    <CardContent sx={{ p: 2.25, '&:last-child': { pb: 2.25 } }}>
+                                        <Typography variant="body2" sx={{ color: theme.palette.text.secondary, fontWeight: 600 }}>
+                                            {selectedCampaign ? 'Form titles' : 'Campaigns'}
                                         </Typography>
-                                        <Typography variant="h4" sx={{ color: theme.palette.text.primary, fontWeight: 800, mt: 1 }}>
+                                        <Typography variant="h5" sx={{ color: theme.palette.text.primary, fontWeight: 700, mt: 0.75 }}>
                                             {chartData?.length ?? 0}
                                         </Typography>
                                     </CardContent>
@@ -849,222 +917,241 @@ export const CampaignAnalyticsPage: React.FC = () => {
 
             <Grid container spacing={3}>
                 {/* Control Panel */}
-                <Grid size={{ xs: 12, lg: 4 }}>
+                <Grid size={{ xs: 12 }}>
                     <motion.div variants={itemVariants}>
                         <Paper
                             sx={{
-                                p: 4,
-                                position: 'sticky',
-                                top: '24px',
-                                background: `linear-gradient(145deg, ${alpha(theme.palette.background.paper, 0.6)} 0%, ${alpha(theme.palette.background.paper, 0.9)} 100%)`,
-                                backdropFilter: 'blur(20px)',
-                                border: `1px solid ${alpha(theme.palette.common.white, 0.05)}`,
-                                borderRadius: '24px',
-                                boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.3)',
+                                p: { xs: 2.5, md: 3 },
+                                background: `linear-gradient(180deg, ${theme.palette.background.paper} 0%, ${alpha(theme.palette.background.paper, 0.92)} 100%)`,
+                                border: `1px solid ${theme.palette.divider}`,
+                                borderRadius: '20px',
+                                boxShadow: `inset 0 1px 0 ${alpha(theme.palette.common.white, theme.palette.mode === 'dark' ? 0.04 : 0.7)}`,
                                 overflow: 'hidden'
                             }}
                         >
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 4 }}>
-                                <Box
-                                    sx={{
-                                        p: 1,
-                                        borderRadius: '12px',
-                                        background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.2)} 0%, ${alpha(theme.palette.primary.main, 0.1)} 100%)`,
-                                        display: 'flex'
-                                    }}
-                                >
-                                    <FilterListIcon sx={{ color: theme.palette.primary.main }} />
-                                </Box>
-                                <Typography variant="h6" fontWeight="800" sx={{ letterSpacing: '0.5px' }}>
-                                    CONTROL PANEL
-                                </Typography>
-                            </Box>
-
-                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                                <FormControl fullWidth variant="filled">
-                                    <InputLabel sx={{ color: alpha(theme.palette.text.primary, 0.7) }}>1. Select Source</InputLabel>
-                                    <Select
-                                        value={selectedSource}
-                                        onChange={e => setSelectedSource(e.target.value)}
-                                        disabled={loading.initial}
-                                        disableUnderline
+                            <Box
+                                sx={{
+                                    display: 'flex',
+                                    alignItems: { xs: 'flex-start', sm: 'center' },
+                                    justifyContent: 'space-between',
+                                    flexDirection: { xs: 'column', sm: 'row' },
+                                    gap: 2,
+                                    mb: 3,
+                                }}
+                            >
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
+                                    <Box
                                         sx={{
-                                            borderRadius: '16px',
-                                            backgroundColor: alpha(theme.palette.background.default, 0.3),
-                                            border: `1px solid ${alpha(theme.palette.common.white, 0.05)}`,
-                                            transition: 'all 0.3s ease',
-                                            '&:hover': {
-                                                backgroundColor: alpha(theme.palette.background.default, 0.5),
-                                                borderColor: alpha(theme.palette.primary.main, 0.3),
-                                            },
-                                            '&.Mui-focused': {
-                                                backgroundColor: alpha(theme.palette.background.default, 0.5),
-                                                borderColor: theme.palette.primary.main,
-                                                boxShadow: `0 0 0 4px ${alpha(theme.palette.primary.main, 0.2)}`
-                                            },
-                                            '& .MuiSelect-icon': { color: theme.palette.primary.main }
+                                            width: 40,
+                                            height: 40,
+                                            borderRadius: '12px',
+                                            background: alpha(theme.palette.primary.main, 0.1),
+                                            border: `1px solid ${alpha(theme.palette.primary.main, 0.12)}`,
+                                            display: 'grid',
+                                            placeItems: 'center',
+                                            flexShrink: 0,
                                         }}
                                     >
-                                        {sources.map(s => <MenuItem key={s.id} value={s.id}>{s.name}</MenuItem>)}
-                                    </Select>
-                                </FormControl>
+                                        <FilterListIcon sx={{ color: theme.palette.primary.main, fontSize: 20 }} />
+                                    </Box>
+                                    <Box sx={{ minWidth: 0 }}>
+                                        <Typography variant="h6" sx={{ fontWeight: 600, letterSpacing: '-0.01em', lineHeight: 1.2 }}>
+                                            Build your analytics view
+                                        </Typography>
+                                        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.35, lineHeight: 1.45 }}>
+                                            Refine the dataset, then update the chart and detailed results.
+                                        </Typography>
+                                    </Box>
+                                </Box>
+                                <Button
+                                    variant="text"
+                                    size="small"
+                                    startIcon={<RestartAltRoundedIcon />}
+                                    onClick={handleClearAllFilters}
+                                    disabled={!selectedSource}
+                                    sx={{
+                                        color: 'text.secondary',
+                                        textTransform: 'none',
+                                        fontWeight: 600,
+                                        borderRadius: '10px',
+                                        px: 1.25,
+                                        flexShrink: 0,
+                                    }}
+                                >
+                                    Reset view
+                                </Button>
+                            </Box>
 
-                                <Collapse in={!!selectedSource} timeout="auto" sx={{ width: '100%' }}>
-                                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                                        <FormControl fullWidth disabled={!selectedSource || loading.dependent} variant="filled">
-                                            <InputLabel sx={{ color: alpha(theme.palette.text.primary, 0.7) }}>2. Drill Down by Campaign (Optional)</InputLabel>
-                                            <Select
-                                                value={selectedCampaign}
-                                                onChange={e => setSelectedCampaign(e.target.value)}
-                                                disableUnderline
+                            <Box
+                                sx={{
+                                    display: 'flex',
+                                    flexWrap: 'wrap',
+                                    gap: 2,
+                                    alignItems: 'flex-end',
+                                }}
+                            >
+                                <Box sx={{ flex: '1 1 170px', minWidth: 0 }}>
+                                    <FilterFieldLabel label="Source" />
+                                    <FormControl fullWidth variant="outlined" size="small">
+                                        <Select
+                                            value={selectedSource}
+                                            onChange={e => setSelectedSource(e.target.value)}
+                                            disabled={loading.initial}
+                                            displayEmpty
+                                            inputProps={{ 'aria-label': 'Source' }}
+                                            renderValue={(value) => sources.find(source => source.id === value)?.name || <Typography color="text.secondary">Choose source</Typography>}
+                                            sx={filterSelectSx}
+                                        >
+                                            {sources.map(s => <MenuItem key={s.id} value={s.id}>{s.name}</MenuItem>)}
+                                        </Select>
+                                    </FormControl>
+                                </Box>
+
+                                <Box sx={{ flex: '3 1 520px', minWidth: 0 }}>
+                                    <Box
+                                        sx={{
+                                            display: 'grid',
+                                            gridTemplateColumns: { xs: '1fr', sm: 'minmax(190px, 1.15fr) minmax(310px, 1.7fr)' },
+                                            gap: 2,
+                                            alignItems: 'end',
+                                        }}
+                                    >
+                                        <Box sx={{ minWidth: 0 }}>
+                                            <FilterFieldLabel label="Campaign" optional />
+                                            <FormControl fullWidth disabled={!selectedSource || loading.dependent} variant="outlined" size="small">
+                                                <Select
+                                                    value={selectedCampaign}
+                                                    onChange={e => setSelectedCampaign(e.target.value)}
+                                                    displayEmpty
+                                                    inputProps={{ 'aria-label': 'Campaign' }}
+                                                    renderValue={(value) => campaigns.find(campaign => campaign.id === value)?.name || (
+                                                        <Typography color="text.secondary">
+                                                            {selectedSource ? 'All campaigns' : 'Select source first'}
+                                                        </Typography>
+                                                    )}
+                                                    sx={filterSelectSx}
+                                                >
+                                                    <MenuItem value=""><em>All campaigns</em></MenuItem>
+                                                    {campaigns.map(c => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
+                                                </Select>
+                                            </FormControl>
+                                        </Box>
+
+                                        <Box sx={{ minWidth: 0 }}>
+                                            <FilterFieldLabel label="Date range" optional />
+                                            <Box
                                                 sx={{
-                                                    borderRadius: '16px',
-                                                    backgroundColor: alpha(theme.palette.background.default, 0.3),
-                                                    border: `1px solid ${alpha(theme.palette.common.white, 0.05)}`,
-                                                    transition: 'all 0.3s ease',
-                                                    '&:hover': {
-                                                        backgroundColor: alpha(theme.palette.background.default, 0.5),
-                                                        borderColor: alpha(theme.palette.primary.main, 0.3),
-                                                    },
-                                                    '&.Mui-focused': {
-                                                        backgroundColor: alpha(theme.palette.background.default, 0.5),
-                                                        borderColor: theme.palette.primary.main,
-                                                        boxShadow: `0 0 0 4px ${alpha(theme.palette.primary.main, 0.2)}`
-                                                    },
-                                                    '& .MuiSelect-icon': { color: theme.palette.primary.main }
+                                                    display: 'grid',
+                                                    gridTemplateColumns: { xs: '1fr', sm: 'minmax(0, 1fr) auto minmax(0, 1fr)' },
+                                                    gap: { xs: 1.25, sm: 0.75 },
+                                                    alignItems: 'center',
                                                 }}
                                             >
-                                                <MenuItem value=""><em>-- View All Campaigns in Source --</em></MenuItem>
-                                                {campaigns.map(c => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
-                                            </Select>
-                                        </FormControl>
-
-                                        <Box sx={{ display: 'flex', gap: 2, flexDirection: { xs: 'column', sm: 'row' } }}>
-                                            <DatePicker
-                                                label="Start Date"
-                                                value={startDate}
-                                                onChange={setStartDate}
-                                                disabled={!selectedSource}
-                                                slotProps={{
-                                                    textField: {
-                                                        fullWidth: true,
-                                                        variant: 'filled',
-                                                        InputProps: { disableUnderline: true },
-                                                        sx: {
-                                                            '& .MuiFilledInput-root': {
-                                                                borderRadius: '16px',
-                                                                backgroundColor: alpha(theme.palette.background.default, 0.3),
-                                                                border: `1px solid ${alpha(theme.palette.common.white, 0.05)}`,
-                                                                transition: 'all 0.3s ease',
-                                                                '&:hover': {
-                                                                    backgroundColor: alpha(theme.palette.background.default, 0.5),
-                                                                    borderColor: alpha(theme.palette.primary.main, 0.3),
-                                                                },
-                                                                '&.Mui-focused': {
-                                                                    backgroundColor: alpha(theme.palette.background.default, 0.5),
-                                                                    borderColor: theme.palette.primary.main,
-                                                                    boxShadow: `0 0 0 4px ${alpha(theme.palette.primary.main, 0.2)}`
-                                                                }
-                                                            },
-                                                            '& .MuiInputLabel-root': { color: alpha(theme.palette.text.primary, 0.7) },
-                                                            '& .MuiSvgIcon-root': { color: theme.palette.primary.main }
+                                                <DatePicker
+                                                    label="From"
+                                                    value={startDate}
+                                                    onChange={setStartDate}
+                                                    disabled={!selectedSource}
+                                                    slotProps={{
+                                                        textField: {
+                                                            fullWidth: true,
+                                                            size: 'small',
+                                                            inputProps: { 'aria-label': 'Start date' },
+                                                            sx: filterTextFieldSx,
                                                         }
-                                                    }
-                                                }}
-                                            />
-                                            <DatePicker
-                                                label="End Date"
-                                                value={endDate}
-                                                onChange={setEndDate}
-                                                disabled={!selectedSource}
-                                                slotProps={{
-                                                    textField: {
-                                                        fullWidth: true,
-                                                        variant: 'filled',
-                                                        InputProps: { disableUnderline: true },
-                                                        sx: {
-                                                            '& .MuiFilledInput-root': {
-                                                                borderRadius: '16px',
-                                                                backgroundColor: alpha(theme.palette.background.default, 0.3),
-                                                                border: `1px solid ${alpha(theme.palette.common.white, 0.05)}`,
-                                                                transition: 'all 0.3s ease',
-                                                                '&:hover': {
-                                                                    backgroundColor: alpha(theme.palette.background.default, 0.5),
-                                                                    borderColor: alpha(theme.palette.primary.main, 0.3),
-                                                                },
-                                                                '&.Mui-focused': {
-                                                                    backgroundColor: alpha(theme.palette.background.default, 0.5),
-                                                                    borderColor: theme.palette.primary.main,
-                                                                    boxShadow: `0 0 0 4px ${alpha(theme.palette.primary.main, 0.2)}`
-                                                                }
-                                                            },
-                                                            '& .MuiInputLabel-root': { color: alpha(theme.palette.text.primary, 0.7) },
-                                                            '& .MuiSvgIcon-root': { color: theme.palette.primary.main }
+                                                    }}
+                                                />
+                                                <ArrowForwardRoundedIcon
+                                                    aria-hidden="true"
+                                                    sx={{ display: { xs: 'none', sm: 'block' }, color: 'text.disabled', fontSize: 18 }}
+                                                />
+                                                <DatePicker
+                                                    label="To"
+                                                    value={endDate}
+                                                    onChange={setEndDate}
+                                                    disabled={!selectedSource}
+                                                    slotProps={{
+                                                        textField: {
+                                                            fullWidth: true,
+                                                            size: 'small',
+                                                            inputProps: { 'aria-label': 'End date' },
+                                                            sx: filterTextFieldSx,
                                                         }
-                                                    }
-                                                }}
-                                            />
+                                                    }}
+                                                />
+                                            </Box>
                                         </Box>
                                     </Box>
-                                </Collapse>
+                                </Box>
 
-                                <Collapse in={!!selectedCampaign} timeout="auto" unmountOnExit>
-                                    <Divider sx={{ my: 2, borderColor: alpha(theme.palette.common.white, 0.1) }}>
-                                        <Chip
-                                            label="Detailed Report"
-                                            icon={<TuneIcon sx={{ fontSize: '16px !important' }} />}
-                                            sx={{
-                                                background: alpha(theme.palette.background.default, 0.5),
-                                                backdropFilter: 'blur(10px)',
-                                                border: `1px solid ${alpha(theme.palette.common.white, 0.1)}`
-                                            }}
-                                        />
-                                    </Divider>
+                                <Box sx={{ flex: '1.45 1 230px', minWidth: 0 }}>
+                                    <FilterFieldLabel label="Form titles" optional />
                                     <FormTitleSelector
                                         key={selectorKey}
                                         titles={formTitles}
                                         onSelectionChange={setSelectedTitles}
-                                        isLoading={loading.dependent}
+                                        isLoading={!!selectedCampaign && loading.dependent}
+                                        disabled={!selectedCampaign || loading.dependent}
+                                        hideInputLabel
+                                        label="Form titles"
+                                        placeholder={selectedCampaign ? 'All form titles' : 'Select campaign first'}
+                                        size="small"
+                                        compactSelection
+                                        showLeadingIcon={false}
+                                        sx={{
+                                            ...filterTextFieldSx,
+                                            '& .MuiAutocomplete-inputRoot': {
+                                                height: 48,
+                                                minHeight: 48,
+                                                maxHeight: 48,
+                                                py: '3px !important',
+                                                pr: '38px !important',
+                                                flexWrap: 'nowrap',
+                                                overflow: 'hidden',
+                                                alignContent: 'center',
+                                            },
+                                            '& .MuiAutocomplete-input': { minWidth: '24px !important' },
+                                            '& .MuiChip-root': { minWidth: 0, maxWidth: 'calc(100% - 32px)' },
+                                            '& .MuiChip-label': { overflow: 'hidden', textOverflow: 'ellipsis' },
+                                        }}
                                     />
-                                </Collapse>
+                                </Box>
 
-                                <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                <Box
+                                    sx={{
+                                        display: 'flex',
+                                        flex: { xs: '1 1 100%', sm: '0 0 160px' },
+                                        minWidth: { xs: '100%', sm: 160 },
+                                        alignSelf: 'flex-end',
+                                        justifyContent: 'flex-end',
+                                    }}
+                                >
                                     <Button
                                         variant="contained"
                                         onClick={handleApplyFilters}
                                         disabled={!selectedSource || loading.stats}
                                         fullWidth
                                         sx={{
-                                            py: 1.5,
+                                            minHeight: 48,
                                             borderRadius: '12px',
-                                            background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
-                                            boxShadow: `0 8px 16px ${alpha(theme.palette.primary.main, 0.3)}`,
-                                            fontSize: '1rem',
-                                            fontWeight: 700,
+                                            background: theme.palette.primary.main,
+                                            boxShadow: `0 8px 20px ${alpha(theme.palette.primary.main, 0.16)}`,
+                                            fontSize: '0.9rem',
+                                            fontWeight: 600,
                                             textTransform: 'none',
+                                            transition: 'transform 160ms ease, box-shadow 160ms ease, background-color 160ms ease',
                                             '&:hover': {
-                                                transform: 'translateY(-2px)',
-                                                boxShadow: `0 12px 20px ${alpha(theme.palette.primary.main, 0.4)}`,
+                                                background: theme.palette.primary.dark,
+                                                boxShadow: `0 10px 24px ${alpha(theme.palette.primary.main, 0.22)}`,
+                                                transform: 'translateY(-1px)',
+                                            },
+                                            '&:active': {
+                                                transform: 'translateY(0)',
                                             }
                                         }}
+                                        endIcon={<ArrowForwardRoundedIcon />}
                                     >
-                                        Apply Filters
-                                    </Button>
-                                    <Button
-                                        variant="text"
-                                        onClick={handleClearAllFilters}
-                                        disabled={!selectedSource}
-                                        fullWidth
-                                        sx={{
-                                            color: alpha(theme.palette.text.primary, 0.6),
-                                            textTransform: 'none',
-                                            '&:hover': {
-                                                color: theme.palette.error.main,
-                                                background: alpha(theme.palette.error.main, 0.1)
-                                            }
-                                        }}
-                                    >
-                                        Clear All Filters
+                                        Update view
                                     </Button>
                                 </Box>
                             </Box>
@@ -1073,7 +1160,7 @@ export const CampaignAnalyticsPage: React.FC = () => {
                 </Grid>
 
                 {/* Results Panel */}
-                <Grid size={{ xs: 12, lg: 8 }}>
+                <Grid size={{ xs: 12 }}>
                     {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
                     {loading.stats ? (
@@ -1141,55 +1228,214 @@ export const CampaignAnalyticsPage: React.FC = () => {
                                     sx={{
                                         width: '100%',
                                         p: 3,
-                                        borderRadius: '16px',
-                                        background: `linear-gradient(145deg, ${alpha(theme.palette.background.paper, 0.9)} 0%, ${alpha(theme.palette.background.paper, 0.95)} 100%)`,
-                                        backdropFilter: 'blur(20px)',
-                                        border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
-                                        boxShadow: theme.shadows[8]
+                                        borderRadius: '20px',
+                                        bgcolor: theme.palette.background.paper,
+                                        border: `1px solid ${theme.palette.divider}`,
+                                        boxShadow: 'none'
                                     }}
                                 >
-                                    <Typography variant="h6" gutterBottom fontWeight="700">
-                                        {selectedCampaign ? 'Revenue by Form Title' : 'Revenue by Campaign'}
-                                    </Typography>
-                                    <ResponsiveContainer width="100%" height={selectedCampaign ? 562 : 420}>
-                                        <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 120 }}>
-                                            <defs>
-                                                {chartData.map((_, index) => (
-                                                    <linearGradient key={index} id={`colorGradient${index}`} x1="0" y1="0" x2="0" y2="1">
-                                                        <stop offset="5%" stopColor={getBarColor(index, chartData.length)} stopOpacity={0.8} />
-                                                        <stop offset="95%" stopColor={getBarColor(index, chartData.length)} stopOpacity={0.3} />
-                                                    </linearGradient>
-                                                ))}
-                                            </defs>
-                                            <CartesianGrid strokeDasharray="3 3" stroke={alpha(theme.palette.text.secondary, 0.1)} />
-                                            <XAxis
-                                                dataKey="name"
-                                                angle={-45}
-                                                textAnchor="end"
-                                                interval={0}
-                                                tick={{ fill: theme.palette.text.secondary, fontSize: 12 }}
-                                            />
-                                            <YAxis
-                                                tickFormatter={(tick) => `$${tick.toLocaleString()}`}
-                                                tick={{ fill: theme.palette.text.secondary }}
-                                            />
-                                            <Tooltip
-                                                formatter={(value: number) => [`$${Number(value).toFixed(2)}`, 'Amount']}
-                                                contentStyle={{
-                                                    backgroundColor: alpha(theme.palette.background.paper, 0.95),
-                                                    border: `1px solid ${theme.palette.divider}`,
-                                                    borderRadius: '8px',
-                                                    backdropFilter: 'blur(10px)'
+                                    <Box
+                                        sx={{
+                                            mb: 1,
+                                            display: 'flex',
+                                            alignItems: { xs: 'flex-start', sm: 'center' },
+                                            justifyContent: 'space-between',
+                                            flexDirection: { xs: 'column', sm: 'row' },
+                                            gap: 1.5,
+                                        }}
+                                    >
+                                        <Typography variant="h6" fontWeight="700">
+                                            {selectedCampaign ? 'Revenue by Form Title' : 'Revenue by Campaign'}
+                                        </Typography>
+                                        {chartData.length > 10 && (
+                                            <ToggleButtonGroup
+                                                value={revenueChartView}
+                                                exclusive
+                                                size="small"
+                                                aria-label="Revenue chart range"
+                                                onChange={(_event, nextView: RevenueChartView | null) => {
+                                                    if (nextView) setRevenueChartView(nextView);
                                                 }}
-                                                cursor={{ fill: alpha(theme.palette.primary.main, 0.1) }}
-                                            />
-                                            <Bar dataKey="total_amount" name="Amount" radius={[8, 8, 0, 0]}>
-                                                {chartData.map((_entry, index) => (
-                                                    <Cell key={`cell-${index}`} fill={`url(#colorGradient${index})`} />
-                                                ))}
-                                            </Bar>
-                                        </BarChart>
-                                    </ResponsiveContainer>
+                                                sx={{
+                                                    '& .MuiToggleButton-root': {
+                                                        minHeight: 36,
+                                                        px: 1.5,
+                                                        borderColor: theme.palette.divider,
+                                                        color: theme.palette.text.secondary,
+                                                        textTransform: 'none',
+                                                        fontWeight: 650,
+                                                        '&.Mui-selected': {
+                                                            bgcolor: alpha(theme.palette.primary.main, 0.12),
+                                                            color: theme.palette.primary.main,
+                                                            '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.16) },
+                                                        },
+                                                    },
+                                                }}
+                                            >
+                                                <ToggleButton value="top10">Top 10</ToggleButton>
+                                                <ToggleButton value="all">All forms</ToggleButton>
+                                            </ToggleButtonGroup>
+                                        )}
+                                    </Box>
+                                    {selectedCampaign && (
+                                        <Stack direction="row" spacing={2} sx={{ mb: 1.5 }} aria-label="Chart color legend">
+                                            <Stack direction="row" spacing={0.75} alignItems="center">
+                                                <Box sx={{ width: 9, height: 9, borderRadius: '50%', bgcolor: 'primary.main' }} />
+                                                <Typography variant="caption" color="text.secondary">Original</Typography>
+                                            </Stack>
+                                            <Stack direction="row" spacing={0.75} alignItems="center">
+                                                <Box sx={{ width: 9, height: 9, borderRadius: '50%', bgcolor: 'secondary.main' }} />
+                                                <Typography variant="caption" color="text.secondary">DNR</Typography>
+                                            </Stack>
+                                        </Stack>
+                                    )}
+                                    <Box
+                                        role="img"
+                                        aria-label={`${selectedCampaign ? 'Revenue by form title' : 'Revenue by campaign'}: ${revenueChartView === 'top10' ? 'top 10' : 'all results'}`}
+                                        sx={{
+                                            width: '100%',
+                                            overflowY: 'hidden',
+                                        }}
+                                    >
+                                        <AnimatePresence mode="wait" initial={false}>
+                                            <motion.div
+                                                key={revenueChartView}
+                                                initial={reduceMotion ? false : { opacity: 0, y: 10, scale: 0.995 }}
+                                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                                exit={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -8, scale: 0.995 }}
+                                                transition={viewTransition}
+                                                style={{ width: '100%' }}
+                                            >
+                                                {revenueChartView === 'top10' ? (
+                                            <ResponsiveContainer width="100%" height={chartHeight}>
+                                                <BarChart
+                                                    data={topRevenueData}
+                                                    layout="vertical"
+                                                    margin={{ top: 8, right: 44, left: 12, bottom: 4 }}
+                                                >
+                                                    <defs>
+                                                        <linearGradient id="topRevenueOriginal" x1="0" y1="0" x2="1" y2="0">
+                                                            <stop offset="0%" stopColor={theme.palette.primary.dark} />
+                                                            <stop offset="100%" stopColor={theme.palette.primary.light} />
+                                                        </linearGradient>
+                                                        <linearGradient id="topRevenueDnr" x1="0" y1="0" x2="1" y2="0">
+                                                            <stop offset="0%" stopColor={theme.palette.secondary.dark} />
+                                                            <stop offset="100%" stopColor={theme.palette.secondary.light} />
+                                                        </linearGradient>
+                                                    </defs>
+                                                    <CartesianGrid
+                                                        strokeDasharray="3 3"
+                                                        stroke={alpha(theme.palette.text.secondary, 0.12)}
+                                                        horizontal={false}
+                                                    />
+                                                    <XAxis
+                                                        type="number"
+                                                        tickFormatter={(tick) => `$${Number(tick).toLocaleString('en-US')}`}
+                                                        tick={{ fill: theme.palette.text.secondary, fontSize: 12 }}
+                                                        axisLine={false}
+                                                        tickLine={false}
+                                                    />
+                                                    <YAxis
+                                                        type="category"
+                                                        dataKey="name"
+                                                        width={250}
+                                                        tick={{ fill: theme.palette.text.secondary, fontSize: 12 }}
+                                                        axisLine={false}
+                                                        tickLine={false}
+                                                    />
+                                                    <Tooltip
+                                                        formatter={(value: number) => [currencyFormatter.format(Number(value)), 'Amount raised']}
+                                                        contentStyle={{
+                                                            backgroundColor: theme.palette.background.paper,
+                                                            border: `1px solid ${theme.palette.divider}`,
+                                                            borderRadius: '12px',
+                                                            boxShadow: theme.shadows[4]
+                                                        }}
+                                                        cursor={{ fill: alpha(theme.palette.primary.main, 0.08) }}
+                                                    />
+                                                    <Bar dataKey="total_amount" name="Amount raised" radius={[0, 7, 7, 0]} maxBarSize={24}>
+                                                        {topRevenueData.map((entry, index) => (
+                                                            <Cell
+                                                                key={`top-revenue-cell-${index}`}
+                                                                fill={isDnrTitle(entry.name) ? 'url(#topRevenueDnr)' : 'url(#topRevenueOriginal)'}
+                                                            />
+                                                        ))}
+                                                    </Bar>
+                                                </BarChart>
+                                            </ResponsiveContainer>
+                                        ) : (
+                                            <Box
+                                                sx={{
+                                                    overflowX: 'auto',
+                                                    overflowY: 'hidden',
+                                                    scrollbarWidth: 'thin',
+                                                    scrollbarColor: `${alpha(theme.palette.primary.main, 0.3)} transparent`,
+                                                }}
+                                            >
+                                                <Box sx={{ minWidth: chartMinWidth }}>
+                                                    <ResponsiveContainer width="100%" height={chartHeight}>
+                                                        <BarChart
+                                                            data={displayedChartData}
+                                                            margin={{ top: 20, right: 24, left: 12, bottom: selectedCampaign ? 132 : 72 }}
+                                                        >
+                                                            <defs>
+                                                                <linearGradient id="allRevenueOriginal" x1="0" y1="0" x2="0" y2="1">
+                                                                    <stop offset="5%" stopColor={theme.palette.primary.light} stopOpacity={0.95} />
+                                                                    <stop offset="100%" stopColor={theme.palette.primary.main} stopOpacity={0.55} />
+                                                                </linearGradient>
+                                                                <linearGradient id="allRevenueDnr" x1="0" y1="0" x2="0" y2="1">
+                                                                    <stop offset="5%" stopColor={theme.palette.secondary.light} stopOpacity={0.95} />
+                                                                    <stop offset="100%" stopColor={theme.palette.secondary.main} stopOpacity={0.55} />
+                                                                </linearGradient>
+                                                            </defs>
+                                                            <CartesianGrid
+                                                                strokeDasharray="3 3"
+                                                                stroke={alpha(theme.palette.text.secondary, 0.12)}
+                                                                vertical={Boolean(selectedCampaign)}
+                                                            />
+                                                            <XAxis
+                                                                dataKey="name"
+                                                                angle={selectedCampaign ? -45 : 0}
+                                                                textAnchor={selectedCampaign ? 'end' : 'middle'}
+                                                                interval={0}
+                                                                height={selectedCampaign ? 128 : 54}
+                                                                tick={{ fill: theme.palette.text.secondary, fontSize: 12 }}
+                                                                axisLine={{ stroke: alpha(theme.palette.text.secondary, 0.3) }}
+                                                                tickLine={false}
+                                                            />
+                                                            <YAxis
+                                                                tickFormatter={(tick) => `$${Number(tick).toLocaleString('en-US')}`}
+                                                                tick={{ fill: theme.palette.text.secondary, fontSize: 12 }}
+                                                                axisLine={{ stroke: alpha(theme.palette.text.secondary, 0.3) }}
+                                                                tickLine={false}
+                                                                width={74}
+                                                            />
+                                                            <Tooltip
+                                                                formatter={(value: number) => [currencyFormatter.format(Number(value)), 'Amount raised']}
+                                                                contentStyle={{
+                                                                    backgroundColor: theme.palette.background.paper,
+                                                                    border: `1px solid ${theme.palette.divider}`,
+                                                                    borderRadius: '12px',
+                                                                    boxShadow: theme.shadows[4]
+                                                                }}
+                                                                cursor={{ fill: alpha(theme.palette.primary.main, 0.08) }}
+                                                            />
+                                                            <Bar dataKey="total_amount" name="Amount raised" radius={[7, 7, 0, 0]} maxBarSize={28}>
+                                                                {displayedChartData.map((entry, index) => (
+                                                                    <Cell
+                                                                        key={`all-revenue-cell-${index}`}
+                                                                        fill={isDnrTitle(entry.name) ? 'url(#allRevenueDnr)' : 'url(#allRevenueOriginal)'}
+                                                                    />
+                                                                ))}
+                                                            </Bar>
+                                                        </BarChart>
+                                                    </ResponsiveContainer>
+                                                </Box>
+                                            </Box>
+                                                )}
+                                            </motion.div>
+                                        </AnimatePresence>
+                                    </Box>
                                 </Paper>
                             )}
                         </motion.div>
@@ -1200,26 +1446,52 @@ export const CampaignAnalyticsPage: React.FC = () => {
             {/* Bottom Section: Detailed Data Tables - Full Width */}
             {
                 stats && (
-                    <Grid container spacing={3} sx={{ mt: 1 }}>
-                        {/* Donations Table */}
-                        <Grid size={{ xs: 12, lg: 6 }}>
-                            <AnimatePresence>
+                    <>
+                    <Paper
+                        sx={{
+                            mt: 3,
+                            borderRadius: '16px',
+                            border: `1px solid ${theme.palette.divider}`,
+                            boxShadow: 'none',
+                            overflow: 'hidden',
+                        }}
+                    >
+                        <Tabs
+                            value={detailTab}
+                            onChange={(_event, value: number) => setDetailTab(value)}
+                            variant="scrollable"
+                            scrollButtons="auto"
+                            aria-label="Analytics detail tables"
+                            sx={{
+                                px: { xs: 1, sm: 2 },
+                                minHeight: 56,
+                                '& .MuiTab-root': { minHeight: 56, textTransform: 'none', fontWeight: 600 },
+                            }}
+                        >
+                            <Tab label={`Form titles (${(chartData?.length ?? 0).toLocaleString('en-US')})`} />
+                            <Tab label={`Donations (${totalDonationsCount.toLocaleString('en-US')})`} />
+                        </Tabs>
+                    </Paper>
+                    <Box sx={{ mt: 1.5 }}>
+                        <AnimatePresence mode="wait" initial={false}>
+                            {detailTab === 1 ? (
+                                <motion.div
+                                    key="donations"
+                                    initial={reduceMotion ? false : { opacity: 0, y: 12 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -8 }}
+                                    transition={viewTransition}
+                                    style={{ width: '100%' }}
+                                >
                                 {(selectedSource || selectedCampaign || selectedTitles.length > 0) && !loading.stats && (
-                                    <motion.div
-                                        initial={{ opacity: 0, y: 20 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        exit={{ opacity: 0, y: 20 }}
-                                        transition={{ duration: 0.3 }}
-                                    >
                                         <Paper
                                             sx={{
                                                 width: '100%',
                                                 height: '100%',
-                                                borderRadius: '16px',
-                                                background: `linear-gradient(145deg, ${alpha(theme.palette.background.paper, 0.9)} 0%, ${alpha(theme.palette.background.paper, 0.95)} 100%)`,
-                                                backdropFilter: 'blur(20px)',
-                                                border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
-                                                boxShadow: theme.shadows[4],
+                                                borderRadius: '20px',
+                                                background: theme.palette.background.paper,
+                                                border: `1px solid ${theme.palette.divider}`,
+                                                boxShadow: 'none',
                                                 overflow: 'hidden',
                                                 display: 'flex',
                                                 flexDirection: 'column'
@@ -1230,19 +1502,36 @@ export const CampaignAnalyticsPage: React.FC = () => {
                                                     <CircularProgress size={24} />
                                                 ) : (
                                                     <Typography variant="h6" fontWeight="700">
-                                                        Donors {totalDonationsCount > 0 && `(${totalDonationsCount})`}
+                                                        Donations
                                                     </Typography>
                                                 )}
                                             </Box>
 
-                                            <TableContainer ref={tableContainerRef} sx={{ maxHeight: 600, flexGrow: 1 }}>
+                                            <TableContainer
+                                                ref={tableContainerRef}
+                                                sx={{
+                                                    flexGrow: 1,
+                                                    maxHeight: { xs: '62vh', md: 'min(68vh, 720px)' },
+                                                    overflow: 'auto',
+                                                    overscrollBehavior: 'contain',
+                                                    scrollbarGutter: 'stable',
+                                                    scrollbarWidth: 'thin',
+                                                    scrollbarColor: `${alpha(theme.palette.primary.main, 0.34)} transparent`,
+                                                    '&::-webkit-scrollbar': { width: 9, height: 9 },
+                                                    '&::-webkit-scrollbar-thumb': {
+                                                        borderRadius: 10,
+                                                        bgcolor: alpha(theme.palette.primary.main, 0.34),
+                                                    },
+                                                    '&::-webkit-scrollbar-track': { bgcolor: 'transparent' },
+                                                }}
+                                            >
                                                 <Table stickyHeader size="small">
                                                     <TableHead>
                                                         <TableRow>
                                                             <TableCell sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>Donor</TableCell>
                                                             <TableCell align="right" sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>Amount</TableCell>
                                                             <TableCell sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>Date</TableCell>
-                                                            <TableCell sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper, minWidth: 200 }}>Email</TableCell>
+                                                            <TableCell sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper, minWidth: 200, display: { xs: 'none', md: 'table-cell' } }}>Email</TableCell>
                                                         </TableRow>
                                                     </TableHead>
                                                     <TableBody>
@@ -1256,10 +1545,15 @@ export const CampaignAnalyticsPage: React.FC = () => {
                                                                     },
                                                                 }}
                                                             >
-                                                                <TableCell sx={{ whiteSpace: 'nowrap' }}>{d.donorName}</TableCell>
-                                                                <TableCell align="right" sx={{ fontWeight: 600, color: theme.palette.success.main, whiteSpace: 'nowrap' }}>${d.amount.toFixed(2)}</TableCell>
+                                                                <TableCell sx={{ minWidth: 170 }}>
+                                                                    <Typography variant="body2" fontWeight={600}>{d.donorName}</Typography>
+                                                                    <Typography variant="caption" color="text.secondary" sx={{ display: { xs: 'block', md: 'none' }, maxWidth: 190, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                                        {d.donorEmail}
+                                                                    </Typography>
+                                                                </TableCell>
+                                                                <TableCell align="right" sx={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{currencyFormatter.format(d.amount)}</TableCell>
                                                                 <TableCell sx={{ whiteSpace: 'nowrap' }}>{dayjs(d.date).format('DD/MM/YYYY HH:mm')}</TableCell>
-                                                                <TableCell sx={{ maxWidth: 250, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={d.donorEmail}>{d.donorEmail}</TableCell>
+                                                                <TableCell sx={{ maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: { xs: 'none', md: 'table-cell' } }} title={d.donorEmail}>{d.donorEmail}</TableCell>
                                                             </TableRow>
                                                         ))}
                                                         <TableRow
@@ -1287,73 +1581,144 @@ export const CampaignAnalyticsPage: React.FC = () => {
                                                 </Box>
                                             )}
                                         </Paper>
-                                    </motion.div>
                                 )}
-                            </AnimatePresence>
-                        </Grid>
-
-                        {/* Form Titles Table */}
-                        <Grid size={{ xs: 12, lg: 6 }}>
-                            <AnimatePresence>
+                                </motion.div>
+                            ) : (
+                                <motion.div
+                                    key="form-titles"
+                                    initial={reduceMotion ? false : { opacity: 0, y: 12 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -8 }}
+                                    transition={viewTransition}
+                                    style={{ width: '100%' }}
+                                >
                                 {chartData && chartData.length > 0 && (
-                                    <motion.div
-                                        initial={{ opacity: 0, y: 20 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        exit={{ opacity: 0, y: 20 }}
-                                        transition={{ duration: 0.3, delay: 0.1 }}
-                                    >
                                         <Paper
                                             sx={{
                                                 width: '100%',
-                                                borderRadius: '16px',
-                                                background: `linear-gradient(145deg, ${alpha(theme.palette.background.paper, 0.9)} 0%, ${alpha(theme.palette.background.paper, 0.95)} 100%)`,
-                                                backdropFilter: 'blur(20px)',
-                                                border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
-                                                boxShadow: theme.shadows[4],
+                                                borderRadius: '20px',
+                                                background: theme.palette.background.paper,
+                                                border: `1px solid ${theme.palette.divider}`,
+                                                boxShadow: 'none',
                                                 overflow: 'hidden'
                                             }}
                                         >
-                                            <Typography variant="h6" sx={{ p: 3, fontWeight: 700 }}>Form Titles</Typography>
-                                            <TableContainer sx={{ maxHeight: 600 }}>
-                                                <Table stickyHeader size="small">
-                                                    <TableHead>
-                                                        <TableRow>
-                                                            <TableCell sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>Form Title</TableCell>
-                                                            <TableCell sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>Start Date</TableCell>
-                                                            <TableCell align="right" sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>Donations</TableCell>
-                                                            <TableCell align="right" sx={{ fontWeight: 700, backgroundColor: theme.palette.background.paper }}>Amount Raised</TableCell>
-                                                        </TableRow>
-                                                    </TableHead>
-                                                    <TableBody>
-                                                        {chartData.map((item) => (
-                                                            <TableRow
-                                                                key={item.id}
-                                                                hover
-                                                                sx={{
-                                                                    '&:nth-of-type(odd)': {
-                                                                        backgroundColor: alpha(theme.palette.action.hover, 0.02),
-                                                                    },
-                                                                }}
-                                                            >
-                                                                <TableCell component="th" scope="row">{item.name}</TableCell>
-                                                                <TableCell>
-                                                                    {item.start_date ? dayjs(item.start_date).format('DD/MM/YYYY') : 'N/A'}
-                                                                </TableCell>
-                                                                <TableCell align="right">{item.donation_count}</TableCell>
-                                                                <TableCell align="right" sx={{ fontWeight: 'bold', color: theme.palette.success.main }}>
-                                                                    ${item.total_amount.toFixed(2)}
-                                                                </TableCell>
-                                                            </TableRow>
-                                                        ))}
-                                                    </TableBody>
-                                                </Table>
-                                            </TableContainer>
+                                            <Box sx={{ px: { xs: 2, md: 3 }, pt: 2.5, pb: 2 }}>
+                                                <Typography variant="h6" fontWeight={700}>Form Titles</Typography>
+                                                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.4 }}>
+                                                    Compare original and DNR performance for each form title.
+                                                </Typography>
+                                            </Box>
+                                            <Box
+                                                role="table"
+                                                aria-label="Form title variant comparison"
+                                                sx={{
+                                                    maxHeight: { xs: '62vh', md: 'min(68vh, 720px)' },
+                                                    overflowY: 'auto',
+                                                    overscrollBehavior: 'contain',
+                                                    scrollbarGutter: 'stable',
+                                                    scrollbarWidth: 'thin',
+                                                    scrollbarColor: `${alpha(theme.palette.primary.main, 0.34)} transparent`,
+                                                    '&::-webkit-scrollbar': { width: 9, height: 9 },
+                                                    '&::-webkit-scrollbar-thumb': {
+                                                        borderRadius: 10,
+                                                        bgcolor: alpha(theme.palette.primary.main, 0.34),
+                                                    },
+                                                    '&::-webkit-scrollbar-track': { bgcolor: 'transparent' },
+                                                }}
+                                            >
+                                                <Box
+                                                    role="row"
+                                                    sx={{
+                                                        display: { xs: 'none', lg: 'grid' },
+                                                        gridTemplateColumns: 'minmax(220px, 0.8fr) minmax(300px, 1fr) minmax(300px, 1fr)',
+                                                        gap: 2,
+                                                        px: 3,
+                                                        py: 1.25,
+                                                        position: 'sticky',
+                                                        top: 0,
+                                                        zIndex: 2,
+                                                        borderTop: `1px solid ${theme.palette.divider}`,
+                                                        borderBottom: `1px solid ${theme.palette.divider}`,
+                                                        bgcolor: theme.palette.background.paper,
+                                                    }}
+                                                >
+                                                    <Typography role="columnheader" variant="caption" color="text.secondary" fontWeight={700}>
+                                                        Form title
+                                                    </Typography>
+                                                    <Typography role="columnheader" variant="caption" color="text.secondary" fontWeight={700}>
+                                                        Original
+                                                    </Typography>
+                                                    <Typography role="columnheader" variant="caption" sx={{ color: theme.palette.primary.main }} fontWeight={700}>
+                                                        DNR
+                                                    </Typography>
+                                                </Box>
+                                                {chronologicalTitleGroups.map((group, groupIndex) => {
+                                                    const originalItem = group.items.find(item => !isDnrTitle(item.name));
+                                                    const dnrItem = group.items.find(item => isDnrTitle(item.name));
+
+                                                    return (
+                                                        <Box
+                                                            role="row"
+                                                            key={group.pairKey}
+                                                            sx={{
+                                                                display: 'grid',
+                                                                gridTemplateColumns: {
+                                                                    xs: 'minmax(0, 1fr)',
+                                                                    lg: 'minmax(220px, 0.8fr) minmax(300px, 1fr) minmax(300px, 1fr)',
+                                                                },
+                                                                gap: { xs: 1.5, lg: 2 },
+                                                                alignItems: 'center',
+                                                                px: { xs: 2, md: 3 },
+                                                                py: 2,
+                                                                borderTop: groupIndex === 0 ? 'none' : `1px solid ${theme.palette.divider}`,
+                                                                bgcolor: groupIndex % 2 === 1
+                                                                    ? alpha(theme.palette.background.default, 0.1)
+                                                                    : 'transparent',
+                                                                transition: 'background-color 160ms ease',
+                                                                '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.025) },
+                                                            }}
+                                                        >
+                                                            <Box role="cell" sx={{ alignSelf: 'start', pt: { xs: 0, lg: 0.75 } }}>
+                                                                <Typography variant="body2" fontWeight={600} sx={{ lineHeight: 1.45 }}>
+                                                                    {group.baseTitle}
+                                                                </Typography>
+                                                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.35 }}>
+                                                                    {dnrItem ? 'Original + DNR' : originalItem ? 'Original only' : 'DNR only'}
+                                                                </Typography>
+                                                            </Box>
+                                                            <Box role="cell">
+                                                                <Typography
+                                                                    variant="caption"
+                                                                    color="text.secondary"
+                                                                    fontWeight={700}
+                                                                    sx={{ display: { xs: 'block', lg: 'none' }, mb: 0.75 }}
+                                                                >
+                                                                    Original
+                                                                </Typography>
+                                                                <VariantMetricsPanel variant="original" item={originalItem} />
+                                                            </Box>
+                                                            <Box role="cell">
+                                                                <Typography
+                                                                    variant="caption"
+                                                                    fontWeight={700}
+                                                                    sx={{ display: { xs: 'block', lg: 'none' }, mb: 0.75, color: theme.palette.primary.main }}
+                                                                >
+                                                                    DNR
+                                                                </Typography>
+                                                                <VariantMetricsPanel variant="dnr" item={dnrItem} />
+                                                            </Box>
+                                                        </Box>
+                                                    );
+                                                })}
+                                            </Box>
                                         </Paper>
-                                    </motion.div>
                                 )}
-                            </AnimatePresence>
-                        </Grid>
-                    </Grid>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+                    </Box>
+                    </>
                 )
             }
 

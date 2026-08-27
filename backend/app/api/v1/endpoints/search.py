@@ -8,8 +8,16 @@ from backend.app.schemas import (
     SearchResponse, MailchimpDetail, BrevoDetail, AirtableSummary
 )
 from backend.app.services.data_service import DataService, get_data_service
-from backend.app.services.mailchimp_service import MailchimpService, get_mailchimp_service
-from backend.app.services.brevo_service import BrevoService, get_brevo_service
+from backend.app.services.mailchimp_service import (
+    MailchimpService,
+    MailchimpUnavailableError,
+    get_mailchimp_service,
+)
+from backend.app.services.brevo_service import (
+    BrevoService,
+    BrevoUnavailableError,
+    get_brevo_service,
+)
 
 router = APIRouter()
 
@@ -62,12 +70,22 @@ async def search_unified_contact(
         try:
             loop = asyncio.get_event_loop()
             for em in all_emails:
-                tags = await loop.run_in_executor(None, mailchimp.get_contact_tags, em)
-                mailchimp_details.append({
-                    "email": em,
-                    "found": bool(tags),
-                    "tags": tags or []
-                })
+                try:
+                    tags = await loop.run_in_executor(None, mailchimp.get_contact_tags, em)
+                    mailchimp_details.append({
+                        "email": em,
+                        # An existing Mailchimp member can legitimately have no tags.
+                        "found": tags is not None,
+                        "tags": tags or [],
+                        "error": None,
+                    })
+                except MailchimpUnavailableError:
+                    mailchimp_details.append({
+                        "email": em,
+                        "found": False,
+                        "tags": [],
+                        "error": "Mailchimp is temporarily unavailable.",
+                    })
         except Exception as e:
             mailchimp_details = [{"error": f"Mailchimp Error: {e}"}]
         return mailchimp_details
@@ -77,12 +95,21 @@ async def search_unified_contact(
         try:
             loop = asyncio.get_event_loop()
             for em in all_emails:
-                details = await loop.run_in_executor(None, brevo.get_contact_details, em)
-                brevo_details.append({
-                    "email": em,
-                    "found": details is not None,
-                    "details": details or {}
-                })
+                try:
+                    details = await loop.run_in_executor(None, brevo.get_contact_details, em)
+                    brevo_details.append({
+                        "email": em,
+                        "found": details is not None,
+                        "details": details or {},
+                        "error": None,
+                    })
+                except BrevoUnavailableError:
+                    brevo_details.append({
+                        "email": em,
+                        "found": False,
+                        "details": {},
+                        "error": "Brevo is temporarily unavailable.",
+                    })
         except Exception as e:
             brevo_details = [{"error": f"Brevo Error: {e}"}]
         return brevo_details
@@ -105,11 +132,17 @@ async def search_unified_contact(
 
     # --- Donations Summary ---
     donation_dates: List[datetime] = []
+    donation_amounts: List[float] = []
     total_amount = 0.0
     
     for d in donations_list:
-        amt = d.get("amount", 0)
+        try:
+            amt = float(d.get("amount", 0) or 0)
+        except (TypeError, ValueError):
+            amt = 0.0
+
         total_amount += amt
+        donation_amounts.append(amt)
         
         ds = d.get("date")
         if ds:
@@ -119,11 +152,14 @@ async def search_unified_contact(
                 pass
                 
     first_date = min(donation_dates).isoformat() if donation_dates else None
+    last_date = max(donation_dates).isoformat() if donation_dates else None
     
     summary = AirtableSummary(
         total=total_amount,
         count=len(donations_list),
-        first_date=first_date
+        first_date=first_date,
+        last_date=last_date,
+        largest=max(donation_amounts, default=0.0)
     )
 
     return SearchResponse(

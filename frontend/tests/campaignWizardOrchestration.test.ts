@@ -5,14 +5,14 @@ const orchestration = await import(
   '../src/features/email-sender/campaignWizardOrchestration.ts'
 ).catch(() => null);
 
-test('existing CSV edits commit configuration and mapping in one update', () => {
+test('existing CSV edits update campaign configuration before saving mapping', () => {
   assert.ok(orchestration, 'campaign wizard orchestration module is missing');
   assert.deepEqual(orchestration.planCampaignSave({
     existingCampaignId: 'campaign-7',
     sourceType: 'csv',
     hasCsvFile: false,
     hasMapping: true,
-  }), ['update-campaign']);
+  }), ['update-campaign', 'save-mapping']);
 });
 
 test('new CSV saves create, upload, and mapping in dependency order', () => {
