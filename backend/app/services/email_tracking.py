@@ -34,27 +34,6 @@ _AUTOMATION_USER_AGENT_PATTERN = re.compile(
 _DEVELOPMENT_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 
-class _UnsubscribeLinkDetector(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.found = False
-
-    def handle_starttag(self, tag: str, attrs) -> None:
-        if tag.casefold() != "a":
-            return
-        attributes = {name.casefold(): value or "" for name, value in attrs}
-        rel_values = {
-            value.casefold() for value in attributes.get("rel", "").split()
-        }
-        href = attributes.get("href", "")
-        try:
-            path = urlsplit(href).path.casefold()
-        except ValueError:
-            path = href.casefold()
-        if "unsubscribe" in path or "unsubscribe" in rel_values:
-            self.found = True
-
-
 def append_unsubscribe_footer(html_body: str, unsubscribe_url: str) -> str:
     """Append one fixed, accessible unsubscribe footer to an HTML message."""
 
@@ -74,12 +53,6 @@ def append_unsubscribe_footer(html_body: str, unsubscribe_url: str) -> str:
     ):
         raise ValueError("unsubscribe_url must be an absolute safe HTTPS URL")
 
-    detector = _UnsubscribeLinkDetector()
-    detector.feed(html_body)
-    detector.close()
-    if detector.found:
-        return html_body
-
     safe_url = escape(unsubscribe_url, quote=True)
     footer = (
         '<footer role="contentinfo" style="margin-top:32px;padding-top:16px;'
@@ -93,7 +66,11 @@ def append_unsubscribe_footer(html_body: str, unsubscribe_url: str) -> str:
     if insertion_point < 0:
         insertion_point = html_body.casefold().rfind("</html>")
     if insertion_point < 0:
+        if html_body.endswith(footer):
+            return html_body
         return html_body + footer
+    if html_body[:insertion_point].endswith(footer):
+        return html_body
     return html_body[:insertion_point] + footer + html_body[insertion_point:]
 
 

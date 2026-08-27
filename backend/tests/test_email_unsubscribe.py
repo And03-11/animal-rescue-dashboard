@@ -114,16 +114,52 @@ def test_unsubscribe_footer_appends_to_html_fragments_without_document_closing_t
     assert appended.endswith("</footer>")
 
 
-def test_existing_unsubscribe_link_leaves_html_document_unchanged():
+@pytest.mark.parametrize(
+    "existing_url",
+    [
+        "https://dashboard.animallove.cr/unsubscribe/stale-token",
+        "https://dashboard.animallove.cr/api/v1/email-tracking/unsubscribe/new-token",
+    ],
+)
+def test_noncanonical_unsubscribe_link_does_not_suppress_generated_footer(
+    existing_url,
+):
+    generated_url = (
+        "https://dashboard.animallove.cr/api/v1/email-tracking/"
+        "unsubscribe/new-token"
+    )
     original = (
-        '<html><body><a href="https://dashboard.animallove.cr/unsubscribe/token" '
-        'rel="unsubscribe">Manage preferences</a></body></html>'
+        f'<html><body><a href="{existing_url}" rel="unsubscribe" '
+        'style="display:none">Manage preferences</a></body></html>'
     )
 
-    assert append_unsubscribe_footer(
-        original,
-        "https://dashboard.animallove.cr/api/v1/email-tracking/unsubscribe/token",
-    ) == original
+    appended = append_unsubscribe_footer(original, generated_url)
+
+    assert appended != original
+    assert '<footer role="contentinfo"' in appended
+    assert f'href="{generated_url}" rel="unsubscribe"' in appended
+    assert appended.count('<footer role="contentinfo"') == 1
+
+
+def test_canonical_footer_markup_inside_comment_does_not_count_as_visible():
+    generated_url = (
+        "https://dashboard.animallove.cr/api/v1/email-tracking/"
+        "unsubscribe/new-token"
+    )
+    canonical_footer = (
+        '<footer role="contentinfo" style="margin-top:32px;padding-top:16px;'
+        'border-top:1px solid #d7dedb;color:#66736e;font-size:12px;'
+        'line-height:1.5;text-align:center">'
+        'You are receiving this email from Animal Love Rescue Center. '
+        f'<a href="{generated_url}" rel="unsubscribe" style="color:#267f73">'
+        'Unsubscribe</a></footer>'
+    )
+    original = f"<html><body><!--{canonical_footer}--></body></html>"
+
+    appended = append_unsubscribe_footer(original, generated_url)
+
+    assert appended != original
+    assert appended.endswith(f"-->{canonical_footer}</body></html>")
 
 
 @pytest.mark.parametrize(

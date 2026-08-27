@@ -531,7 +531,7 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
             f"[{campaign_id}] ERROR: Email compliance could not initialize: "
             f"{tracking_error}"
         )
-        config["status"] = "Error - Tracking Unavailable"
+        config["status"] = "Error - Compliance Unavailable"
         storage.save_campaign(campaign_id, config, serialize_unknown=True)
         _sync_remote_campaign_status(campaign_id, config["status"])
         return

@@ -408,4 +408,4 @@ def test_worker_fails_before_gmail_without_compliance_public_base_url(
     assert gmail.sent == []
     assert not (sent_logs / f"sent_{campaign_id}.csv").exists()
     stored = json.loads(config_path.read_text(encoding="utf-8"))
-    assert stored["status"] == "Error - Tracking Unavailable"
+    assert stored["status"] == "Error - Compliance Unavailable"
