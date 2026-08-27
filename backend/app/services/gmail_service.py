@@ -7,6 +7,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from pathlib import Path
 from typing import Mapping
+from html.parser import HTMLParser
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -18,6 +19,94 @@ _HEADER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9-]+$")
 PROJECT_ROOT = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "..")
 )
+
+
+class _EmailHtmlToTextParser(HTMLParser):
+    _BLOCK_TAGS = frozenset(
+        {
+            "address", "article", "blockquote", "div", "footer", "h1", "h2",
+            "h3", "h4", "h5", "h6", "header", "li", "main", "ol", "p",
+            "section", "table", "tr", "ul",
+        }
+    )
+    _IGNORED_TAGS = frozenset({"script", "style"})
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self._chunks: list[str] = []
+        self._ignored_depth = 0
+        self._links: list[str | None] = []
+        self._pending_links: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs):
+        tag = tag.casefold()
+        if tag in self._IGNORED_TAGS:
+            self._ignored_depth += 1
+            return
+        if self._ignored_depth:
+            return
+        if tag == "br" or tag in self._BLOCK_TAGS:
+            self._newline()
+        if tag == "a":
+            self._links.append(dict(attrs).get("href"))
+
+    def handle_startendtag(self, tag: str, attrs):
+        if tag.casefold() == "br" and not self._ignored_depth:
+            self._newline()
+
+    def handle_endtag(self, tag: str):
+        tag = tag.casefold()
+        if tag in self._IGNORED_TAGS:
+            if self._ignored_depth:
+                self._ignored_depth -= 1
+            return
+        if self._ignored_depth:
+            return
+        if tag == "a" and self._links:
+            href = self._links.pop()
+            if href:
+                self._pending_links.append(href)
+        if tag in self._BLOCK_TAGS:
+            self._flush_pending_links()
+            self._newline()
+
+    def handle_data(self, data: str):
+        if self._ignored_depth:
+            return
+        collapsed = re.sub(r"\s+", " ", data)
+        if not collapsed.strip():
+            if self._chunks and not self._chunks[-1].endswith((" ", "\n")):
+                self._chunks.append(" ")
+            return
+        if collapsed.startswith(" ") and self._chunks and not self._chunks[-1].endswith((" ", "\n")):
+            self._chunks.append(" ")
+        self._chunks.append(collapsed.strip())
+        if collapsed.endswith(" "):
+            self._chunks.append(" ")
+
+    def text(self) -> str:
+        self._flush_pending_links()
+        value = "".join(self._chunks)
+        value = re.sub(r"[ \t]+\n", "\n", value)
+        value = re.sub(r"\n[ \t]+", "\n", value)
+        value = re.sub(r" {2,}", " ", value)
+        value = re.sub(r"\n{3,}", "\n\n", value)
+        return value.strip()
+
+    def _flush_pending_links(self):
+        while self._pending_links:
+            self._chunks.append(f" ({self._pending_links.pop(0)})")
+
+    def _newline(self):
+        if self._chunks and not self._chunks[-1].endswith("\n"):
+            self._chunks.append("\n")
+
+
+def _html_to_plain_text(html_body: str) -> str:
+    parser = _EmailHtmlToTextParser()
+    parser.feed(html_body)
+    parser.close()
+    return parser.text()
 
 
 def resolve_gmail_token_path(
@@ -116,6 +205,7 @@ class GmailService:
             for name, value in validated_headers.items():
                 message[name] = value
 
+            message.attach(MIMEText(_html_to_plain_text(html_body), 'plain', 'utf-8'))
             message.attach(MIMEText(html_body, 'html', 'utf-8'))
 
             raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()

@@ -111,3 +111,47 @@ def test_send_email_rejects_header_injection_before_calling_gmail():
         raise AssertionError("Expected unsafe email headers to be rejected")
 
     assert api.messages_resource.sent == []
+
+
+def test_send_email_submits_plain_text_then_html_alternatives():
+    api = _FakeGmailApi(result={"id": "gmail-message-1"})
+    service = _gmail_service(api)
+    unsubscribe_url = "https://tracking.animallove.cr/unsubscribe?t=unique-token"
+    html_body = f"""
+    <html><body>
+      <h1>Animal &amp; Love</h1>
+      <p>Support a rescue <a href="https://donations.animallove.cr/give">today</a>.</p>
+      <p><a href="{unsubscribe_url}">Unsubscribe</a></p>
+      <script>window.shouldNotAppear = true;</script>
+      <style>.should-not-appear {{ color: red; }}</style>
+    </body></html>
+    """
+
+    result = service.send_email(
+        to_email="donor@example.org",
+        subject="Thank you",
+        html_body=html_body,
+    )
+
+    assert result.success is True
+    raw = api.messages_resource.sent[0]["body"]["raw"]
+    parsed = message_from_bytes(base64.urlsafe_b64decode(raw.encode("ascii")))
+    alternatives = parsed.get_payload()
+
+    assert parsed.get_content_type() == "multipart/alternative"
+    assert [part.get_content_type() for part in alternatives] == [
+        "text/plain",
+        "text/html",
+    ]
+    assert [part.get_content_charset() for part in alternatives] == ["utf-8", "utf-8"]
+
+    plain_text = alternatives[0].get_payload(decode=True).decode("utf-8")
+    html_text = alternatives[1].get_payload(decode=True).decode("utf-8")
+    assert "Animal & Love" in plain_text
+    assert "Support a rescue today." in plain_text
+    assert "https://donations.animallove.cr/give" in plain_text
+    assert unsubscribe_url in plain_text
+    assert "shouldNotAppear" not in plain_text
+    assert "should-not-appear" not in plain_text
+    assert unsubscribe_url in html_text
+    assert html_text == html_body
