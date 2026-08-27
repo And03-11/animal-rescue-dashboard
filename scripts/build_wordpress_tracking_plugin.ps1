@@ -21,6 +21,7 @@ $pluginFiles = @(
     'assets\js\tracker.js'
 )
 
+Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $archive = [System.IO.Compression.ZipFile]::Open(
     $archivePath,

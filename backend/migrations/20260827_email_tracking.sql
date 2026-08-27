@@ -1,5 +1,8 @@
 BEGIN;
 
+ALTER TABLE IF EXISTS email_sender_campaigns
+    ADD COLUMN IF NOT EXISTS click_tracking_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+
 CREATE TABLE IF NOT EXISTS email_campaign_deliveries (
     id UUID PRIMARY KEY,
     campaign_id TEXT NOT NULL,
