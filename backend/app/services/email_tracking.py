@@ -12,7 +12,7 @@ import hmac
 import os
 import re
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from html import escape
 from html.parser import HTMLParser
@@ -62,6 +62,9 @@ class DeliveryRecord:
     recipient_email: str
     recipient_email_normalized: str
     status: str = "prepared"
+    sender_account: str | None = None
+    gmail_message_id: str | None = None
+    failure_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -90,6 +93,7 @@ class PreparedTrackedEmail:
     html_body: str
     links: tuple[TrackingLink, ...]
     unsubscribe_token: str
+    already_sent: bool = False
 
 
 @dataclass(frozen=True)
@@ -132,6 +136,24 @@ class EmailTrackingRepository(Protocol):
 
     def upsert_event(self, event: TrackingEvent) -> TrackingEvent:
         """Insert or merge a unique link/visitor/event signal."""
+
+    def mark_delivery_sent(
+        self,
+        delivery_id: UUID,
+        *,
+        sender_account: str,
+        gmail_message_id: str | None,
+    ) -> None:
+        """Persist a successful Gmail handoff before the legacy resume ledger."""
+
+    def mark_delivery_failed(
+        self,
+        delivery_id: UUID,
+        *,
+        sender_account: str,
+        failure_reason: str,
+    ) -> None:
+        """Persist a failed Gmail handoff for campaign diagnostics."""
 
 
 class InMemoryEmailTrackingRepository:
@@ -242,6 +264,50 @@ class InMemoryEmailTrackingRepository:
         self._events_by_key[key] = merged
         return merged
 
+    def mark_delivery_sent(
+        self,
+        delivery_id: UUID,
+        *,
+        sender_account: str,
+        gmail_message_id: str | None,
+    ) -> None:
+        delivery = self._deliveries_by_id.get(delivery_id)
+        if delivery is None:
+            raise KeyError(f"Unknown delivery {delivery_id}")
+        self._deliveries_by_id[delivery_id] = replace(
+            delivery,
+            status="sent",
+            sender_account=sender_account,
+            gmail_message_id=gmail_message_id,
+            failure_reason=None,
+        )
+
+    def mark_delivery_failed(
+        self,
+        delivery_id: UUID,
+        *,
+        sender_account: str,
+        failure_reason: str,
+    ) -> None:
+        delivery = self._deliveries_by_id.get(delivery_id)
+        if delivery is None:
+            raise KeyError(f"Unknown delivery {delivery_id}")
+        self._deliveries_by_id[delivery_id] = replace(
+            delivery,
+            status="failed",
+            sender_account=sender_account,
+            gmail_message_id=None,
+            failure_reason=failure_reason,
+        )
+
+    def delivery_for(
+        self, campaign_id: str, recipient_email: str
+    ) -> DeliveryRecord | None:
+        delivery_id = self._delivery_ids_by_key.get(
+            (campaign_id, recipient_email.strip().casefold())
+        )
+        return self._deliveries_by_id.get(delivery_id) if delivery_id else None
+
     def links_for_delivery(self, delivery_id: UUID) -> list[StoredTrackingLink]:
         return sorted(
             (
@@ -342,6 +408,70 @@ class PostgresEmailTrackingRepository:
             recipient_email_normalized=row["recipient_email_normalized"],
             status=row["status"],
         )
+
+    def mark_delivery_sent(
+        self,
+        delivery_id: UUID,
+        *,
+        sender_account: str,
+        gmail_message_id: str | None,
+    ) -> None:
+        connection = self._connect()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE email_campaign_deliveries
+                    SET status = 'sent',
+                        sender_account = %s,
+                        gmail_message_id = %s,
+                        sent_at = NOW(),
+                        failed_at = NULL,
+                        failure_reason = NULL
+                    WHERE id = %s
+                    """,
+                    (sender_account, gmail_message_id, delivery_id),
+                )
+                if cursor.rowcount != 1:
+                    raise KeyError(f"Unknown delivery {delivery_id}")
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def mark_delivery_failed(
+        self,
+        delivery_id: UUID,
+        *,
+        sender_account: str,
+        failure_reason: str,
+    ) -> None:
+        connection = self._connect()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE email_campaign_deliveries
+                    SET status = 'failed',
+                        sender_account = %s,
+                        gmail_message_id = NULL,
+                        failed_at = NOW(),
+                        sent_at = NULL,
+                        failure_reason = %s
+                    WHERE id = %s
+                    """,
+                    (sender_account, failure_reason, delivery_id),
+                )
+                if cursor.rowcount != 1:
+                    raise KeyError(f"Unknown delivery {delivery_id}")
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
 
     def replace_tracking_links(
         self, delivery_id: UUID, links: Sequence[StoredTrackingLink]
@@ -617,6 +747,14 @@ class EmailTrackingService:
             recipient_email=original_email,
             recipient_email_normalized=normalized_email,
         )
+        if delivery.status == "sent":
+            return PreparedTrackedEmail(
+                delivery_id=delivery.id,
+                html_body=html_body,
+                links=(),
+                unsubscribe_token="",
+                already_sent=True,
+            )
         prepared_links: list[TrackingLink] = []
         stored_links: list[StoredTrackingLink] = []
 
@@ -693,6 +831,32 @@ class EmailTrackingService:
             html_body=parser.html,
             links=tuple(prepared_links),
             unsubscribe_token=unsubscribe_token,
+        )
+
+    def mark_delivery_sent(
+        self,
+        delivery_id: UUID,
+        *,
+        sender_account: str,
+        gmail_message_id: str | None,
+    ) -> None:
+        self.repository.mark_delivery_sent(
+            delivery_id,
+            sender_account=sender_account,
+            gmail_message_id=gmail_message_id,
+        )
+
+    def mark_delivery_failed(
+        self,
+        delivery_id: UUID,
+        *,
+        sender_account: str,
+        failure_reason: str,
+    ) -> None:
+        self.repository.mark_delivery_failed(
+            delivery_id,
+            sender_account=sender_account,
+            failure_reason=(failure_reason or "Send failed")[:512],
         )
 
     @staticmethod

@@ -29,6 +29,7 @@ from backend.app.services.campaign_storage import (
     InvalidCampaignIdError,
 )
 from backend.app.services.email_test_delivery import deliver_test_emails
+from backend.app.services.email_tracking import get_email_tracking_service
 
 
 from fastapi import Depends, Query, status
@@ -491,6 +492,20 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
 
     subject = config.get('subject', '(No Subject)')
     html_body_template = config.get('html_body', '<p>Error: Email body missing.</p>')
+    click_tracking_enabled = config.get("click_tracking_enabled") is True
+    tracking_service = None
+    if click_tracking_enabled:
+        try:
+            tracking_service = get_email_tracking_service()
+        except Exception as tracking_error:
+            print(
+                f"[{campaign_id}] ERROR: Click tracking could not initialize: "
+                f"{tracking_error}"
+            )
+            config["status"] = "Error - Tracking Unavailable"
+            storage.save_campaign(campaign_id, config, serialize_unknown=True)
+            _sync_remote_campaign_status(campaign_id, config["status"])
+            return
 
 
     # --- 4. Parallel Email Sending ---
@@ -610,13 +625,73 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
 
                     html_body_personalized = html_body_template.replace("{{name}}", name).replace("*|FNAME|*", name)
 
+                    prepared_delivery_id = None
+                    html_body_to_send = html_body_personalized
+                    if click_tracking_enabled:
+                        try:
+                            prepared_email = tracking_service.prepare_email(
+                                campaign_id=campaign_id,
+                                recipient_email=email,
+                                html_body=html_body_personalized,
+                            )
+                            prepared_delivery_id = prepared_email.delivery_id
+                            html_body_to_send = prepared_email.html_body
+                            if prepared_email.already_sent:
+                                try:
+                                    with log_lock:
+                                        storage.append_sent_email(campaign_id, email)
+                                        sent_emails_set.add(email.strip().lower())
+                                    print(
+                                        f"[{campaign_id}] Recovered sent ledger for "
+                                        f"an already accepted Gmail delivery."
+                                    )
+                                except Exception as log_error:
+                                    print(
+                                        f"[{campaign_id}] CRITICAL: already sent "
+                                        f"delivery could not be recovered in the "
+                                        f"resume ledger: {log_error}"
+                                    )
+                                    with failed_contacts_lock:
+                                        failed_contacts.append(
+                                            {
+                                                "email": email,
+                                                "reason": (
+                                                    "Sent but delivery ledger recovery failed"
+                                                ),
+                                                "account": credential_name,
+                                            }
+                                        )
+                                    stop_event.set()
+                                contacts_queue.task_done()
+                                if stop_event.is_set():
+                                    break
+                                continue
+                        except Exception as tracking_error:
+                            print(
+                                f"[{campaign_id}] Worker {worker_id} could not "
+                                f"prepare tracked delivery: {tracking_error}"
+                            )
+                            with failed_contacts_lock:
+                                failed_contacts.append(
+                                    {
+                                        "email": email,
+                                        "reason": "Tracking preparation failed",
+                                        "account": credential_name,
+                                    }
+                                )
+                            stop_event.set()
+                            contacts_queue.task_done()
+                            break
+
                     success = False
+                    send_result = None
                     try:
-                        success = service.send_email(
+                        send_result = service.send_email(
                             to_email=email,
                             subject=subject,
-                            html_body=html_body_personalized
+                            html_body=html_body_to_send
                         )
+                        success = bool(send_result)
                     except Exception as e_send:
                          print(f"[{campaign_id}] Worker {worker_id} Exception sending to {email}: {e_send}")
 
@@ -624,22 +699,52 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
                         print(f"  -> Worker {worker_id}: SUCCESS {email}")
 
                         delivery_logged = False
-                        with log_lock:
+                        tracking_delivery_write_failed = False
+                        if click_tracking_enabled:
                             try:
-                                storage.append_sent_email(campaign_id, email)
-                                sent_emails_set.add(email.strip().lower())
-                                delivery_logged = True
-                            except Exception as log_error:
-                                print(
-                                    f"[{campaign_id}] CRITICAL: sent email could not be "
-                                    f"recorded; stopping campaign: {log_error}"
+                                tracking_service.mark_delivery_sent(
+                                    prepared_delivery_id,
+                                    sender_account=credential_name,
+                                    gmail_message_id=getattr(
+                                        send_result, "message_id", None
+                                    ),
                                 )
+                            except Exception as tracking_error:
+                                print(
+                                    f"[{campaign_id}] CRITICAL: Gmail accepted the "
+                                    f"message but tracking delivery state could not be "
+                                    f"recorded; stopping campaign: {tracking_error}"
+                                )
+                                with failed_contacts_lock:
+                                    failed_contacts.append(
+                                        {
+                                            "email": email,
+                                            "reason": (
+                                                "Sent but tracking delivery write failed"
+                                            ),
+                                            "account": credential_name,
+                                        }
+                                    )
+                                tracking_delivery_write_failed = True
                                 stop_event.set()
+
+                        with log_lock:
+                            if not stop_event.is_set():
+                                try:
+                                    storage.append_sent_email(campaign_id, email)
+                                    sent_emails_set.add(email.strip().lower())
+                                    delivery_logged = True
+                                except Exception as log_error:
+                                    print(
+                                        f"[{campaign_id}] CRITICAL: sent email could not be "
+                                        f"recorded; stopping campaign: {log_error}"
+                                    )
+                                    stop_event.set()
 
                         if delivery_logged:
                             with sent_count_lock:
                                 sent_count_this_run += 1
-                        else:
+                        elif not tracking_delivery_write_failed:
                             with failed_contacts_lock:
                                 failed_contacts.append({
                                     "email": email,
@@ -654,8 +759,24 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
                         time.sleep(random.uniform(12.0, 25.0))
                     else:
                         print(f"  -> Worker {worker_id}: FAILED {email}")
+                        failure_reason = (
+                            getattr(send_result, "error", None) or "Send failed"
+                        )
+                        if click_tracking_enabled and prepared_delivery_id is not None:
+                            try:
+                                tracking_service.mark_delivery_failed(
+                                    prepared_delivery_id,
+                                    sender_account=credential_name,
+                                    failure_reason=failure_reason,
+                                )
+                            except Exception as tracking_error:
+                                print(
+                                    f"[{campaign_id}] CRITICAL: failed delivery state "
+                                    f"could not be recorded: {tracking_error}"
+                                )
+                                stop_event.set()
                         with failed_contacts_lock:
-                            failed_contacts.append({"email": email, "reason": "Send failed", "account": credential_name})
+                            failed_contacts.append({"email": email, "reason": failure_reason, "account": credential_name})
                         time.sleep(random.uniform(30.0, 60.0))
 
                     contacts_queue.task_done()

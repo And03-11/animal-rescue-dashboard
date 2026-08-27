@@ -1,0 +1,286 @@
+import json
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+from backend.app.api.v1.endpoints import email_sender
+from backend.app.services.email_tracking import (
+    EmailTrackingService,
+    InMemoryEmailTrackingRepository,
+)
+from backend.app.services.gmail_service import GmailSendResult
+
+
+class _RemoteService:
+    def __init__(self):
+        self.updated = []
+
+    def update_campaign(self, campaign_id, updates):
+        self.updated.append((campaign_id, updates.copy()))
+
+
+class _GmailService:
+    credentials_path = "gmail_credentials/tracking-sender.json"
+
+    def __init__(self, result=None):
+        self.result = result or GmailSendResult(
+            success=True,
+            message_id="gmail-message-1",
+            thread_id="gmail-thread-1",
+        )
+        self.sent = []
+
+    def send_email(self, *, to_email, subject, html_body):
+        self.sent.append(
+            {
+                "to_email": to_email,
+                "subject": subject,
+                "html_body": html_body,
+            }
+        )
+        return self.result
+
+
+class _CredentialsManager:
+    def __init__(self, gmail_service):
+        self.gmail_service = gmail_service
+
+    def get_gmail_services(self, _sender_config):
+        return [self.gmail_service]
+
+
+@pytest.fixture
+def campaign_environment(tmp_path, monkeypatch):
+    campaign_data = tmp_path / "campaign_data"
+    sent_logs = tmp_path / "sent_logs"
+    targets = tmp_path / "campaign_targets"
+    campaign_data.mkdir()
+    sent_logs.mkdir()
+    targets.mkdir()
+
+    gmail = _GmailService()
+    remote = _RemoteService()
+    monkeypatch.setattr(email_sender, "CAMPAIGN_DATA_DIR", str(campaign_data))
+    monkeypatch.setattr(email_sender, "SENT_LOGS_DIR", str(sent_logs))
+    monkeypatch.setattr(email_sender, "TARGETS_DIR", str(targets))
+    monkeypatch.setattr(
+        email_sender, "credentials_manager_instance", _CredentialsManager(gmail)
+    )
+    monkeypatch.setattr(email_sender, "get_email_sender_service", lambda: remote)
+    monkeypatch.setattr(email_sender.time, "sleep", lambda _seconds: None)
+    return campaign_data, sent_logs, targets, gmail, remote
+
+
+def _write_csv_campaign(
+    campaign_data: Path,
+    targets: Path,
+    campaign_id: str,
+    *,
+    click_tracking_enabled: bool,
+):
+    config = {
+        "id": campaign_id,
+        "source_type": "csv",
+        "status": "Launching",
+        "sender_config": "all",
+        "subject": "Help {{name}}",
+        "html_body": (
+            '<p>Hello {{name}}</p><a href="https://donations.animallove.cr/give">'
+            "Donate</a>"
+        ),
+        "mapping": {"email": "Email", "name": "Name", "has_header": True},
+        "click_tracking_enabled": click_tracking_enabled,
+        "target_count": 1,
+    }
+    config_path = campaign_data / f"{campaign_id}.json"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    (targets / f"target_{campaign_id}.csv").write_text(
+        "Email,Name\ndonor@example.org,Ana\n", encoding="utf-8"
+    )
+    return config_path
+
+
+def _run_locked_campaign(campaign_id):
+    storage = email_sender._get_campaign_storage()
+    launch_id = storage.acquire_launch_lock(campaign_id)
+    assert launch_id
+    email_sender.run_campaign_task(campaign_id, launch_id)
+
+
+def test_worker_leaves_html_untouched_when_click_tracking_is_disabled(
+    campaign_environment, monkeypatch
+):
+    campaign_data, sent_logs, targets, gmail, _remote = campaign_environment
+    campaign_id = "Campaign_tracking-disabled"
+    _write_csv_campaign(
+        campaign_data,
+        targets,
+        campaign_id,
+        click_tracking_enabled=False,
+    )
+
+    def unexpected_tracking_service():
+        raise AssertionError("Tracking service must not load for opt-out campaigns")
+
+    monkeypatch.setattr(
+        email_sender, "get_email_tracking_service", unexpected_tracking_service
+    )
+
+    _run_locked_campaign(campaign_id)
+
+    assert len(gmail.sent) == 1
+    sent_html = gmail.sent[0]["html_body"]
+    assert "#alc=" not in sent_html
+    assert "utm_campaign" not in sent_html
+    assert "Hello Ana" in sent_html
+    sent = pd.read_csv(sent_logs / f"sent_{campaign_id}.csv")
+    assert sent["Email"].tolist() == ["donor@example.org"]
+
+
+def test_worker_tracks_enabled_campaign_and_records_gmail_delivery(
+    campaign_environment, monkeypatch
+):
+    campaign_data, sent_logs, targets, gmail, _remote = campaign_environment
+    campaign_id = "Campaign_tracking-enabled"
+    _write_csv_campaign(
+        campaign_data,
+        targets,
+        campaign_id,
+        click_tracking_enabled=True,
+    )
+    repository = InMemoryEmailTrackingRepository()
+    tracking_service = EmailTrackingService(
+        repository,
+        allowed_hosts={"donations.animallove.cr"},
+    )
+    monkeypatch.setattr(
+        email_sender, "get_email_tracking_service", lambda: tracking_service
+    )
+
+    _run_locked_campaign(campaign_id)
+
+    assert len(gmail.sent) == 1
+    sent_html = gmail.sent[0]["html_body"]
+    assert "#alc=" in sent_html
+    assert "utm_campaign=Campaign_tracking-enabled" in sent_html
+    assert "donor@example.org" not in sent_html
+    delivery = repository.delivery_for(campaign_id, "donor@example.org")
+    assert delivery is not None
+    assert delivery.status == "sent"
+    assert delivery.sender_account == "tracking-sender.json"
+    assert delivery.gmail_message_id == "gmail-message-1"
+    sent = pd.read_csv(sent_logs / f"sent_{campaign_id}.csv")
+    assert sent["Email"].tolist() == ["donor@example.org"]
+
+
+def test_worker_fails_closed_when_tracking_preparation_fails(
+    campaign_environment, monkeypatch
+):
+    campaign_data, sent_logs, targets, gmail, _remote = campaign_environment
+    campaign_id = "Campaign_tracking-prepare-failure"
+    config_path = _write_csv_campaign(
+        campaign_data,
+        targets,
+        campaign_id,
+        click_tracking_enabled=True,
+    )
+
+    class _BrokenTrackingService:
+        def prepare_email(self, **_kwargs):
+            raise RuntimeError("tracking database unavailable")
+
+    monkeypatch.setattr(
+        email_sender, "get_email_tracking_service", lambda: _BrokenTrackingService()
+    )
+
+    _run_locked_campaign(campaign_id)
+
+    assert gmail.sent == []
+    assert not (sent_logs / f"sent_{campaign_id}.csv").exists()
+    stored = json.loads(config_path.read_text(encoding="utf-8"))
+    assert stored["status"] == "Error - Sending Failed"
+
+
+def test_worker_records_failed_delivery_when_gmail_rejects_send(
+    campaign_environment, monkeypatch
+):
+    campaign_data, sent_logs, targets, gmail, _remote = campaign_environment
+    campaign_id = "Campaign_tracking-gmail-failure"
+    _write_csv_campaign(
+        campaign_data,
+        targets,
+        campaign_id,
+        click_tracking_enabled=True,
+    )
+    gmail.result = GmailSendResult(success=False, error="transport unavailable")
+    repository = InMemoryEmailTrackingRepository()
+    tracking_service = EmailTrackingService(
+        repository,
+        allowed_hosts={"donations.animallove.cr"},
+    )
+    monkeypatch.setattr(
+        email_sender, "get_email_tracking_service", lambda: tracking_service
+    )
+
+    _run_locked_campaign(campaign_id)
+
+    assert len(gmail.sent) == 1
+    assert not (sent_logs / f"sent_{campaign_id}.csv").exists()
+    delivery = repository.delivery_for(campaign_id, "donor@example.org")
+    assert delivery is not None
+    assert delivery.status == "failed"
+    assert delivery.sender_account == "tracking-sender.json"
+    assert delivery.failure_reason == "transport unavailable"
+
+
+def test_worker_does_not_resend_after_gmail_success_if_legacy_ledger_failed(
+    campaign_environment, monkeypatch
+):
+    campaign_data, sent_logs, targets, gmail, _remote = campaign_environment
+    campaign_id = "Campaign_tracking-ledger-recovery"
+    config_path = _write_csv_campaign(
+        campaign_data,
+        targets,
+        campaign_id,
+        click_tracking_enabled=True,
+    )
+    repository = InMemoryEmailTrackingRepository()
+    tracking_service = EmailTrackingService(
+        repository,
+        allowed_hosts={"donations.animallove.cr"},
+    )
+    monkeypatch.setattr(
+        email_sender, "get_email_tracking_service", lambda: tracking_service
+    )
+    original_append = email_sender.CampaignFileStorage.append_sent_email
+    append_attempts = 0
+
+    def fail_first_append(storage, received_campaign_id, recipient_email):
+        nonlocal append_attempts
+        append_attempts += 1
+        if append_attempts == 1:
+            raise OSError("disk unavailable")
+        return original_append(storage, received_campaign_id, recipient_email)
+
+    monkeypatch.setattr(
+        email_sender.CampaignFileStorage,
+        "append_sent_email",
+        fail_first_append,
+    )
+
+    _run_locked_campaign(campaign_id)
+
+    assert len(gmail.sent) == 1
+    assert not (sent_logs / f"sent_{campaign_id}.csv").exists()
+    stored = json.loads(config_path.read_text(encoding="utf-8"))
+    stored["status"] = "Launching"
+    config_path.write_text(json.dumps(stored), encoding="utf-8")
+
+    _run_locked_campaign(campaign_id)
+
+    assert len(gmail.sent) == 1
+    sent = pd.read_csv(sent_logs / f"sent_{campaign_id}.csv")
+    assert sent["Email"].tolist() == ["donor@example.org"]
+    stored = json.loads(config_path.read_text(encoding="utf-8"))
+    assert stored["status"] == "Completed"
