@@ -31,6 +31,7 @@ from backend.app.api.v1.endpoints import (
     templates,  # Added for email templates
     template_search,  # Smart template search via n8n
     funnel_intake,
+    email_tracking,
 )
 from backend.app.api.v1.endpoints import campaigns_fast
 from backend.app.api.v1.endpoints.search import router as search_router
@@ -94,6 +95,16 @@ else:
         "https://mongrel-valued-gar.ngrok-free.app",
     ]
 
+tracking_origins = [
+    origin.strip().rstrip("/")
+    for origin in os.getenv(
+        "EMAIL_TRACKING_ALLOWED_ORIGINS",
+        "https://donations.animallove.cr",
+    ).split(",")
+    if origin.strip()
+]
+origins = list(dict.fromkeys([*origins, *tracking_origins]))
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -118,6 +129,11 @@ app.include_router(analytics_router, prefix="/api/v1/analytics", tags=["analytic
 app.include_router(templates.router, prefix="/api/v1", tags=["templates"])  # Email templates
 app.include_router(template_search.router, prefix="/api/v1", tags=["template-search"])  # Smart template search
 app.include_router(funnel_intake.router, prefix="/api/v1", tags=["funnel-intake"])
+app.include_router(
+    email_tracking.router,
+    prefix="/api/v1/email-tracking",
+    tags=["email-tracking"],
+)
 
 # --- Health Check Endpoint (for Docker) ---
 @app.get("/health", tags=["health"])
