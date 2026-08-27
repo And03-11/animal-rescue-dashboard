@@ -69,11 +69,19 @@ def write_environment(tmp_path, monkeypatch):
     targets.mkdir()
 
     remote_service = FakeEmailSenderService()
+
+    class TrackingUnavailable:
+        def campaign_summaries(self, _campaign_ids):
+            raise RuntimeError("tracking schema is not available in this fixture")
+
     monkeypatch.setattr(email_sender, "CAMPAIGN_DATA_DIR", str(campaign_data))
     monkeypatch.setattr(email_sender, "SENT_LOGS_DIR", str(sent_logs))
     monkeypatch.setattr(email_sender, "TARGETS_DIR", str(targets))
     monkeypatch.setattr(email_sender, "AirtableService", FakeAirtableService)
     monkeypatch.setattr(email_sender, "get_email_sender_service", lambda: remote_service)
+    monkeypatch.setattr(
+        email_sender, "get_email_tracking_service", lambda: TrackingUnavailable()
+    )
     return campaign_data, sent_logs, targets, remote_service
 
 

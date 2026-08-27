@@ -18,8 +18,8 @@ test('completed campaigns open their report and keep engagement metrics empty un
     primaryAction: 'report',
     sent: 1031,
     total: 1032,
-    openRate: null,
-    clickRate: null,
+    landingRate: null,
+    humanClickRate: null,
   });
   assert.equal('delivered' in presentation, false);
 });
@@ -50,9 +50,9 @@ test('tracked engagement rates are exposed without recalculating them in the tab
     createdAt: '2026-08-24T12:00:00',
     source_type: 'csv',
     status: 'Completed',
-    performance: { open_rate: 42.6, click_rate: 5.4 },
+    performance: { landing_rate: 42.6, human_click_rate: 5.4 },
   });
 
-  assert.equal(presentation.openRate, 42.6);
-  assert.equal(presentation.clickRate, 5.4);
+  assert.equal(presentation.landingRate, 42.6);
+  assert.equal(presentation.humanClickRate, 5.4);
 });

@@ -12,8 +12,8 @@ export interface CampaignPresentation {
   primaryAction: CampaignPrimaryAction;
   sent: number;
   total: number;
-  openRate: number | null;
-  clickRate: number | null;
+  landingRate: number | null;
+  humanClickRate: number | null;
 }
 
 export function buildCampaignPresentation(campaign: EmailCampaign): CampaignPresentation {
@@ -41,7 +41,7 @@ export function buildCampaignPresentation(campaign: EmailCampaign): CampaignPres
     primaryAction,
     sent,
     total,
-    openRate: campaign.performance?.open_rate ?? null,
-    clickRate: campaign.performance?.click_rate ?? null,
+    landingRate: campaign.performance?.landing_rate ?? null,
+    humanClickRate: campaign.performance?.human_click_rate ?? null,
   };
 }

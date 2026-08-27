@@ -115,8 +115,8 @@ export function CampaignTable({
               <TableCell>Status</TableCell>
               <TableCell>Audience</TableCell>
               <TableCell>Sent</TableCell>
-              <TableCell align="right">Open rate</TableCell>
-              <TableCell align="right">Click rate</TableCell>
+              <TableCell align="right">Landing rate</TableCell>
+              <TableCell align="right">Human click rate</TableCell>
               <TableCell align="right">Actions</TableCell>
             </TableRow>
           </TableHead>
@@ -322,26 +322,26 @@ export function CampaignTable({
                   <TableCell align="right">
                     <Typography
                       variant="body2"
-                      className={presentation.openRate === null ? undefined : 'dashboard-data-value'}
+                      className={presentation.landingRate === null ? undefined : 'dashboard-data-value'}
                       sx={{ fontWeight: 700 }}
                     >
-                      {presentation.openRate === null ? '—' : `${presentation.openRate.toFixed(1)}%`}
+                      {presentation.landingRate === null ? '—' : `${presentation.landingRate.toFixed(1)}%`}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
-                      {presentation.openRate === null ? 'Not tracked' : 'Unique opens'}
+                      {presentation.landingRate === null ? 'Not tracked' : 'Landing detected'}
                     </Typography>
                   </TableCell>
 
                   <TableCell align="right">
                     <Typography
                       variant="body2"
-                      className={presentation.clickRate === null ? undefined : 'dashboard-data-value'}
+                      className={presentation.humanClickRate === null ? undefined : 'dashboard-data-value'}
                       sx={{ fontWeight: 700 }}
                     >
-                      {presentation.clickRate === null ? '—' : `${presentation.clickRate.toFixed(1)}%`}
+                      {presentation.humanClickRate === null ? '—' : `${presentation.humanClickRate.toFixed(1)}%`}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
-                      {presentation.clickRate === null ? 'Not tracked' : 'Unique clicks'}
+                      {presentation.humanClickRate === null ? 'Not tracked' : 'Human-likely'}
                     </Typography>
                   </TableCell>
 

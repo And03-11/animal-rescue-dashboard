@@ -67,8 +67,52 @@ export interface CampaignProgress {
 }
 
 export interface CampaignPerformance {
-  open_rate?: number;
-  click_rate?: number;
+  sent?: number;
+  landing_visits?: number;
+  human_likely_clicks?: number;
+  unconfirmed_activity?: number;
+  suspected_automation?: number;
+  landing_rate?: number | null;
+  human_click_rate?: number | null;
+}
+
+export interface CampaignReportSummary {
+  sent: number;
+  landing_visits: number;
+  human_likely_clicks: number;
+  unconfirmed_activity: number;
+  suspected_automation: number;
+  landing_rate: number | null;
+  human_click_rate: number | null;
+}
+
+export interface CampaignReportLink {
+  destination_origin: string;
+  destination_path: string;
+  landing_visits: number;
+  human_likely_clicks: number;
+}
+
+export type CampaignActivityClassification =
+  | 'human_likely'
+  | 'unconfirmed'
+  | 'suspected_automation';
+
+export interface CampaignRecentEngagement {
+  recipient: string;
+  destination_origin: string;
+  destination_path: string;
+  event_type: 'landing_loaded' | 'human_interaction' | 'session_summary';
+  classification: CampaignActivityClassification;
+  engagement_ms: number;
+  device_class: 'mobile' | 'tablet' | 'desktop' | 'unknown';
+  occurred_at: string;
+}
+
+export interface CampaignReportResponse {
+  summary: CampaignReportSummary;
+  top_links: CampaignReportLink[];
+  recent_engagement: CampaignRecentEngagement[];
 }
 
 export interface EmailCampaign {
@@ -116,6 +160,7 @@ export interface CampaignContact {
 }
 
 export interface CampaignDetails {
+  campaign_name?: string;
   subject?: string;
   region?: string;
   is_bounced?: boolean;

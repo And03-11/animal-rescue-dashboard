@@ -34,6 +34,14 @@ def campaign_directories(tmp_path, monkeypatch):
     monkeypatch.setattr(email_sender, "CAMPAIGN_DATA_DIR", str(campaign_data))
     monkeypatch.setattr(email_sender, "SENT_LOGS_DIR", str(sent_logs))
     monkeypatch.setattr(email_sender, "TARGETS_DIR", str(targets))
+
+    class TrackingUnavailable:
+        def campaign_summaries(self, _campaign_ids):
+            raise RuntimeError("tracking schema is not available in storage tests")
+
+    monkeypatch.setattr(
+        email_sender, "get_email_tracking_service", lambda: TrackingUnavailable()
+    )
     return campaign_data, sent_logs, targets
 
 
@@ -60,6 +68,7 @@ def test_list_campaigns_preserves_progress_shape(campaign_directories):
         "items": [
             {
                 **config,
+                "click_tracking_enabled": False,
                 "progress": {"sent": 2, "total": 4, "percentage": 50.0},
             }
         ],
@@ -95,8 +104,9 @@ def test_list_campaigns_returns_requested_page_with_total(campaign_directories):
     assert response.json() == {
         "items": [
             {
-                **configs[1],
-                "progress": {"sent": 2, "total": 4, "percentage": 50.0},
+                    **configs[1],
+                    "click_tracking_enabled": False,
+                    "progress": {"sent": 2, "total": 4, "percentage": 50.0},
             }
         ],
         "total": 3,
@@ -146,8 +156,9 @@ def test_list_campaigns_omits_heavy_fields_from_summaries(campaign_directories):
                 for key, value in config.items()
                 if key not in {"html_body", "sender_config", "mapping"}
             }
-            | {
-                "progress": {"sent": 0, "total": 12, "percentage": 0.0},
+                | {
+                    "click_tracking_enabled": False,
+                    "progress": {"sent": 0, "total": 12, "percentage": 0.0},
             }
         ],
         "total": 1,
@@ -171,7 +182,7 @@ def test_campaign_details_preserve_contact_statuses(campaign_directories):
 
     assert response.status_code == 200
     assert response.json() == {
-        "details": config,
+        "details": {**config, "click_tracking_enabled": False},
         "contacts": [
             {"email": "One@Example.com", "status": "Sent"},
             {"email": "two@example.com", "status": "Pending"},

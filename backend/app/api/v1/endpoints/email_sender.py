@@ -1083,10 +1083,23 @@ def list_campaigns(
     """
     Lista una página de campañas en disco con progreso.
     """
-    return _get_campaign_storage().list_campaigns_with_progress(
+    page = _get_campaign_storage().list_campaigns_with_progress(
         page_size=page_size,
         offset=offset,
     )
+    campaign_ids = [
+        item.get("id") for item in page["items"] if item.get("id")
+    ]
+    if campaign_ids:
+        try:
+            summaries = get_email_tracking_service().campaign_summaries(campaign_ids)
+            for item in page["items"]:
+                campaign_id = item.get("id")
+                if campaign_id in summaries:
+                    item["performance"] = summaries[campaign_id]
+        except Exception as error:
+            logger.warning("Campaign tracking summaries unavailable: %s", error)
+    return page
 
 @router.get("/sender/campaigns/{campaign_id}/details")
 def get_campaign_details(
@@ -1100,6 +1113,32 @@ def get_campaign_details(
     if not storage.campaign_exists(campaign_id):
         raise HTTPException(status_code=404, detail="Campaign not found")
     return storage.get_campaign_details(campaign_id)
+
+
+@router.get("/sender/campaigns/{campaign_id}/report", response_model=Dict[str, Any])
+def get_campaign_report(
+    campaign_id: str,
+    current_user: str = Depends(get_current_user),
+):
+    storage = _get_campaign_storage()
+    try:
+        storage.validate_campaign_id(campaign_id)
+    except InvalidCampaignIdError as error:
+        raise HTTPException(status_code=422, detail="Invalid campaign ID.") from error
+    if not storage.campaign_exists(campaign_id):
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    try:
+        return get_email_tracking_service().campaign_report(campaign_id)
+    except Exception as error:
+        logger.error(
+            "Unable to build tracking report for %s",
+            campaign_id,
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Campaign engagement report is temporarily unavailable.",
+        ) from error
 
 @router.put("/sender/campaigns/{campaign_id:path}", response_model=Dict[str, Any])
 def update_campaign(

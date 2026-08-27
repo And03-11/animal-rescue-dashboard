@@ -220,6 +220,12 @@ class EmailTrackingRepository(Protocol):
     def is_suppressed(self, recipient_email_normalized: str) -> bool:
         """Return whether a normalized recipient is on the local suppression list."""
 
+    def campaign_report(self, campaign_id: str) -> dict:
+        """Return one campaign's conservative engagement report."""
+
+    def campaign_summaries(self, campaign_ids: Sequence[str]) -> dict[str, dict]:
+        """Return summaries for several campaigns in one repository call."""
+
 
 class InMemoryEmailTrackingRepository:
     """Behavioral repository used by unit tests and local domain checks."""
@@ -400,6 +406,119 @@ class InMemoryEmailTrackingRepository:
             (campaign_id, recipient_email.strip().casefold())
         )
         return self._deliveries_by_id.get(delivery_id) if delivery_id else None
+
+    @staticmethod
+    def _mask_email(email: str) -> str:
+        local, separator, domain = email.partition("@")
+        if not separator:
+            return "***"
+        return f"{local[:1]}***@{domain}"
+
+    def _campaign_delivery_ids(self, campaign_id: str) -> set[UUID]:
+        return {
+            delivery.id
+            for delivery in self._deliveries_by_id.values()
+            if delivery.campaign_id == campaign_id and delivery.status == "sent"
+        }
+
+    def _campaign_summary(self, campaign_id: str) -> dict:
+        delivery_ids = self._campaign_delivery_ids(campaign_id)
+        landing_delivery_ids: set[UUID] = set()
+        human_delivery_ids: set[UUID] = set()
+        automation_delivery_ids: set[UUID] = set()
+        for event in self._events_by_key.values():
+            link = self._links_by_id.get(event.tracking_link_id)
+            if link is None or link.delivery_id not in delivery_ids:
+                continue
+            if event.event_type == "landing_loaded":
+                landing_delivery_ids.add(link.delivery_id)
+            if event.event_type == "human_interaction":
+                human_delivery_ids.add(link.delivery_id)
+            if event.suspected_automation:
+                automation_delivery_ids.add(link.delivery_id)
+
+        sent = len(delivery_ids)
+        landings = len(landing_delivery_ids)
+        humans = len(human_delivery_ids)
+        return {
+            "sent": sent,
+            "landing_visits": landings,
+            "human_likely_clicks": humans,
+            "unconfirmed_activity": len(landing_delivery_ids - human_delivery_ids),
+            "suspected_automation": len(automation_delivery_ids),
+            "landing_rate": round(landings / sent * 100, 2) if sent else None,
+            "human_click_rate": round(humans / sent * 100, 2) if sent else None,
+        }
+
+    def campaign_summaries(self, campaign_ids: Sequence[str]) -> dict[str, dict]:
+        return {
+            campaign_id: self._campaign_summary(campaign_id)
+            for campaign_id in dict.fromkeys(campaign_ids)
+        }
+
+    def campaign_report(self, campaign_id: str) -> dict:
+        delivery_ids = self._campaign_delivery_ids(campaign_id)
+        destination_activity: dict[
+            tuple[str, str], dict[str, set[UUID]]
+        ] = {}
+        recent: list[dict] = []
+
+        for event in self._events_by_key.values():
+            link = self._links_by_id.get(event.tracking_link_id)
+            if link is None or link.delivery_id not in delivery_ids:
+                continue
+            delivery = self._deliveries_by_id[link.delivery_id]
+            destination_key = (link.destination_origin, link.destination_path)
+            counters = destination_activity.setdefault(
+                destination_key, {"landing": set(), "human": set()}
+            )
+            if event.event_type == "landing_loaded":
+                counters["landing"].add(link.delivery_id)
+            if event.event_type == "human_interaction":
+                counters["human"].add(link.delivery_id)
+
+            classification = "unconfirmed"
+            if event.suspected_automation:
+                classification = "suspected_automation"
+            elif event.event_type == "human_interaction":
+                classification = "human_likely"
+            recent.append(
+                {
+                    "recipient": self._mask_email(delivery.recipient_email),
+                    "destination_origin": link.destination_origin,
+                    "destination_path": link.destination_path,
+                    "event_type": event.event_type,
+                    "classification": classification,
+                    "engagement_ms": event.engagement_ms,
+                    "device_class": event.device_class,
+                    "occurred_at": event.occurred_at,
+                }
+            )
+
+        top_links = [
+            {
+                "destination_origin": origin,
+                "destination_path": path,
+                "landing_visits": len(counters["landing"]),
+                "human_likely_clicks": len(counters["human"]),
+            }
+            for (origin, path), counters in destination_activity.items()
+            if counters["landing"] or counters["human"]
+        ]
+        top_links.sort(
+            key=lambda item: (
+                -item["human_likely_clicks"],
+                -item["landing_visits"],
+                item["destination_origin"],
+                item["destination_path"],
+            )
+        )
+        recent.sort(key=lambda item: item["occurred_at"], reverse=True)
+        return {
+            "summary": self._campaign_summary(campaign_id),
+            "top_links": top_links,
+            "recent_engagement": recent[:50],
+        }
 
     def links_for_delivery(self, delivery_id: UUID) -> list[StoredTrackingLink]:
         return sorted(
@@ -700,6 +819,147 @@ class PostgresEmailTrackingRepository:
         finally:
             connection.close()
         return bool(row and row[0])
+
+    @staticmethod
+    def _summary_from_row(row: dict | None) -> dict:
+        sent = int((row or {}).get("sent") or 0)
+        landings = int((row or {}).get("landing_visits") or 0)
+        humans = int((row or {}).get("human_likely_clicks") or 0)
+        return {
+            "sent": sent,
+            "landing_visits": landings,
+            "human_likely_clicks": humans,
+            "unconfirmed_activity": int(
+                (row or {}).get("unconfirmed_activity") or 0
+            ),
+            "suspected_automation": int(
+                (row or {}).get("suspected_automation") or 0
+            ),
+            "landing_rate": round(landings / sent * 100, 2) if sent else None,
+            "human_click_rate": round(humans / sent * 100, 2) if sent else None,
+        }
+
+    def campaign_summaries(self, campaign_ids: Sequence[str]) -> dict[str, dict]:
+        requested = list(dict.fromkeys(campaign_ids))
+        if not requested:
+            return {}
+        connection = self._connect()
+        try:
+            with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute(
+                    """
+                    WITH delivery_flags AS (
+                        SELECT d.campaign_id, d.id,
+                               BOOL_OR(e.event_type = 'landing_loaded') AS has_landing,
+                               BOOL_OR(e.event_type = 'human_interaction') AS has_human,
+                               BOOL_OR(COALESCE(e.suspected_automation, FALSE)) AS has_automation
+                        FROM email_campaign_deliveries AS d
+                        LEFT JOIN email_tracking_links AS link ON link.delivery_id = d.id
+                        LEFT JOIN email_tracking_events AS e ON e.tracking_link_id = link.id
+                        WHERE d.campaign_id = ANY(%s) AND d.status = 'sent'
+                        GROUP BY d.campaign_id, d.id
+                    )
+                    SELECT campaign_id,
+                           COUNT(*) AS sent,
+                           COUNT(*) FILTER (WHERE has_landing) AS landing_visits,
+                           COUNT(*) FILTER (WHERE has_human) AS human_likely_clicks,
+                           COUNT(*) FILTER (WHERE has_landing AND NOT has_human)
+                               AS unconfirmed_activity,
+                           COUNT(*) FILTER (WHERE has_automation)
+                               AS suspected_automation
+                    FROM delivery_flags
+                    GROUP BY campaign_id
+                    """,
+                    (requested,),
+                )
+                rows = cursor.fetchall()
+        finally:
+            connection.close()
+        indexed = {row["campaign_id"]: row for row in rows}
+        return {
+            campaign_id: self._summary_from_row(indexed.get(campaign_id))
+            for campaign_id in requested
+        }
+
+    @staticmethod
+    def _mask_email(email: str) -> str:
+        local, separator, domain = email.partition("@")
+        return f"{local[:1]}***@{domain}" if separator else "***"
+
+    def campaign_report(self, campaign_id: str) -> dict:
+        summary = self.campaign_summaries([campaign_id])[campaign_id]
+        connection = self._connect()
+        try:
+            with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute(
+                    """
+                    SELECT link.destination_origin, link.destination_path,
+                           COUNT(DISTINCT d.id) FILTER (
+                               WHERE e.event_type = 'landing_loaded'
+                           ) AS landing_visits,
+                           COUNT(DISTINCT d.id) FILTER (
+                               WHERE e.event_type = 'human_interaction'
+                           ) AS human_likely_clicks
+                    FROM email_campaign_deliveries AS d
+                    JOIN email_tracking_links AS link ON link.delivery_id = d.id
+                    JOIN email_tracking_events AS e ON e.tracking_link_id = link.id
+                    WHERE d.campaign_id = %s AND d.status = 'sent'
+                    GROUP BY link.destination_origin, link.destination_path
+                    ORDER BY human_likely_clicks DESC, landing_visits DESC,
+                             link.destination_origin, link.destination_path
+                    LIMIT 50
+                    """,
+                    (campaign_id,),
+                )
+                top_rows = cursor.fetchall()
+                cursor.execute(
+                    """
+                    SELECT d.recipient_email, link.destination_origin,
+                           link.destination_path, e.event_type,
+                           e.suspected_automation, e.engagement_ms,
+                           e.device_class, e.occurred_at
+                    FROM email_campaign_deliveries AS d
+                    JOIN email_tracking_links AS link ON link.delivery_id = d.id
+                    JOIN email_tracking_events AS e ON e.tracking_link_id = link.id
+                    WHERE d.campaign_id = %s AND d.status = 'sent'
+                    ORDER BY e.occurred_at DESC
+                    LIMIT 50
+                    """,
+                    (campaign_id,),
+                )
+                recent_rows = cursor.fetchall()
+        finally:
+            connection.close()
+
+        top_links = [
+            {
+                "destination_origin": row["destination_origin"],
+                "destination_path": row["destination_path"],
+                "landing_visits": int(row["landing_visits"] or 0),
+                "human_likely_clicks": int(row["human_likely_clicks"] or 0),
+            }
+            for row in top_rows
+        ]
+        recent = []
+        for row in recent_rows:
+            classification = "unconfirmed"
+            if row["suspected_automation"]:
+                classification = "suspected_automation"
+            elif row["event_type"] == "human_interaction":
+                classification = "human_likely"
+            recent.append(
+                {
+                    "recipient": self._mask_email(row["recipient_email"]),
+                    "destination_origin": row["destination_origin"],
+                    "destination_path": row["destination_path"],
+                    "event_type": row["event_type"],
+                    "classification": classification,
+                    "engagement_ms": int(row["engagement_ms"] or 0),
+                    "device_class": row["device_class"] or "unknown",
+                    "occurred_at": row["occurred_at"],
+                }
+            )
+        return {"summary": summary, "top_links": top_links, "recent_engagement": recent}
 
     def find_tracking_link_by_digest(
         self, digest: str
@@ -1026,6 +1286,20 @@ class EmailTrackingService:
     def is_suppressed(self, recipient_email: str) -> bool:
         _original, normalized_email = self._normalize_email(recipient_email)
         return self.repository.is_suppressed(normalized_email)
+
+    def campaign_summaries(self, campaign_ids: Sequence[str]) -> dict[str, dict]:
+        normalized_ids = [
+            campaign_id.strip()
+            for campaign_id in campaign_ids
+            if isinstance(campaign_id, str) and campaign_id.strip()
+        ]
+        return self.repository.campaign_summaries(normalized_ids)
+
+    def campaign_report(self, campaign_id: str) -> dict:
+        campaign_id = campaign_id.strip()
+        if not campaign_id:
+            raise ValueError("campaign_id is required")
+        return self.repository.campaign_report(campaign_id)
 
     def mark_delivery_sent(
         self,
