@@ -37,13 +37,18 @@ class FakeBlob {
   }
 }
 
-function browserEnvironment({ hash = '#alc=abcdefghijklmnop', beaconResult = true } = {}) {
+function browserEnvironment({
+  hash = '#alc=abcdefghijklmnop',
+  beaconResult = true,
+  fetchResults = [],
+  storage = new MemoryStorage(),
+} = {}) {
   const listeners = new Map();
   const listenerOptions = new Map();
   const beacons = [];
   const fetches = [];
+  const timers = [];
   const replacements = [];
-  const storage = new MemoryStorage();
   let cookie = '';
   let now = 1_000;
   const document = {
@@ -81,7 +86,13 @@ function browserEnvironment({ hash = '#alc=abcdefghijklmnop', beaconResult = tru
     },
     fetch(endpoint, options) {
       fetches.push({ endpoint, options });
-      return Promise.resolve({ ok: true });
+      const result = fetchResults[fetches.length - 1];
+      if (result instanceof Error) return Promise.reject(result);
+      return Promise.resolve(result ?? { ok: true });
+    },
+    setTimeout(callback, delay) {
+      timers.push({ callback, delay });
+      return timers.length;
     },
     sessionStorage: storage,
     crypto: {
@@ -105,11 +116,26 @@ function browserEnvironment({ hash = '#alc=abcdefghijklmnop', beaconResult = tru
     listenerOptions,
     beacons,
     fetches,
+    timers,
     replacements,
     storage,
     readCookie: () => cookie,
+    runNextTimer() {
+      const timer = timers.shift();
+      if (!timer) return null;
+      timer.callback();
+      return timer.delay;
+    },
     advance(milliseconds) { now += milliseconds; },
   };
+}
+
+function fetchEvents(browser) {
+  return browser.fetches.map(({ options }) => JSON.parse(options.body));
+}
+
+async function settleAsyncWork() {
+  await new Promise((resolve) => setImmediate(resolve));
 }
 
 const config = {
@@ -139,14 +165,16 @@ test('starts without delaying navigation, strips token, and emits one landing ev
 
   tracker.start(browser.environment, config);
   tracker.start(browser.environment, config);
+  await settleAsyncWork();
 
   assert.deepEqual(browser.replacements, [
     '/a-source-of-strength-n/?utm_source=email#section=amounts',
   ]);
-  assert.equal(browser.beacons.length, 1);
-  assert.equal(browser.beacons[0].endpoint, config.endpoint);
-  assert.equal(browser.beacons[0].payload.type, 'text/plain;charset=UTF-8');
-  const payload = JSON.parse(browser.beacons[0].payload.textValue);
+  assert.equal(browser.fetches.length, 1);
+  assert.equal(browser.beacons.length, 0);
+  assert.equal(browser.fetches[0].endpoint, config.endpoint);
+  assert.equal(browser.fetches[0].options.keepalive, true);
+  const payload = JSON.parse(browser.fetches[0].options.body);
   assert.equal(payload.token, 'abcdefghijklmnop');
   assert.equal(payload.event_type, 'landing_loaded');
   assert.equal(payload.viewport_width, 390);
@@ -167,7 +195,7 @@ test('classifies the first trusted interaction and emits one session summary', a
   browser.listeners.get('pagehide')[0]();
   browser.listeners.get('pagehide')[0]();
 
-  const events = browser.beacons.map(({ payload }) => JSON.parse(payload.textValue));
+  const events = fetchEvents(browser);
   assert.deepEqual(events.map(({ event_type }) => event_type), [
     'landing_loaded',
     'human_interaction',
@@ -184,7 +212,7 @@ test('treats a trusted scroll as a passive human interaction signal', async () =
   browser.listeners.get('scroll')[0]({ isTrusted: false });
   browser.listeners.get('scroll')[0]({ isTrusted: true });
 
-  const events = browser.beacons.map(({ payload }) => JSON.parse(payload.textValue));
+  const events = fetchEvents(browser);
   assert.deepEqual(events.map(({ event_type }) => event_type), [
     'landing_loaded',
     'human_interaction',
@@ -203,25 +231,121 @@ test('first hidden transition summarizes only visible time and pagehide does not
   browser.advance(8_000);
   browser.listeners.get('pagehide')[0]();
 
-  const summaries = browser.beacons
-    .map(({ payload }) => JSON.parse(payload.textValue))
+  const summaries = fetchEvents(browser)
     .filter(({ event_type }) => event_type === 'session_summary');
   assert.equal(summaries.length, 1);
   assert.equal(summaries[0].engagement_ms, 2000);
 });
 
-test('falls back to fetch keepalive when sendBeacon declines the payload', async () => {
+test('uses confirmable fetch delivery even when sendBeacon would accept the payload', async () => {
   const tracker = await loadTracker();
-  const browser = browserEnvironment({ beaconResult: false });
+  const browser = browserEnvironment({ beaconResult: true });
 
   tracker.start(browser.environment, config);
 
   assert.equal(browser.fetches.length, 1);
+  assert.equal(browser.beacons.length, 0);
   assert.equal(browser.fetches[0].endpoint, config.endpoint);
   assert.equal(browser.fetches[0].options.method, 'POST');
   assert.equal(browser.fetches[0].options.keepalive, true);
   assert.equal(browser.fetches[0].options.headers['Content-Type'], 'text/plain;charset=UTF-8');
   assert.equal(JSON.parse(browser.fetches[0].options.body).event_type, 'landing_loaded');
+});
+
+test('pagehide mirrors pending events to best-effort beacons without duplicating the flush', async () => {
+  const tracker = await loadTracker();
+  const browser = browserEnvironment({
+    fetchResults: [new Error('blocked'), new Error('blocked')],
+  });
+
+  tracker.start(browser.environment, config);
+  browser.listeners.get('pagehide')[0]();
+  browser.listeners.get('pagehide')[0]();
+
+  assert.deepEqual(
+    browser.beacons.map(({ payload }) => JSON.parse(payload.textValue).event_type),
+    ['landing_loaded', 'session_summary'],
+  );
+});
+
+test('retries a failed landing and marks it delivered only after a confirmed response', async () => {
+  const tracker = await loadTracker();
+  const browser = browserEnvironment({
+    fetchResults: [{ ok: false }, { ok: true }],
+  });
+
+  tracker.start(browser.environment, config);
+  await settleAsyncWork();
+
+  assert.equal(browser.fetches.length, 1);
+  assert.equal(browser.timers.length, 1);
+  assert.equal(browser.runNextTimer(), 1000);
+  await settleAsyncWork();
+  assert.equal(browser.fetches.length, 2);
+
+  tracker.start(browser.environment, config);
+  await settleAsyncWork();
+  assert.equal(browser.fetches.length, 2);
+});
+
+test('recovers an undelivered event from session storage after a reload without the token hash', async () => {
+  const tracker = await loadTracker();
+  const storage = new MemoryStorage();
+  const firstPage = browserEnvironment({
+    storage,
+    fetchResults: [
+      new Error('offline'),
+      new Error('still offline'),
+      new Error('still offline'),
+    ],
+  });
+
+  tracker.start(firstPage.environment, config);
+  await settleAsyncWork();
+  assert.equal(firstPage.runNextTimer(), 1000);
+  await settleAsyncWork();
+  assert.equal(firstPage.runNextTimer(), 3000);
+  await settleAsyncWork();
+  assert.equal(firstPage.fetches.length, 3);
+
+  const trackerAfterReload = await loadTracker();
+  const reloadedPage = browserEnvironment({ hash: '', storage });
+
+  assert.equal(trackerAfterReload.start(reloadedPage.environment, config), false);
+  await settleAsyncWork();
+  assert.equal(reloadedPage.fetches.length, 1);
+  assert.equal(
+    JSON.parse(reloadedPage.fetches[0].options.body).event_type,
+    'landing_loaded',
+  );
+
+  trackerAfterReload.start(reloadedPage.environment, config);
+  await settleAsyncWork();
+  assert.equal(reloadedPage.fetches.length, 1);
+});
+
+test('recovers pending events when a page returns from the back-forward cache', async () => {
+  const tracker = await loadTracker();
+  const browser = browserEnvironment({
+    fetchResults: [
+      new Error('offline'),
+      new Error('still offline'),
+      new Error('still offline'),
+      { ok: true },
+    ],
+  });
+
+  tracker.start(browser.environment, config);
+  await settleAsyncWork();
+  browser.runNextTimer();
+  await settleAsyncWork();
+  browser.runNextTimer();
+  await settleAsyncWork();
+  assert.equal(browser.fetches.length, 3);
+
+  browser.listeners.get('pageshow')[0]({ persisted: true });
+  await settleAsyncWork();
+  assert.equal(browser.fetches.length, 4);
 });
 
 test('disabled or non-HTTPS configuration does not consume attribution', async () => {

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Animal Love Email Tracking
  * Description: Records privacy-conscious first-party engagement for Animal Love donation links.
- * Version: 1.0.0
+ * Version: 1.0.1
  * Author: Animal Love Rescue Center
  * Requires at least: 6.2
  * Requires PHP: 7.4
@@ -13,7 +13,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('ALC_TRACKING_VERSION', '1.0.0');
+define('ALC_TRACKING_VERSION', '1.0.1');
 define('ALC_TRACKING_FILE', __FILE__);
 
 function alc_tracking_sanitize_enabled($value) {

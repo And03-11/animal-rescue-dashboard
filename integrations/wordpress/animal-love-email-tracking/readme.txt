@@ -3,7 +3,7 @@ Contributors: animallove
 Tags: email, attribution, privacy, donations
 Requires at least: 6.2
 Requires PHP: 7.4
-Stable tag: 1.0.0
+Stable tag: 1.0.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -37,6 +37,10 @@ Plugin settings remain when the plugin is deactivated or removed so that an
 administrator does not lose configuration unexpectedly.
 
 == Changelog ==
+
+= 1.0.1 =
+* Confirm event delivery, retry transient failures, and recover pending events after navigation.
+* Flush pending events with a best-effort beacon when the landing page closes.
 
 = 1.0.0 =
 * Initial first-party landing and interaction tracking.
