@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link as RouterLink, useParams } from 'react-router-dom';
 import {
   Alert,
@@ -27,6 +27,7 @@ import CodeOutlinedIcon from '@mui/icons-material/CodeOutlined';
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
 import apiClient from '../api/axiosConfig';
 import { EmailPreview } from '../components/EmailPreview';
+import { isAbortError } from '../features/email-sender/apiErrors';
 import {
   buildCampaignReportCards,
   buildCampaignReportVisibility,
@@ -35,6 +36,12 @@ import {
   formatCampaignRate,
   hasCampaignEngagement,
 } from '../features/email-sender/campaignReport';
+import {
+  canRefreshTrackingMetrics,
+  runExclusiveRefresh,
+  shouldPollCampaignReport,
+  TRACKING_METRICS_REFRESH_INTERVAL_MS,
+} from '../features/email-sender/campaignTrackingRefresh';
 import type {
   CampaignDetailsResponse,
   CampaignReportResponse,
@@ -56,14 +63,22 @@ export const CampaignDetailPage = () => {
   const [error, setError] = useState<string | null>(null);
   const [reportError, setReportError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'preview' | 'code'>('preview');
+  const campaignRequestSequenceRef = useRef(0);
+  const campaignRefreshInFlightRef = useRef(false);
 
-  const fetchCampaign = useCallback(async (showLoading = false) => {
+  const fetchCampaign = useCallback(async (
+    showLoading = false,
+    signal?: AbortSignal,
+  ) => {
     if (!campaignId) return;
+    const requestId = ++campaignRequestSequenceRef.current;
     if (showLoading) setLoading(true);
     try {
       const detailsResponse = await apiClient.get<CampaignDetailsResponse>(
         `/sender/campaigns/${campaignId}/details`,
+        { signal },
       );
+      if (signal?.aborted || requestId !== campaignRequestSequenceRef.current) return;
       setDetailsData(detailsResponse.data);
       setError(null);
       if (detailsResponse.data.details?.click_tracking_enabled !== true) {
@@ -73,31 +88,73 @@ export const CampaignDetailPage = () => {
         try {
           const reportResponse = await apiClient.get<CampaignReportResponse>(
             `/sender/campaigns/${campaignId}/report`,
+            { signal },
           );
+          if (signal?.aborted || requestId !== campaignRequestSequenceRef.current) return;
           setReport(reportResponse.data);
           setReportError(null);
-        } catch {
+        } catch (reportRequestError) {
+          if (
+            isAbortError(reportRequestError)
+            || signal?.aborted
+            || requestId !== campaignRequestSequenceRef.current
+          ) return;
           setReportError('Engagement metrics are temporarily unavailable. Campaign details are still shown.');
         }
       }
-    } catch {
-      setError('Failed to load campaign details.');
+    } catch (campaignRequestError) {
+      if (
+        isAbortError(campaignRequestError)
+        || signal?.aborted
+        || requestId !== campaignRequestSequenceRef.current
+      ) return;
+      if (showLoading) {
+        setError('Failed to load campaign details.');
+      } else {
+        setReportError('Unable to refresh campaign metrics. Existing data is still shown.');
+      }
     } finally {
-      setLoading(false);
+      if (
+        showLoading
+        && !signal?.aborted
+        && requestId === campaignRequestSequenceRef.current
+      ) setLoading(false);
     }
   }, [campaignId]);
 
   useEffect(() => {
-    void fetchCampaign(true);
+    const controller = new AbortController();
+    void fetchCampaign(true, controller.signal);
+    return () => controller.abort();
   }, [fetchCampaign]);
 
+  const shouldRefreshCampaignReport = !loading && shouldPollCampaignReport(
+    detailsData?.details?.status,
+    detailsData?.details?.click_tracking_enabled,
+  );
   useEffect(() => {
-    if (detailsData?.details?.status !== 'Sending') return undefined;
-    const intervalId = window.setInterval(() => {
-      void fetchCampaign(false);
-    }, 5000);
-    return () => window.clearInterval(intervalId);
-  }, [detailsData?.details?.status, fetchCampaign]);
+    if (!shouldRefreshCampaignReport) return undefined;
+
+    const controller = new AbortController();
+    const refreshWhenVisible = () => {
+      if (canRefreshTrackingMetrics(document.visibilityState)) {
+        void runExclusiveRefresh(
+          campaignRefreshInFlightRef,
+          () => fetchCampaign(false, controller.signal),
+        );
+      }
+    };
+    const intervalId = window.setInterval(
+      refreshWhenVisible,
+      TRACKING_METRICS_REFRESH_INTERVAL_MS,
+    );
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      controller.abort();
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+  }, [fetchCampaign, shouldRefreshCampaignReport]);
 
   const details = detailsData?.details;
   const reportVisibility = buildCampaignReportVisibility(
@@ -179,28 +236,38 @@ export const CampaignDetailPage = () => {
 
       {reportVisibility.showEngagement && report && (
         <>
-          <Grid container spacing={2} sx={{ mb: 3 }}>
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: {
+                xs: '1fr',
+                sm: 'repeat(2, minmax(0, 1fr))',
+                lg: 'repeat(5, minmax(0, 1fr))',
+              },
+              gap: 2,
+              mb: 3,
+            }}
+          >
             {cards.map((card) => (
-              <Grid key={card.label} size={{ xs: 12, sm: 6, lg: 3 }}>
-                <Paper
-                  variant="outlined"
-                  sx={{
-                    p: 2.25,
-                    height: '100%',
-                    borderColor: card.tone === 'warning' ? 'warning.main' : 'divider',
-                  }}
-                >
-                  <Typography variant="caption" color="text.secondary">{card.label}</Typography>
-                  <Typography variant="h4" className="dashboard-data-value" sx={{ mt: 0.75, fontWeight: 750 }}>
-                    {card.value.toLocaleString()}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                    {card.helper}
-                  </Typography>
-                </Paper>
-              </Grid>
+              <Paper
+                key={card.label}
+                variant="outlined"
+                sx={{
+                  p: 2.25,
+                  height: '100%',
+                  borderColor: card.tone === 'warning' ? 'warning.main' : 'divider',
+                }}
+              >
+                <Typography variant="caption" color="text.secondary">{card.label}</Typography>
+                <Typography variant="h4" className="dashboard-data-value" sx={{ mt: 0.75, fontWeight: 750 }}>
+                  {card.value.toLocaleString()}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                  {card.helper}
+                </Typography>
+              </Paper>
             ))}
-          </Grid>
+          </Box>
 
           {!hasCampaignEngagement(report.summary) && (
             <Alert severity="info" sx={{ mb: 3 }}>

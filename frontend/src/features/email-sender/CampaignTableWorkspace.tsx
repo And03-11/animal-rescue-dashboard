@@ -40,7 +40,10 @@ import {
   buildAudiencePresentation,
   buildAudienceTooltipProps,
 } from './audiencePresentation';
-import { buildCampaignPresentation } from './campaignPresentation';
+import {
+  buildCampaignMetricDisplay,
+  buildCampaignPresentation,
+} from './campaignPresentation';
 import { campaignColumnPercentages } from './campaignTableLayout';
 import type { EmailCampaign } from './types';
 
@@ -115,8 +118,8 @@ export function CampaignTable({
               <TableCell>Status</TableCell>
               <TableCell>Audience</TableCell>
               <TableCell>Sent</TableCell>
-              <TableCell align="right">Landing rate</TableCell>
-              <TableCell align="right">Human click rate</TableCell>
+              <TableCell align="right">Unique landings</TableCell>
+              <TableCell align="right">Unique clicks</TableCell>
               <TableCell align="right">Actions</TableCell>
             </TableRow>
           </TableHead>
@@ -173,6 +176,16 @@ export function CampaignTable({
               const deliveryPercentage = presentation.total > 0
                 ? Math.min(100, Math.max(0, (presentation.sent / presentation.total) * 100))
                 : 0;
+              const landingDisplay = buildCampaignMetricDisplay(
+                presentation.trackingEnabled,
+                presentation.landingVisits,
+                presentation.landingRate,
+              );
+              const humanClickDisplay = buildCampaignMetricDisplay(
+                presentation.trackingEnabled,
+                presentation.humanLikelyClicks,
+                presentation.humanClickRate,
+              );
               const isActionBusy = Boolean(actionLoading[campaign.id]);
 
               return (
@@ -322,34 +335,26 @@ export function CampaignTable({
                   <TableCell align="right">
                     <Typography
                       variant="body2"
-                      className={presentation.landingRate === null ? undefined : 'dashboard-data-value'}
+                      className={presentation.landingVisits === null ? undefined : 'dashboard-data-value'}
                       sx={{ fontWeight: 700 }}
                     >
-                      {presentation.landingRate === null ? '—' : `${presentation.landingRate.toFixed(1)}%`}
+                      {landingDisplay.value}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
-                      {!presentation.trackingEnabled
-                        ? 'Tracking off'
-                        : presentation.landingRate === null
-                          ? 'Not tracked'
-                          : 'Landing detected'}
+                      {landingDisplay.helper}
                     </Typography>
                   </TableCell>
 
                   <TableCell align="right">
                     <Typography
                       variant="body2"
-                      className={presentation.humanClickRate === null ? undefined : 'dashboard-data-value'}
+                      className={presentation.humanLikelyClicks === null ? undefined : 'dashboard-data-value'}
                       sx={{ fontWeight: 700 }}
                     >
-                      {presentation.humanClickRate === null ? '—' : `${presentation.humanClickRate.toFixed(1)}%`}
+                      {humanClickDisplay.value}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
-                      {!presentation.trackingEnabled
-                        ? 'Tracking off'
-                        : presentation.humanClickRate === null
-                          ? 'Not tracked'
-                          : 'Human-likely'}
+                      {humanClickDisplay.helper}
                     </Typography>
                   </TableCell>
 

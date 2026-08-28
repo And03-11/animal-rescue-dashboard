@@ -21,11 +21,12 @@ test('report stat cards use conservative engagement labels', () => {
 
   assert.deepEqual(cards.map((card) => card.label), [
     'Sent',
-    'Human-likely clicks',
+    'Unique landing recipients',
+    'Unique human clickers',
     'Unconfirmed activity',
     'Suspected automation',
   ]);
-  assert.deepEqual(cards.map((card) => card.value), [100, 18, 24, 5]);
+  assert.deepEqual(cards.map((card) => card.value), [100, 42, 18, 24, 5]);
   assert.equal(cards.some((card) => card.label.includes('Open')), false);
   assert.equal(cards.some((card) => card.label === 'Clicks'), false);
 });

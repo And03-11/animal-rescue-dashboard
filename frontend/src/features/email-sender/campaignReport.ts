@@ -39,7 +39,13 @@ export function buildCampaignReportCards(
       tone: 'neutral',
     },
     {
-      label: 'Human-likely clicks',
+      label: 'Unique landing recipients',
+      value: summary.landing_visits,
+      helper: `${formatCampaignRate(summary.landing_rate)} of sent`,
+      tone: 'neutral',
+    },
+    {
+      label: 'Unique human clickers',
       value: summary.human_likely_clicks,
       helper: `${formatCampaignRate(summary.human_click_rate)} of sent`,
       tone: 'positive',

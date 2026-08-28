@@ -20,6 +20,12 @@ import { CampaignDeleteDialog } from '../features/email-sender/CampaignDeleteDia
 import { CampaignTable } from '../features/email-sender/CampaignTableWorkspace';
 import { CampaignWizard } from '../features/email-sender/CampaignWizard';
 import {
+  canRefreshTrackingMetrics,
+  runExclusiveRefresh,
+  shouldPollCampaignList,
+  TRACKING_METRICS_REFRESH_INTERVAL_MS,
+} from '../features/email-sender/campaignTrackingRefresh';
+import {
   CampaignSaveSessionState,
   executeCampaignSavePlan,
   planCampaignSave,
@@ -50,6 +56,8 @@ export const EmailSenderPage = () => {
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
   const campaignSaveSessionRef = useRef(new CampaignSaveSessionState());
   const wizardCampaignIdRef = useRef<string | null>(editingCampaignId);
+  const campaignRequestSequenceRef = useRef(0);
+  const campaignRefreshInFlightRef = useRef(false);
 
   useEffect(() => {
     if (!isModalOpen || wizardCampaignIdRef.current !== editingCampaignId) {
@@ -62,6 +70,7 @@ export const EmailSenderPage = () => {
     signal?: AbortSignal,
     showLoading = true,
   ) => {
+    const requestId = ++campaignRequestSequenceRef.current;
     if (showLoading) setLoading(true);
 
     try {
@@ -75,6 +84,7 @@ export const EmailSenderPage = () => {
         headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache', 'Expires': '0' },
       });
       const { items, total } = response.data;
+      if (signal?.aborted || requestId !== campaignRequestSequenceRef.current) return;
       const lastPage = Math.max(0, Math.ceil(total / rowsPerPage) - 1);
 
       setTotalCampaigns(total);
@@ -86,12 +96,20 @@ export const EmailSenderPage = () => {
       setCampaigns(items);
       setError(null);
     } catch (err: unknown) {
-      if (!isAbortError(err) && showLoading) {
+      if (
+        !isAbortError(err)
+        && showLoading
+        && requestId === campaignRequestSequenceRef.current
+      ) {
         setError('Failed to load campaigns.');
         console.error(err);
       }
     } finally {
-      if (showLoading && !signal?.aborted) setLoading(false);
+      if (
+        showLoading
+        && !signal?.aborted
+        && requestId === campaignRequestSequenceRef.current
+      ) setLoading(false);
     }
   }, [page, rowsPerPage]);
 
@@ -102,22 +120,32 @@ export const EmailSenderPage = () => {
     return () => controller.abort();
   }, [fetchCampaigns]);
 
-  // Polling para campañas 'Sending'
+  // Keep delivery state and first-party engagement fresh without shifting rows.
+  const shouldRefreshCampaigns = !loading && shouldPollCampaignList(campaigns);
   useEffect(() => {
-    const isCampaignSending = campaigns.some(c => c.status === 'Sending');
-    if (!isCampaignSending) return;
+    if (!shouldRefreshCampaigns) return undefined;
 
-    console.log("Polling active for sending campaigns...");
-    const intervalId = setInterval(() => {
-      console.log("Polling for campaign updates...");
-      void fetchCampaigns(undefined, false);
-    }, 5000);
+    const controller = new AbortController();
+    const refreshWhenVisible = () => {
+      if (canRefreshTrackingMetrics(document.visibilityState)) {
+        void runExclusiveRefresh(
+          campaignRefreshInFlightRef,
+          () => fetchCampaigns(controller.signal, false),
+        );
+      }
+    };
+    const intervalId = window.setInterval(
+      refreshWhenVisible,
+      TRACKING_METRICS_REFRESH_INTERVAL_MS,
+    );
+    document.addEventListener('visibilitychange', refreshWhenVisible);
 
     return () => {
-      console.log("Polling stopped.");
-      clearInterval(intervalId);
-    }
-  }, [campaigns, fetchCampaigns]);
+      controller.abort();
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+  }, [fetchCampaigns, shouldRefreshCampaigns]);
 
 
   const handleSaveCampaign = async (
