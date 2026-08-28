@@ -29,6 +29,7 @@ import apiClient from '../api/axiosConfig';
 import { EmailPreview } from '../components/EmailPreview';
 import {
   buildCampaignReportCards,
+  buildCampaignReportVisibility,
   formatActivityClassification,
   formatCampaignDestination,
   formatCampaignRate,
@@ -65,14 +66,19 @@ export const CampaignDetailPage = () => {
       );
       setDetailsData(detailsResponse.data);
       setError(null);
-      try {
-        const reportResponse = await apiClient.get<CampaignReportResponse>(
-          `/sender/campaigns/${campaignId}/report`,
-        );
-        setReport(reportResponse.data);
+      if (detailsResponse.data.details?.click_tracking_enabled !== true) {
+        setReport(null);
         setReportError(null);
-      } catch {
-        setReportError('Engagement metrics are temporarily unavailable. Campaign details are still shown.');
+      } else {
+        try {
+          const reportResponse = await apiClient.get<CampaignReportResponse>(
+            `/sender/campaigns/${campaignId}/report`,
+          );
+          setReport(reportResponse.data);
+          setReportError(null);
+        } catch {
+          setReportError('Engagement metrics are temporarily unavailable. Campaign details are still shown.');
+        }
       }
     } catch {
       setError('Failed to load campaign details.');
@@ -94,6 +100,10 @@ export const CampaignDetailPage = () => {
   }, [detailsData?.details?.status, fetchCampaign]);
 
   const details = detailsData?.details;
+  const reportVisibility = buildCampaignReportVisibility(
+    details?.click_tracking_enabled,
+    report !== null,
+  );
   const cards = useMemo(
     () => (report ? buildCampaignReportCards(report.summary) : []),
     [report],
@@ -145,10 +155,10 @@ export const CampaignDetailPage = () => {
           </Typography>
           <Stack direction="row" spacing={2} useFlexGap flexWrap="wrap" sx={{ mt: 1.25 }}>
             <Typography variant="caption" color="text.secondary">
-              Landing rate <strong>{formatCampaignRate(report?.summary.landing_rate)}</strong>
+              Landing rate <strong>{reportVisibility.statusLabel ?? formatCampaignRate(report?.summary.landing_rate)}</strong>
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              Human click rate <strong>{formatCampaignRate(report?.summary.human_click_rate)}</strong>
+              Human click rate <strong>{reportVisibility.statusLabel ?? formatCampaignRate(report?.summary.human_click_rate)}</strong>
             </Typography>
             <Typography variant="caption" color="text.secondary">
               Open tracking <strong>Off</strong>
@@ -157,9 +167,17 @@ export const CampaignDetailPage = () => {
         </Box>
       </Stack>
 
-      {reportError && <Alert severity="warning" sx={{ mb: 2.5 }}>{reportError}</Alert>}
+      {!reportVisibility.trackingEnabled && (
+        <Alert severity="info" sx={{ mb: 2.5 }}>
+          Donation click tracking was off for this campaign. No landing or human-click engagement was collected.
+        </Alert>
+      )}
 
-      {report && (
+      {reportVisibility.trackingEnabled && reportError && (
+        <Alert severity="warning" sx={{ mb: 2.5 }}>{reportError}</Alert>
+      )}
+
+      {reportVisibility.showEngagement && report && (
         <>
           <Grid container spacing={2} sx={{ mb: 3 }}>
             {cards.map((card) => (

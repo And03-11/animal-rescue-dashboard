@@ -10,6 +10,24 @@ export interface CampaignReportCard {
   tone: 'neutral' | 'positive' | 'warning';
 }
 
+export interface CampaignReportVisibility {
+  trackingEnabled: boolean;
+  showEngagement: boolean;
+  statusLabel: 'Tracking off' | null;
+}
+
+export function buildCampaignReportVisibility(
+  clickTrackingEnabled: boolean | undefined,
+  hasReport: boolean,
+): CampaignReportVisibility {
+  const trackingEnabled = clickTrackingEnabled === true;
+  return {
+    trackingEnabled,
+    showEngagement: trackingEnabled && hasReport,
+    statusLabel: trackingEnabled ? null : 'Tracking off',
+  };
+}
+
 export function buildCampaignReportCards(
   summary: CampaignReportSummary,
 ): CampaignReportCard[] {

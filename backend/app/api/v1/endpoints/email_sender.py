@@ -53,6 +53,7 @@ def _email_public_api_base_url() -> str:
         parsed.hostname is None
         or parsed.username is not None
         or parsed.password is not None
+        or parsed.path not in {"", "/"}
         or parsed.query
         or parsed.fragment
         or parsed.scheme.casefold() not in {"http", "https"}
@@ -62,7 +63,7 @@ def _email_public_api_base_url() -> str:
         )
     ):
         raise ValueError(
-            "EMAIL_PUBLIC_API_BASE_URL must be an absolute safe HTTPS base URL"
+            "EMAIL_PUBLIC_API_BASE_URL must be an absolute safe HTTPS root origin"
         )
     return value
 
@@ -565,6 +566,7 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
 
     sent_count_this_run = 0
     failed_contacts = []
+    suppressed_emails_set: set[str] = set()
 
     if total_contacts_to_send == 0:
         print(f"[{campaign_id}] No new contacts to send. Finishing.")
@@ -664,13 +666,7 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
                                 "suppressed recipient."
                             )
                             with failed_contacts_lock:
-                                failed_contacts.append(
-                                    {
-                                        "email": email,
-                                        "reason": "Suppressed - unsubscribed",
-                                        "account": credential_name,
-                                    }
-                                )
+                                suppressed_emails_set.add(email.strip().lower())
                             contacts_queue.task_done()
                             continue
                         prepared_email = tracking_service.prepare_email(
@@ -758,20 +754,62 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
                         )
                         success = bool(send_result)
                     except Exception as e_send:
-                         print(f"[{campaign_id}] Worker {worker_id} Exception sending to {email}: {e_send}")
+                        logger.warning(
+                            "Campaign Gmail send raised exception=%s",
+                            type(e_send).__name__,
+                        )
 
                     if success:
                         print(f"  -> Worker {worker_id}: SUCCESS {email}")
 
                         delivery_logged = False
-                        delivery_state_write_failed = False
+                        gmail_message_id = getattr(
+                            send_result, "message_id", None
+                        )
+                        if not isinstance(gmail_message_id, str) or not gmail_message_id.strip():
+                            with failed_contacts_lock:
+                                failed_contacts.append(
+                                    {
+                                        "email": email,
+                                        "reason": (
+                                            "Gmail acceptance missing message ID"
+                                        ),
+                                        "account": credential_name,
+                                    }
+                                )
+                            stop_event.set()
+                            contacts_queue.task_done()
+                            break
+                        gmail_message_id = gmail_message_id.strip()
+
+                        with log_lock:
+                            try:
+                                storage.append_sent_email(
+                                    campaign_id,
+                                    email,
+                                    gmail_message_id=gmail_message_id,
+                                )
+                                sent_emails_set.add(email.strip().lower())
+                                delivery_logged = True
+                            except Exception as log_error:
+                                print(
+                                    f"[{campaign_id}] CRITICAL: Gmail acceptance "
+                                    f"could not be recorded in the resume ledger; "
+                                    f"stopping campaign: {log_error}"
+                                )
+                                with failed_contacts_lock:
+                                    failed_contacts.append({
+                                        "email": email,
+                                        "reason": "Sent but delivery ledger write failed",
+                                        "account": credential_name,
+                                    })
+                                stop_event.set()
+
                         try:
                             tracking_service.mark_delivery_sent(
                                 prepared_delivery_id,
                                 sender_account=credential_name,
-                                gmail_message_id=getattr(
-                                    send_result, "message_id", None
-                                ),
+                                gmail_message_id=gmail_message_id,
                             )
                         except Exception as tracking_error:
                             print(
@@ -789,32 +827,11 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
                                         "account": credential_name,
                                     }
                                 )
-                            delivery_state_write_failed = True
                             stop_event.set()
-
-                        with log_lock:
-                            if not stop_event.is_set():
-                                try:
-                                    storage.append_sent_email(campaign_id, email)
-                                    sent_emails_set.add(email.strip().lower())
-                                    delivery_logged = True
-                                except Exception as log_error:
-                                    print(
-                                        f"[{campaign_id}] CRITICAL: sent email could not be "
-                                        f"recorded; stopping campaign: {log_error}"
-                                    )
-                                    stop_event.set()
 
                         if delivery_logged:
                             with sent_count_lock:
                                 sent_count_this_run += 1
-                        elif not delivery_state_write_failed:
-                            with failed_contacts_lock:
-                                failed_contacts.append({
-                                    "email": email,
-                                    "reason": "Sent but delivery ledger write failed",
-                                    "account": credential_name,
-                                })
 
                         # Short sleep per account to handle rate limits nicely
                         # With 18+ accounts, we slow this down significantly to keep global rate safe
@@ -869,6 +886,7 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
     print(f"  - Total emails enviados (incluyendo anteriores): {final_sent_count}")
     print(f"  - Total contactos en lista original: {len(contact_data)}")
     print(f"  - Fallos registrados en esta ejecución: {len(failed_contacts)}")
+    print(f"  - Omitidos por supresión: {len(suppressed_emails_set)}")
     # Opcional: Guardar los fallos en un archivo de log separado
     # if failed_contacts:
     #     failure_log_path = os.path.join(SENT_LOGS_DIR, f"failed_{campaign_id}.json")
@@ -892,9 +910,10 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
             and isinstance(c.get('Email'), str)
             and c.get('Email').strip()
         })
-        if final_sent_count == valid_contacts_count:
+        completed_outcomes_count = final_sent_count + len(suppressed_emails_set)
+        if completed_outcomes_count == valid_contacts_count:
             final_status = 'Completed'
-        elif final_sent_count > 0: # Si se envió al menos uno, pero no todos
+        elif completed_outcomes_count > 0:
             final_status = 'Completed with Errors'
         elif failed_contacts: # Si no se envió ninguno pero hubo fallos registrados
             final_status = 'Error - Sending Failed'
@@ -905,6 +924,7 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
     config['status'] = final_status
     config['completedAt'] = datetime.now().isoformat() # Guardar fecha/hora de finalización
     config['sent_count_final'] = final_sent_count # Guardar conteo final real
+    config['suppressed_count_final'] = len(suppressed_emails_set)
 
     try:
         storage.save_campaign(campaign_id, config, serialize_unknown=True)

@@ -1,6 +1,7 @@
 # backend/app/services/gmail_service.py
 import os
 import base64
+import logging
 import re
 from dataclasses import dataclass
 from email.mime.text import MIMEText
@@ -16,6 +17,9 @@ from googleapiclient.discovery import build
 
 SCOPES = ['https://www.googleapis.com/auth/gmail.send']
 _HEADER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9-]+$")
+_SAFE_GMAIL_ERROR = "Gmail API request failed."
+_MISSING_MESSAGE_ID_ERROR = "Gmail API response did not include a message ID."
+logger = logging.getLogger(__name__)
 PROJECT_ROOT = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "..")
 )
@@ -114,6 +118,18 @@ def _html_to_plain_text(html_body: str) -> str:
     parser.feed(html_body)
     parser.close()
     return parser.text()
+
+
+def _sanitized_http_status(error: Exception) -> int | None:
+    response = getattr(error, "resp", None)
+    candidates = (
+        getattr(response, "status", None),
+        getattr(error, "status_code", None),
+    )
+    for candidate in candidates:
+        if isinstance(candidate, int) and 100 <= candidate <= 599:
+            return candidate
+    return None
 
 
 def resolve_gmail_token_path(
@@ -221,14 +237,30 @@ class GmailService:
             response = self.service.users().messages().send(
                 userId='me', body=body
             ).execute()
+            message_id = response.get("id") if isinstance(response, dict) else None
+            if not isinstance(message_id, str) or not message_id.strip():
+                logger.warning("Gmail API response missing a nonempty message ID")
+                return GmailSendResult(
+                    success=False,
+                    error=_MISSING_MESSAGE_ID_ERROR,
+                )
+            message_id = message_id.strip()
+            thread_id = response.get("threadId")
+            if not isinstance(thread_id, str) or not thread_id.strip():
+                thread_id = None
+            else:
+                thread_id = thread_id.strip()
             print(f"Correo enviado exitosamente a {to_email}")
             return GmailSendResult(
                 success=True,
-                message_id=response.get("id") if isinstance(response, dict) else None,
-                thread_id=(
-                    response.get("threadId") if isinstance(response, dict) else None
-                ),
+                message_id=message_id,
+                thread_id=thread_id,
             )
-        except Exception as e:
-            print(f"Error al enviar correo a {to_email}: {e}")
-            return GmailSendResult(success=False, error=str(e)[:512])
+        except Exception as error:
+            status_code = _sanitized_http_status(error)
+            logger.warning(
+                "Gmail API request failed: exception=%s status=%s",
+                type(error).__name__,
+                status_code if status_code is not None else "unknown",
+            )
+            return GmailSendResult(success=False, error=_SAFE_GMAIL_ERROR)

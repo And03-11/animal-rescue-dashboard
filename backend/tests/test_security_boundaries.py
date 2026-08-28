@@ -46,6 +46,19 @@ def test_funnel_stats_require_authentication():
     assert response.status_code == 401
 
 
+def test_tracking_origin_is_not_granted_global_credentialed_cors():
+    response = client.options(
+        "/api/v1/templates",
+        headers={
+            "Origin": "https://donations.animallove.cr",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "access-control-allow-origin" not in response.headers
+
+
 def test_share_link_debug_route_is_removed():
     response = client.get("/api/v1/analytics/debug/share-link-test")
 

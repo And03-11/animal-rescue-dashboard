@@ -12,6 +12,7 @@ export interface CampaignPresentation {
   primaryAction: CampaignPrimaryAction;
   sent: number;
   total: number;
+  trackingEnabled: boolean;
   landingRate: number | null;
   humanClickRate: number | null;
 }
@@ -19,6 +20,7 @@ export interface CampaignPresentation {
 export function buildCampaignPresentation(campaign: EmailCampaign): CampaignPresentation {
   const sent = campaign.progress?.sent ?? campaign.sent_count_final ?? 0;
   const total = campaign.progress?.total ?? campaign.target_count ?? 0;
+  const trackingEnabled = campaign.click_tracking_enabled === true;
 
   let primaryAction: CampaignPrimaryAction = 'none';
 
@@ -41,7 +43,10 @@ export function buildCampaignPresentation(campaign: EmailCampaign): CampaignPres
     primaryAction,
     sent,
     total,
-    landingRate: campaign.performance?.landing_rate ?? null,
-    humanClickRate: campaign.performance?.human_click_rate ?? null,
+    trackingEnabled,
+    landingRate: trackingEnabled ? campaign.performance?.landing_rate ?? null : null,
+    humanClickRate: trackingEnabled
+      ? campaign.performance?.human_click_rate ?? null
+      : null,
   };
 }

@@ -328,7 +328,11 @@ export function CampaignTable({
                       {presentation.landingRate === null ? '—' : `${presentation.landingRate.toFixed(1)}%`}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
-                      {presentation.landingRate === null ? 'Not tracked' : 'Landing detected'}
+                      {!presentation.trackingEnabled
+                        ? 'Tracking off'
+                        : presentation.landingRate === null
+                          ? 'Not tracked'
+                          : 'Landing detected'}
                     </Typography>
                   </TableCell>
 
@@ -341,7 +345,11 @@ export function CampaignTable({
                       {presentation.humanClickRate === null ? '—' : `${presentation.humanClickRate.toFixed(1)}%`}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
-                      {presentation.humanClickRate === null ? 'Not tracked' : 'Human-likely'}
+                      {!presentation.trackingEnabled
+                        ? 'Tracking off'
+                        : presentation.humanClickRate === null
+                          ? 'Not tracked'
+                          : 'Human-likely'}
                     </Typography>
                   </TableCell>
 

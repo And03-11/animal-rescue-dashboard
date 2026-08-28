@@ -108,16 +108,6 @@ else:
         "https://mongrel-valued-gar.ngrok-free.app",
     ]
 
-tracking_origins = [
-    origin.strip().rstrip("/")
-    for origin in os.getenv(
-        "EMAIL_TRACKING_ALLOWED_ORIGINS",
-        "https://donations.animallove.cr",
-    ).split(",")
-    if origin.strip()
-]
-origins = list(dict.fromkeys([*origins, *tracking_origins]))
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,

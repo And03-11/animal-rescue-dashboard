@@ -79,15 +79,20 @@ EMAIL_TRACKING_ALLOWED_HOSTS=donations.animallove.cr
 EMAIL_TRACKING_IP_HASH_KEY=REPLACE-WITH-A-LONG-RANDOM-SECRET
 ```
 
-Keep the existing `SUPABASE_DATABASE_URL` and `CORS_ORIGINS` values. The
-tracking origin is added to the normal CORS list automatically; do not replace
-the dashboard's existing origins.
+Keep the existing `CORS_ORIGINS` values for the authenticated dashboard. Do not
+add the donation origin to that credentialed, all-method allowlist. Only
+`POST /api/v1/email-tracking/events` reflects an exact origin from
+`EMAIL_TRACKING_ALLOWED_ORIGINS`, without credentials or a broad preflight
+grant.
 
 Configuration rules:
 
-- `EMAIL_PUBLIC_API_BASE_URL` must be the externally reachable HTTPS API base,
-  without `/api/v1` at the end. It is used in unsubscribe links embedded in
-  email.
+- `EMAIL_PUBLIC_API_BASE_URL` is required for every launched campaign, even
+  when donation click tracking is off, because every real message includes an
+  unsubscribe URL. It must be the externally reachable HTTPS root origin with
+  no path, query, fragment, or credentials; for example,
+  `https://tracking.animallove.cr`, never
+  `https://tracking.animallove.cr/api`.
 - `EMAIL_TRACKING_ALLOWED_ORIGINS` is a comma-separated exact-origin allowlist.
   Use no path and no trailing slash.
 - `EMAIL_TRACKING_ALLOWED_HOSTS` is a comma-separated hostname allowlist for
@@ -112,6 +117,50 @@ Invoke-WebRequest -Method Post -Uri "https://YOUR-PUBLIC-DASHBOARD-API/api/v1/em
 
 Repeat with `Origin = "https://example.org"`; the expected result is `403`.
 Do not use a real recipient token for this boundary check.
+
+### Required public-ingestion controls
+
+Do not expose the event endpoint to production traffic until all three controls
+below are enforced and observed in staging:
+
+1. **Distributed ingress rate limiting.** Configure the CDN, WAF, load
+   balancer, or reverse proxy in front of every backend instance to limit only
+   `POST /api/v1/email-tracking/events`. A reasonable initial ceiling is 120
+   requests per minute per source IP with a burst of 30; tune it from canary
+   traffic without weakening the database concurrency cap. The limiter must
+   share state across instances or run at their common ingress. An in-process
+   Python counter is not multi-instance protection.
+2. **Transaction-pool and connection budget.** Point
+   `SUPABASE_DATABASE_URL` at the provider's transaction-pool endpoint (or an
+   equivalent PgBouncer transaction pool), not an unbounded direct PostgreSQL
+   endpoint. Set an explicit event-ingestion concurrency cap per instance and
+   verify `instance_count × event_concurrency_cap` fits inside the connections
+   reserved for this service while leaving at least 30% of the database limit
+   for authenticated dashboard and maintenance traffic. Example: four
+   instances capped at four concurrent event writes require a 16-connection
+   ingestion budget before the 30% reserve.
+3. **Monitoring and alerts.** Dashboard request volume, `202`, `403`, `413`,
+   `429`, and `5xx` rates, p95 latency, pool wait time, active database
+   connections, and connection errors. Alert when `5xx` exceeds 1% for five
+   minutes, p95 exceeds one second for ten minutes, or the allocated pool stays
+   above 80% for ten minutes. Alert on sustained `429` volume separately so an
+   attack is not mistaken for an application outage. Never log event bodies,
+   attribution tokens, or recipient data.
+
+Operator checks before exposure:
+
+- From staging, send more than the configured per-IP burst with an unknown
+  canary token and the allowed origin. Confirm some requests return `429`, then
+  wait for the window and confirm ordinary requests return `202`.
+- Repeat while requests are distributed across every backend instance. Confirm
+  the same shared ingress limit applies; if each instance grants its own full
+  allowance, the deployment is not ready.
+- During the burst, confirm the database/pool dashboard never exceeds the
+  documented connection budget, pool wait remains bounded, and no direct
+  database connection surge occurs.
+- Trigger a controlled staging `5xx` and a pool-saturation warning, then verify
+  the configured alerts reach the on-call channel. Remove the fault before the
+  canary.
 
 ## 4. Build and install the WordPress plugin
 
@@ -236,3 +285,9 @@ after the event endpoint, CORS allowlist, and canary checks pass again.
 - [ ] Recent-engagement UI masks recipient addresses.
 - [ ] A scanner GET cannot unsubscribe a recipient.
 - [ ] Suppressions are checked immediately before every real send.
+- [ ] Distributed ingress rate limiting is active and verified across all
+      backend instances; no in-memory limiter is counted as shared protection.
+- [ ] The transaction-pool/concurrency calculation is recorded and leaves at
+      least 30% of database capacity for non-ingestion work.
+- [ ] Request, latency, `429`, `5xx`, pool-saturation, and connection-error
+      alerts have been exercised in staging.

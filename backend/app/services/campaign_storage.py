@@ -305,17 +305,80 @@ class CampaignFileStorage:
             self._cleanup_temporary_path(config_temporary_path, campaign_id)
             self._cleanup_temporary_path(target_temporary_path, campaign_id)
             self._cleanup_temporary_path(rollback_target_path, campaign_id)
-    def append_sent_email(self, campaign_id: str, email: str) -> None:
-        """Durably append one successful delivery to the resume ledger."""
+    def append_sent_email(
+        self,
+        campaign_id: str,
+        email: str,
+        *,
+        gmail_message_id: str | None = None,
+    ) -> None:
+        """Durably append Gmail acceptance evidence to the resume ledger."""
         sent_log_path = self.sent_log_path(campaign_id)
         sent_log_path.parent.mkdir(parents=True, exist_ok=True)
 
+        if gmail_message_id is not None:
+            gmail_message_id = gmail_message_id.strip()
+            if not gmail_message_id:
+                raise ValueError("Gmail message ID must be nonempty")
+
+        existing_fieldnames: list[str] = []
+        existing_rows: list[dict[str, str]] = []
+        needs_message_id_upgrade = False
+        if sent_log_path.exists() and sent_log_path.stat().st_size > 0:
+            with sent_log_path.open(
+                "r", newline="", encoding="utf-8-sig"
+            ) as existing_file:
+                reader = csv.DictReader(existing_file)
+                existing_fieldnames = list(reader.fieldnames or [])
+                if "Email" not in existing_fieldnames:
+                    raise ValueError("Sent ledger is missing the Email column")
+                if (
+                    gmail_message_id is not None
+                    and "GmailMessageId" not in existing_fieldnames
+                ):
+                    needs_message_id_upgrade = True
+                    existing_rows = list(reader)
+
+        if needs_message_id_upgrade:
+            upgraded_fieldnames = [*existing_fieldnames, "GmailMessageId"]
+            temporary_path = sent_log_path.with_name(
+                f".{sent_log_path.name}.{uuid4().hex}.tmp"
+            )
+            try:
+                with temporary_path.open(
+                    "w", newline="", encoding="utf-8-sig"
+                ) as temporary_file:
+                    writer = csv.DictWriter(
+                        temporary_file, fieldnames=upgraded_fieldnames
+                    )
+                    writer.writeheader()
+                    writer.writerows(existing_rows)
+                    writer.writerow(
+                        {
+                            "Email": email,
+                            "GmailMessageId": gmail_message_id,
+                        }
+                    )
+                    temporary_file.flush()
+                    os.fsync(temporary_file.fileno())
+                os.replace(temporary_path, sent_log_path)
+                return
+            finally:
+                self._cleanup_temporary_path(temporary_path, campaign_id)
+
         write_header = not sent_log_path.exists() or sent_log_path.stat().st_size == 0
+        fieldnames = existing_fieldnames or [
+            "Email",
+            *(["GmailMessageId"] if gmail_message_id is not None else []),
+        ]
         with sent_log_path.open("a", newline="", encoding="utf-8-sig") as log_file:
-            writer = csv.DictWriter(log_file, fieldnames=["Email"])
+            writer = csv.DictWriter(log_file, fieldnames=fieldnames)
             if write_header:
                 writer.writeheader()
-            writer.writerow({"Email": email})
+            row = {"Email": email}
+            if "GmailMessageId" in fieldnames:
+                row["GmailMessageId"] = gmail_message_id or ""
+            writer.writerow(row)
             log_file.flush()
             os.fsync(log_file.fileno())
 

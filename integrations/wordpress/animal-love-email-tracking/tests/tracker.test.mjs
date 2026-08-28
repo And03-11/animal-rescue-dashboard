@@ -39,6 +39,7 @@ class FakeBlob {
 
 function browserEnvironment({ hash = '#alc=abcdefghijklmnop', beaconResult = true } = {}) {
   const listeners = new Map();
+  const listenerOptions = new Map();
   const beacons = [];
   const fetches = [];
   const replacements = [];
@@ -46,10 +47,11 @@ function browserEnvironment({ hash = '#alc=abcdefghijklmnop', beaconResult = tru
   let cookie = '';
   let now = 1_000;
   const document = {
-    addEventListener(type, callback) {
+    addEventListener(type, callback, options) {
       const callbacks = listeners.get(type) ?? [];
       callbacks.push(callback);
       listeners.set(type, callbacks);
+      listenerOptions.set(type, options);
     },
     get cookie() {
       return cookie;
@@ -100,6 +102,7 @@ function browserEnvironment({ hash = '#alc=abcdefghijklmnop', beaconResult = tru
   return {
     environment,
     listeners,
+    listenerOptions,
     beacons,
     fetches,
     replacements,
@@ -171,6 +174,40 @@ test('classifies the first trusted interaction and emits one session summary', a
     'session_summary',
   ]);
   assert.equal(events[2].engagement_ms, 2500);
+});
+
+test('treats a trusted scroll as a passive human interaction signal', async () => {
+  const tracker = await loadTracker();
+  const browser = browserEnvironment();
+
+  tracker.start(browser.environment, config);
+  browser.listeners.get('scroll')[0]({ isTrusted: false });
+  browser.listeners.get('scroll')[0]({ isTrusted: true });
+
+  const events = browser.beacons.map(({ payload }) => JSON.parse(payload.textValue));
+  assert.deepEqual(events.map(({ event_type }) => event_type), [
+    'landing_loaded',
+    'human_interaction',
+  ]);
+  assert.equal(browser.listenerOptions.get('scroll').passive, true);
+});
+
+test('first hidden transition summarizes only visible time and pagehide does not duplicate it', async () => {
+  const tracker = await loadTracker();
+  const browser = browserEnvironment();
+
+  tracker.start(browser.environment, config);
+  browser.advance(2_000);
+  browser.environment.document.visibilityState = 'hidden';
+  browser.listeners.get('visibilitychange')[0]();
+  browser.advance(8_000);
+  browser.listeners.get('pagehide')[0]();
+
+  const summaries = browser.beacons
+    .map(({ payload }) => JSON.parse(payload.textValue))
+    .filter(({ event_type }) => event_type === 'session_summary');
+  assert.equal(summaries.length, 1);
+  assert.equal(summaries[0].engagement_ms, 2000);
 });
 
 test('falls back to fetch keepalive when sendBeacon declines the payload', async () => {

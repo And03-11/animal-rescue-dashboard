@@ -16,6 +16,7 @@ from backend.app.services.email_tracking import (
     EmailTrackingService,
     InMemoryEmailTrackingRepository,
 )
+from backend.app.services.gmail_service import GmailSendResult
 
 
 class CapturingBackgroundTasks:
@@ -46,7 +47,10 @@ class RecordingGmailService:
         self.events.append(("send", to_email))
         self.sent.append(to_email)
         self.extra_headers.append(dict(extra_headers or {}))
-        return True
+        return GmailSendResult(
+            success=True,
+            message_id=f"gmail-message-{len(self.sent)}",
+        )
 
 
 class FakeCredentialsManager:
@@ -234,6 +238,60 @@ def test_sent_ledger_is_durable_and_readable(campaign_directories):
 
     ledger = pd.read_csv(storage.sent_log_path("Campaign_ledger"))
     assert ledger["Email"].tolist() == ["one@example.org", "two@example.org"]
+
+
+def test_sent_ledger_records_gmail_id_and_upgrades_legacy_one_column_file(
+    campaign_directories,
+):
+    campaign_data, sent_logs, targets = campaign_directories
+    storage = CampaignFileStorage(
+        str(campaign_data), str(sent_logs), str(targets)
+    )
+    ledger_path = storage.sent_log_path("Campaign_ledger_upgrade")
+    ledger_path.write_text(
+        "Email\nlegacy@example.org\n",
+        encoding="utf-8-sig",
+    )
+
+    storage.append_sent_email(
+        "Campaign_ledger_upgrade",
+        "accepted@example.org",
+        gmail_message_id="gmail-message-accepted",
+    )
+
+    ledger = pd.read_csv(ledger_path)
+    assert ledger.columns.tolist() == ["Email", "GmailMessageId"]
+    assert ledger["Email"].tolist() == [
+        "legacy@example.org",
+        "accepted@example.org",
+    ]
+    assert pd.isna(ledger.loc[0, "GmailMessageId"])
+    assert ledger.loc[1, "GmailMessageId"] == "gmail-message-accepted"
+
+
+def test_sent_ledger_upgrades_empty_legacy_header_before_recording_gmail_id(
+    campaign_directories,
+):
+    campaign_data, sent_logs, targets = campaign_directories
+    storage = CampaignFileStorage(
+        str(campaign_data), str(sent_logs), str(targets)
+    )
+    ledger_path = storage.sent_log_path("Campaign_empty_ledger_upgrade")
+    ledger_path.write_text("Email\n", encoding="utf-8-sig")
+
+    storage.append_sent_email(
+        "Campaign_empty_ledger_upgrade",
+        "accepted@example.org",
+        gmail_message_id="gmail-message-accepted",
+    )
+
+    ledger = pd.read_csv(ledger_path)
+    assert ledger.to_dict("records") == [
+        {
+            "Email": "accepted@example.org",
+            "GmailMessageId": "gmail-message-accepted",
+        }
+    ]
 
 
 

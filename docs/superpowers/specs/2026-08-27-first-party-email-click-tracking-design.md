@@ -175,6 +175,21 @@ The Gmail worker checks suppressions again immediately before sending.
 - `GET /api/v1/sender/campaigns` — authenticated list enriched with a single
   bulk performance query for the campaigns on the current page.
 
+`POST /events` performs its own exact-origin validation and reflects only that
+validated origin with `Vary: Origin`. The donation origin is not added to the
+application's global credentialed CORS allowlist, and the public endpoint does
+not grant credentialed or broad preflight access.
+
+### Public-ingestion production gate
+
+Production exposure requires a shared ingress/CDN/WAF rate limiter in front of
+all processes, an explicit transaction-pool and database-connection budget,
+and monitored alerts for request outcomes, latency, throttling, pool pressure,
+and database errors. The operator must verify the rate limit across multiple
+instances and load-test the documented connection budget in staging. A
+process-local in-memory limiter is not distributed abuse protection and cannot
+satisfy this gate.
+
 ## WordPress Plugin
 
 The installable plugin is named **Animal Love Email Tracking** and lives in
@@ -239,6 +254,12 @@ visible unsubscribe footer is inserted before the closing `</body>` (or
   persistence; it never disables compliance preparation.
 - Applying the SQL migration, configuring the public API URL/CORS origin, and
   installing the plugin are explicit deployment steps.
+- `EMAIL_PUBLIC_API_BASE_URL` is a required HTTPS root origin for every
+  launched campaign because unsubscribe compliance remains active when click
+  tracking is disabled; path-prefixed values are rejected.
+- Public ingestion remains disabled until shared rate limiting, transaction
+  pooling/capacity, and monitoring alerts pass the operator checks in the
+  deployment guide.
 - No production database or WordPress mutation occurs as part of the local
   build.
 

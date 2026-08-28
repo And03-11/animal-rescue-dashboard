@@ -58,3 +58,24 @@ test('activity classifications remain explicit', () => {
   assert.equal(reportModule.formatActivityClassification('unconfirmed'), 'Unconfirmed');
   assert.equal(reportModule.formatActivityClassification('suspected_automation'), 'Suspected automation');
 });
+
+test('tracking-disabled detail hides engagement cards even when a report exists', () => {
+  assert.ok(reportModule, 'campaign report presentation module is missing');
+
+  assert.deepEqual(
+    reportModule.buildCampaignReportVisibility(false, true),
+    {
+      trackingEnabled: false,
+      showEngagement: false,
+      statusLabel: 'Tracking off',
+    },
+  );
+  assert.deepEqual(
+    reportModule.buildCampaignReportVisibility(true, true),
+    {
+      trackingEnabled: true,
+      showEngagement: true,
+      statusLabel: null,
+    },
+  );
+});

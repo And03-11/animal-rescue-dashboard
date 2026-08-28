@@ -149,7 +149,7 @@
 
 - [ ] **Step 6: Implement and register the public router**
 
-  Parse at most 4 KiB from `Request.body()`. Validate `Origin` against `EMAIL_TRACKING_ALLOWED_ORIGINS`, defaulting to `https://donations.animallove.cr`. Return `{"accepted": true}` for valid and unknown tokens. Add the WordPress origin to CORS even when general `CORS_ORIGINS` is configured.
+  Parse at most 4 KiB from `Request.body()`. Validate `Origin` against `EMAIL_TRACKING_ALLOWED_ORIGINS`, defaulting to `https://donations.animallove.cr`. Return `{"accepted": true}` for valid and unknown tokens. Do not add the WordPress origin to global credentialed CORS. Reflect only the exact validated origin on `POST /events`, add `Vary: Origin`, and grant no credentials or broad preflight access.
 
 - [ ] **Step 7: Run API and security tests and verify GREEN**
 
@@ -650,3 +650,18 @@
   recipient was added to tracked sources.
 
 - [ ] **Step 4: Complete a whole-branch code review before another canary**
+
+### Task 13: Gate public ingestion on enforceable capacity controls
+
+- [ ] Configure shared CDN/WAF/ingress rate limiting for only
+  `POST /api/v1/email-tracking/events` and verify the limit still applies when
+  requests are distributed across multiple backend instances. Do not count an
+  in-memory process limiter as distributed protection.
+- [ ] Use a transaction-pool endpoint and document the calculation
+  `instance_count × event_concurrency_cap`, including at least 30% reserved
+  database capacity for dashboard and maintenance traffic.
+- [ ] Monitor `202`, `403`, `413`, `429`, `5xx`, p95 latency, pool wait,
+  connection utilization, and database errors. Exercise the deployment-guide
+  alert thresholds in staging before enabling public traffic.
+- [ ] Require `EMAIL_PUBLIC_API_BASE_URL` for every launched campaign and
+  reject values that are not an HTTPS root origin without a path.

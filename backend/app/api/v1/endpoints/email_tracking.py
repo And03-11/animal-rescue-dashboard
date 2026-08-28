@@ -6,7 +6,7 @@ import json
 import os
 from urllib.parse import parse_qs, quote
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse
 
 from backend.app.services.email_tracking import get_email_tracking_service
@@ -29,10 +29,13 @@ def _allowed_origins() -> frozenset[str]:
 
 
 @router.post("/events", status_code=status.HTTP_202_ACCEPTED)
-async def ingest_event(request: Request) -> dict[str, bool]:
-    origin = (request.headers.get("origin") or "").rstrip("/")
+async def ingest_event(request: Request, response: Response) -> dict[str, bool]:
+    origin = request.headers.get("origin") or ""
     if not origin or origin not in _allowed_origins():
         raise HTTPException(status_code=403, detail="Event origin is not allowed.")
+
+    response.headers["Access-Control-Allow-Origin"] = origin
+    response.headers["Vary"] = "Origin"
 
     body = await request.body()
     if len(body) > MAX_EVENT_BODY_BYTES:

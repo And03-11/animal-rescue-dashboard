@@ -77,6 +77,26 @@ def test_valid_and_unknown_tokens_have_identical_public_responses(api_environmen
     assert "token" not in valid_response.text.casefold()
 
 
+def test_events_response_allows_only_the_exact_validated_origin(api_environment):
+    client, _repository, prepared = api_environment
+    response = post_event(
+        client,
+        {
+            "token": prepared.links[0].token,
+            "event_type": "landing_loaded",
+            "visitor_id": "visitor-api-cors",
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.headers["access-control-allow-origin"] == (
+        "https://donations.animallove.cr"
+    )
+    assert response.headers["vary"] == "Origin"
+    assert "access-control-allow-credentials" not in response.headers
+    assert "access-control-allow-methods" not in response.headers
+
+
 def test_disallowed_or_missing_origin_is_rejected(api_environment):
     client, _repository, prepared = api_environment
     payload = {
@@ -86,6 +106,11 @@ def test_disallowed_or_missing_origin_is_rejected(api_environment):
     }
 
     disallowed = post_event(client, payload, origin="https://attacker.example")
+    non_exact = post_event(
+        client,
+        payload,
+        origin="https://donations.animallove.cr/",
+    )
     missing = client.post(
         "/api/v1/email-tracking/events",
         content=json.dumps(payload),
@@ -93,7 +118,11 @@ def test_disallowed_or_missing_origin_is_rejected(api_environment):
     )
 
     assert disallowed.status_code == 403
+    assert non_exact.status_code == 403
     assert missing.status_code == 403
+    assert "access-control-allow-origin" not in disallowed.headers
+    assert "access-control-allow-origin" not in non_exact.headers
+    assert "access-control-allow-origin" not in missing.headers
 
 
 @pytest.mark.parametrize(

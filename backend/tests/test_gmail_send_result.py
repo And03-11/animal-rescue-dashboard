@@ -1,4 +1,5 @@
 import base64
+import logging
 from email import message_from_bytes
 
 from backend.app.services.gmail_service import GmailService
@@ -77,7 +78,7 @@ def test_send_email_returns_message_metadata_and_adds_safe_headers():
     assert parsed["List-Unsubscribe-Post"] == "List-Unsubscribe=One-Click"
 
 
-def test_send_email_returns_failure_without_gmail_metadata():
+def test_send_email_returns_safe_failure_without_gmail_metadata():
     api = _FakeGmailApi(error=RuntimeError("transport unavailable"))
     service = _gmail_service(api)
 
@@ -91,7 +92,51 @@ def test_send_email_returns_failure_without_gmail_metadata():
     assert bool(result) is False
     assert result.message_id is None
     assert result.thread_id is None
-    assert result.error == "transport unavailable"
+    assert result.error == "Gmail API request failed."
+
+
+class _SecretBearingHttpError(RuntimeError):
+    def __init__(self):
+        super().__init__("Bearer top-secret-token response-body=private")
+        self.resp = type("Response", (), {"status": 429})()
+
+
+def test_send_email_never_exposes_raw_gmail_exception_text(caplog, capsys):
+    api = _FakeGmailApi(error=_SecretBearingHttpError())
+    service = _gmail_service(api)
+
+    with caplog.at_level(logging.WARNING):
+        result = service.send_email(
+            to_email="donor@example.org",
+            subject="Subject",
+            html_body="<p>Body</p>",
+        )
+
+    captured = capsys.readouterr()
+    combined_output = f"{captured.out}\n{captured.err}\n{caplog.text}"
+    assert result.success is False
+    assert result.error == "Gmail API request failed."
+    assert "top-secret-token" not in combined_output
+    assert "response-body" not in combined_output
+    assert "_SecretBearingHttpError" in caplog.text
+    assert "429" in caplog.text
+
+
+def test_send_email_rejects_success_responses_without_a_nonempty_message_id():
+    for malformed_response in (None, {}, {"id": ""}, {"id": "   "}, []):
+        api = _FakeGmailApi(result=malformed_response)
+        service = _gmail_service(api)
+
+        result = service.send_email(
+            to_email="donor@example.org",
+            subject="Subject",
+            html_body="<p>Body</p>",
+        )
+
+        assert result.success is False
+        assert result.message_id is None
+        assert result.thread_id is None
+        assert result.error == "Gmail API response did not include a message ID."
 
 
 def test_send_email_rejects_header_injection_before_calling_gmail():

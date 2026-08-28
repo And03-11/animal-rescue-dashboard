@@ -119,9 +119,17 @@
     persistAttribution(environment, token, configuration.retentionDays);
 
     var visitorId = getVisitorId(environment);
-    var startedAt = environment.performance && typeof environment.performance.now === 'function'
-      ? environment.performance.now()
-      : Date.now();
+    function currentTime() {
+      return environment.performance && typeof environment.performance.now === 'function'
+        ? environment.performance.now()
+        : Date.now();
+    }
+
+    var visibleStartedAt = environment.document.visibilityState === 'hidden'
+      ? null
+      : currentTime();
+    var visibleEngagementMs = 0;
+    var sessionSummarized = false;
 
     function emitOnce(eventType, engagementMs) {
       var eventKey = 'alc_event_' + fingerprint + '_' + eventType;
@@ -145,16 +153,28 @@
       if (event && event.isTrusted === false) return;
       emitOnce('human_interaction', 0);
     }
-    ['pointerdown', 'keydown', 'touchstart'].forEach(function listen(type) {
+    ['pointerdown', 'keydown', 'touchstart', 'scroll'].forEach(function listen(type) {
       environment.document.addEventListener(type, humanInteraction, { passive: true });
     });
 
-    environment.addEventListener('pagehide', function summarizeSession() {
-      var now = environment.performance && typeof environment.performance.now === 'function'
-        ? environment.performance.now()
-        : Date.now();
-      emitOnce('session_summary', now - startedAt);
+    function summarizeSession() {
+      if (sessionSummarized) return;
+      if (visibleStartedAt !== null) {
+        visibleEngagementMs += Math.max(0, currentTime() - visibleStartedAt);
+        visibleStartedAt = null;
+      }
+      emitOnce('session_summary', visibleEngagementMs);
+      sessionSummarized = true;
+    }
+
+    environment.document.addEventListener('visibilitychange', function visibilityChanged() {
+      if (environment.document.visibilityState === 'hidden') {
+        summarizeSession();
+      } else if (!sessionSummarized && visibleStartedAt === null) {
+        visibleStartedAt = currentTime();
+      }
     });
+    environment.addEventListener('pagehide', summarizeSession);
     return true;
   }
 

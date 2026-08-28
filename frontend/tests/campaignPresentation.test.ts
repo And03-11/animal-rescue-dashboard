@@ -18,6 +18,7 @@ test('completed campaigns open their report and keep engagement metrics empty un
     primaryAction: 'report',
     sent: 1031,
     total: 1032,
+    trackingEnabled: false,
     landingRate: null,
     humanClickRate: null,
   });
@@ -50,9 +51,30 @@ test('tracked engagement rates are exposed without recalculating them in the tab
     createdAt: '2026-08-24T12:00:00',
     source_type: 'csv',
     status: 'Completed',
+    click_tracking_enabled: true,
     performance: { landing_rate: 42.6, human_click_rate: 5.4 },
   });
 
+  assert.equal(presentation.trackingEnabled, true);
   assert.equal(presentation.landingRate, 42.6);
   assert.equal(presentation.humanClickRate, 5.4);
+});
+
+test('tracking-disabled campaigns ignore zero-valued performance summaries', async () => {
+  const { buildCampaignPresentation } = await import(
+    '../src/features/email-sender/campaignPresentation.ts'
+  );
+
+  const presentation = buildCampaignPresentation({
+    id: 'Campaign_tracking_off',
+    createdAt: '2026-08-24T12:00:00',
+    source_type: 'csv',
+    status: 'Completed',
+    click_tracking_enabled: false,
+    performance: { landing_rate: 0, human_click_rate: 0 },
+  });
+
+  assert.equal(presentation.trackingEnabled, false);
+  assert.equal(presentation.landingRate, null);
+  assert.equal(presentation.humanClickRate, null);
 });
