@@ -115,6 +115,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Added after CORSMiddleware so it wraps that middleware and can remove the
+# credential header from the one public, credential-free tracking endpoint.
+app.add_middleware(email_tracking.TrackingEventCorsIsolationMiddleware)
 
 # --- Registro de routers (sin cambios) ---
 app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["dashboard"])

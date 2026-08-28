@@ -15,6 +15,33 @@ from backend.app.services.email_tracking import get_email_tracking_service
 router = APIRouter()
 MAX_EVENT_BODY_BYTES = 4096
 MAX_UNSUBSCRIBE_BODY_BYTES = 1024
+TRACKING_EVENT_PATH = "/api/v1/email-tracking/events"
+
+
+class TrackingEventCorsIsolationMiddleware:
+    """Keep the public tracking endpoint outside credentialed dashboard CORS."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http" or scope.get("path") != TRACKING_EVENT_PATH:
+            await self.app(scope, receive, send)
+            return
+
+        async def send_without_credentials(message):
+            if message["type"] == "http.response.start":
+                message = {
+                    **message,
+                    "headers": [
+                        (name, value)
+                        for name, value in message.get("headers", [])
+                        if name.lower() != b"access-control-allow-credentials"
+                    ],
+                }
+            await send(message)
+
+        await self.app(scope, receive, send_without_credentials)
 
 
 def _allowed_origins() -> frozenset[str]:

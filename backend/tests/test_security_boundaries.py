@@ -3,6 +3,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.app.api.v1.endpoints import email_tracking as email_tracking_api
 from backend.app.main import app
 from backend.app.core.security import get_current_user
 
@@ -57,6 +58,38 @@ def test_tracking_origin_is_not_granted_global_credentialed_cors():
 
     assert response.status_code == 400
     assert "access-control-allow-origin" not in response.headers
+
+
+def test_tracking_event_response_never_allows_browser_credentials(monkeypatch):
+    class AcceptingTrackingService:
+        def record_event(self, **_event):
+            return None
+
+    monkeypatch.setenv(
+        "EMAIL_TRACKING_ALLOWED_ORIGINS", "https://donations.animallove.cr"
+    )
+    monkeypatch.setattr(
+        email_tracking_api,
+        "get_email_tracking_service",
+        lambda: AcceptingTrackingService(),
+    )
+
+    response = client.post(
+        "/api/v1/email-tracking/events",
+        json={
+            "token": "unknown-token-with-enough-entropy",
+            "event_type": "landing_loaded",
+            "visitor_id": "visitor-cors-boundary",
+        },
+        headers={"Origin": "https://donations.animallove.cr"},
+    )
+
+    assert response.status_code == 202
+    assert response.headers["access-control-allow-origin"] == (
+        "https://donations.animallove.cr"
+    )
+    assert response.headers["vary"] == "Origin"
+    assert "access-control-allow-credentials" not in response.headers
 
 
 def test_share_link_debug_route_is_removed():
