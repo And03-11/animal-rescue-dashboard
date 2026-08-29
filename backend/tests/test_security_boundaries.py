@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from backend.app.api.v1.endpoints import email_tracking as email_tracking_api
 from backend.app.main import app
 from backend.app.core.security import get_current_user
+from backend.app.services.data_service import get_data_service
 
 
 client = TestClient(app)
@@ -41,8 +42,20 @@ def test_template_search_requires_authentication():
     assert response.status_code == 401
 
 
-def test_funnel_stats_require_authentication():
-    response = client.get("/api/v1/dashboard/funnel-stats")
+def test_funnel_stats_authenticates_before_initializing_data_service():
+    def unavailable_data_service():
+        raise RuntimeError("database unavailable")
+
+    previous_override = app.dependency_overrides.pop(get_data_service, None)
+    app.dependency_overrides[get_data_service] = unavailable_data_service
+    try:
+        response = TestClient(app, raise_server_exceptions=False).get(
+            "/api/v1/dashboard/funnel-stats"
+        )
+    finally:
+        app.dependency_overrides.pop(get_data_service, None)
+        if previous_override is not None:
+            app.dependency_overrides[get_data_service] = previous_override
 
     assert response.status_code == 401
 
