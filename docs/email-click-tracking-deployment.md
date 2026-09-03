@@ -73,7 +73,7 @@ Set these values in the production secret/environment manager before starting
 the new backend:
 
 ```dotenv
-EMAIL_PUBLIC_API_BASE_URL=https://YOUR-PUBLIC-DASHBOARD-API
+EMAIL_PUBLIC_API_BASE_URL=https://api-db.animallove.cr
 EMAIL_TRACKING_ALLOWED_ORIGINS=https://donations.animallove.cr
 EMAIL_TRACKING_ALLOWED_HOSTS=donations.animallove.cr
 EMAIL_TRACKING_IP_HASH_KEY=REPLACE-WITH-A-LONG-RANDOM-SECRET
@@ -91,8 +91,8 @@ Configuration rules:
   when donation click tracking is off, because every real message includes an
   unsubscribe URL. It must be the externally reachable HTTPS root origin with
   no path, query, fragment, or credentials; for example,
-  `https://tracking.animallove.cr`, never
-  `https://tracking.animallove.cr/api`.
+  `https://api-db.animallove.cr`, never
+  `https://api-db.animallove.cr/api`.
 - `EMAIL_TRACKING_ALLOWED_ORIGINS` is a comma-separated exact-origin allowlist.
   Use no path and no trailing slash.
 - `EMAIL_TRACKING_ALLOWED_HOSTS` is a comma-separated hostname allowlist for
@@ -112,7 +112,7 @@ origin. A generic `202 Accepted` is expected so tokens cannot be enumerated:
 
 ```powershell
 $trackingBody = '{"token":"unknown-canary-token","event_type":"landing_loaded","visitor_id":"canary-browser-0001","engagement_ms":0,"viewport_width":1440}'
-Invoke-WebRequest -Method Post -Uri "https://YOUR-PUBLIC-DASHBOARD-API/api/v1/email-tracking/events" -Headers @{ Origin = "https://donations.animallove.cr" } -ContentType "text/plain;charset=UTF-8" -Body $trackingBody
+Invoke-WebRequest -Method Post -Uri "https://api-db.animallove.cr/api/v1/email-tracking/events" -Headers @{ Origin = "https://donations.animallove.cr" } -ContentType "text/plain;charset=UTF-8" -Body $trackingBody
 ```
 
 Repeat with `Origin = "https://example.org"`; the expected result is `403`.
@@ -179,7 +179,7 @@ In WordPress:
 2. Upload `animal-love-email-tracking.zip` and activate it.
 3. Open **Settings > Email Tracking**.
 4. Enter
-   `https://YOUR-PUBLIC-DASHBOARD-API/api/v1/email-tracking/events`.
+   `https://api-db.animallove.cr/api/v1/email-tracking/events`.
 5. Keep the default 30-day attribution retention unless the privacy policy
    requires a shorter window.
 6. Add the privacy-notice URL used by Animal Love.
@@ -202,7 +202,7 @@ Create a campaign addressed only to an internal Animal Love test mailbox:
 5. Confirm these headers exist:
 
    ```text
-   List-Unsubscribe: <https://YOUR-PUBLIC-DASHBOARD-API/api/v1/email-tracking/unsubscribe/...>
+   List-Unsubscribe: <https://api-db.animallove.cr/api/v1/email-tracking/unsubscribe/...>
    List-Unsubscribe-Post: List-Unsubscribe=One-Click
    ```
 
