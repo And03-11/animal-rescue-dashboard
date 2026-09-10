@@ -225,13 +225,30 @@ class EmailSenderService:
         """)
     
     def mark_campaign_launching(self, campaign_id: str) -> Optional[Dict[str, Any]]:
-        """Atomically claim one scheduled campaign for launch."""
-        return self._execute_one("""
-            UPDATE email_sender_campaigns
-            SET status = 'Launching', last_updated = NOW()
-            WHERE id = %s AND status = 'Scheduled'
-            RETURNING *
-        """, (campaign_id,))
+        """Durably claim one scheduled campaign for launch."""
+        conn = self._get_connection()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    UPDATE email_sender_campaigns
+                    SET status = 'Launching', last_updated = NOW()
+                    WHERE id = %s AND status = 'Scheduled'
+                    RETURNING *
+                    """,
+                    (campaign_id,),
+                )
+                result = cur.fetchone()
+                if result is None:
+                    conn.rollback()
+                    return None
+            conn.commit()
+            return dict(result)
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
 
 # Singleton instance

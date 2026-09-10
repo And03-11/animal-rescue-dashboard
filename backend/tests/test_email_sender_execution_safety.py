@@ -647,6 +647,59 @@ def test_scheduler_submission_failure_restores_remote_scheduled(
     assert service.updated == [(campaign_id, {"status": "Scheduled"})]
 
 
+def test_scheduler_reserves_local_campaign_before_executor_submission(
+    campaign_directories, monkeypatch
+):
+    from backend.app.core import scheduler_worker
+    from backend.app.services import email_sender_service
+
+    campaign_data, _sent_logs, _targets = campaign_directories
+    campaign_id = "Campaign_scheduler_reserved"
+    config_path = write_airtable_campaign(
+        campaign_data, campaign_id, status="Scheduled"
+    )
+
+    class FakeScheduledService:
+        def __init__(self):
+            self.marked = []
+
+        def get_pending_scheduled_campaigns(self):
+            return [{"id": campaign_id}]
+
+        def mark_campaign_launching(self, received_id):
+            self.marked.append(received_id)
+            return {"id": received_id, "status": "Launching"}
+
+    class CapturingLoop:
+        def __init__(self):
+            self.submission = None
+
+        def run_in_executor(self, executor, function, *args):
+            self.submission = (executor, function, args)
+
+    service = FakeScheduledService()
+    loop = CapturingLoop()
+    monkeypatch.setattr(
+        email_sender_service, "get_email_sender_service", lambda: service
+    )
+    monkeypatch.setattr(scheduler_worker.os.path, "exists", lambda _path: True)
+    monkeypatch.setattr(scheduler_worker.asyncio, "get_event_loop", lambda: loop)
+
+    asyncio.run(scheduler_worker.check_and_launch_scheduled_campaigns())
+
+    stored = json.loads(config_path.read_text(encoding="utf-8"))
+    assert stored["status"] == "Launching"
+    assert service.marked == [campaign_id]
+    assert loop.submission is not None
+    _executor, submitted_function, submitted_args = loop.submission
+    assert submitted_function is email_sender.run_campaign_task
+    assert submitted_args[0] == campaign_id
+    assert len(submitted_args) == 2
+    assert email_sender._get_campaign_storage().owns_launch_lock(
+        campaign_id, submitted_args[1]
+    )
+
+
 
 def test_worker_refresh_commit_failure_preserves_prior_audience_snapshot(
     execution_environment, monkeypatch
