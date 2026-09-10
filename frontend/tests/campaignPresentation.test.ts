@@ -43,6 +43,22 @@ test('campaigns with failed recipients expose retry as their primary action', as
   assert.equal(presentation.primaryAction, 'retry');
 });
 
+test('campaigns where every recipient failed also expose retry', async () => {
+  const { buildCampaignPresentation } = await import(
+    '../src/features/email-sender/campaignPresentation.ts'
+  );
+
+  const presentation = buildCampaignPresentation({
+    id: 'Campaign_all_failed',
+    createdAt: '2026-09-10T12:00:00',
+    source_type: 'csv',
+    status: 'Error - Sending Failed',
+    progress: { sent: 0, total: 20, percentage: 0 },
+  });
+
+  assert.equal(presentation.primaryAction, 'retry');
+});
+
 test('tracked engagement counts and rates are exposed without recalculating them in the table', async () => {
   const { buildCampaignPresentation } = await import(
     '../src/features/email-sender/campaignPresentation.ts'

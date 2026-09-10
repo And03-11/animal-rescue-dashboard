@@ -1,6 +1,9 @@
 import base64
+import json
 import logging
 from email import message_from_bytes
+
+import pytest
 
 from backend.app.services.gmail_service import GmailService
 
@@ -99,6 +102,46 @@ class _SecretBearingHttpError(RuntimeError):
     def __init__(self):
         super().__init__("Bearer top-secret-token response-body=private")
         self.resp = type("Response", (), {"status": 429})()
+
+
+class _ClassifiedHttpError(RuntimeError):
+    def __init__(self, status, reason=None):
+        super().__init__("private upstream response")
+        self.resp = type("Response", (), {"status": status})()
+        self.content = json.dumps(
+            {
+                "error": {
+                    "errors": ([{"reason": reason}] if reason else []),
+                }
+            }
+        ).encode("utf-8")
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_retryable"),
+    [
+        (_ClassifiedHttpError(429), True),
+        (_ClassifiedHttpError(503), True),
+        (_ClassifiedHttpError(403, "rateLimitExceeded"), True),
+        (_ClassifiedHttpError(403, "userRateLimitExceeded"), True),
+        (_ClassifiedHttpError(403, "forbidden"), False),
+        (_ClassifiedHttpError(400), False),
+        (RuntimeError("connection outcome unknown"), False),
+    ],
+)
+def test_send_email_classifies_only_safe_transient_failures_for_retry(
+    error, expected_retryable
+):
+    service = _gmail_service(_FakeGmailApi(error=error))
+
+    result = service.send_email(
+        to_email="donor@example.org",
+        subject="Subject",
+        html_body="<p>Body</p>",
+    )
+
+    assert result.success is False
+    assert result.retryable is expected_retryable
 
 
 def test_send_email_never_exposes_raw_gmail_exception_text(caplog, capsys):

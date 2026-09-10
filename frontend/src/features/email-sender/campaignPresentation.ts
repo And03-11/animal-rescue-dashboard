@@ -44,7 +44,11 @@ export function buildCampaignPresentation(campaign: EmailCampaign): CampaignPres
 
   let primaryAction: CampaignPrimaryAction = 'none';
 
-  if (campaign.status === 'Completed with Errors' && sent < total) {
+  if (
+    (campaign.status === 'Completed with Errors'
+      || campaign.status === 'Error - Sending Failed')
+    && sent < total
+  ) {
     primaryAction = 'retry';
   } else if (campaign.status === 'Completed' || campaign.status === 'Completed with Errors') {
     primaryAction = 'report';

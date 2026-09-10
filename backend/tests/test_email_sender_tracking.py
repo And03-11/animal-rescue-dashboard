@@ -113,6 +113,20 @@ def _run_locked_campaign(campaign_id):
     email_sender.run_campaign_task(campaign_id, launch_id)
 
 
+def test_retry_jobs_prefer_a_different_sender_when_available():
+    retry_contact = {"_retry_avoid_worker_id": 1}
+
+    assert email_sender._retry_should_yield_to_other_worker(
+        retry_contact, worker_id=1, worker_count=2
+    ) is True
+    assert email_sender._retry_should_yield_to_other_worker(
+        retry_contact, worker_id=2, worker_count=2
+    ) is False
+    assert email_sender._retry_should_yield_to_other_worker(
+        retry_contact, worker_id=1, worker_count=1
+    ) is False
+
+
 @pytest.mark.parametrize(
     "configured_url",
     [
@@ -320,6 +334,142 @@ def test_worker_records_failed_delivery_when_gmail_rejects_send(
     assert delivery.status == "failed"
     assert delivery.sender_account == "tracking-sender.json"
     assert delivery.failure_reason == "transport unavailable"
+
+
+def test_worker_retries_transient_gmail_failures_and_records_one_delivery(
+    campaign_environment, monkeypatch
+):
+    campaign_data, sent_logs, targets, gmail, _remote = campaign_environment
+    campaign_id = "Campaign_tracking-transient-retry"
+    config_path = _write_csv_campaign(
+        campaign_data,
+        targets,
+        campaign_id,
+        click_tracking_enabled=False,
+    )
+    outcomes = iter(
+        [
+            GmailSendResult(
+                success=False,
+                error="Gmail API request failed.",
+                retryable=True,
+            ),
+            GmailSendResult(
+                success=False,
+                error="Gmail API request failed.",
+                retryable=True,
+            ),
+            GmailSendResult(success=True, message_id="gmail-after-retry"),
+        ]
+    )
+    attempts = []
+
+    def send_with_transient_failures(**send_kwargs):
+        attempts.append(send_kwargs["to_email"])
+        return next(outcomes)
+
+    monkeypatch.setattr(gmail, "send_email", send_with_transient_failures)
+    repository = InMemoryEmailTrackingRepository()
+    tracking_service = EmailTrackingService(
+        repository,
+        allowed_hosts={"donations.animallove.cr"},
+    )
+    monkeypatch.setattr(
+        email_sender, "get_email_tracking_service", lambda: tracking_service
+    )
+
+    _run_locked_campaign(campaign_id)
+
+    assert attempts == [
+        "donor@example.org",
+        "donor@example.org",
+        "donor@example.org",
+    ]
+    sent = pd.read_csv(sent_logs / f"sent_{campaign_id}.csv")
+    assert sent["Email"].tolist() == ["donor@example.org"]
+    stored = json.loads(config_path.read_text(encoding="utf-8"))
+    assert stored["status"] == "Completed"
+    delivery = repository.delivery_for(campaign_id, "donor@example.org")
+    assert delivery is not None
+    assert delivery.status == "sent"
+    assert delivery.gmail_message_id == "gmail-after-retry"
+
+
+def test_worker_stops_after_three_transient_gmail_failures(
+    campaign_environment, monkeypatch
+):
+    campaign_data, sent_logs, targets, gmail, _remote = campaign_environment
+    campaign_id = "Campaign_tracking-transient-retry-exhausted"
+    config_path = _write_csv_campaign(
+        campaign_data,
+        targets,
+        campaign_id,
+        click_tracking_enabled=False,
+    )
+    attempts = []
+
+    def always_fail_transiently(**send_kwargs):
+        attempts.append(send_kwargs["to_email"])
+        return GmailSendResult(
+            success=False,
+            error="Gmail API request failed.",
+            retryable=True,
+        )
+
+    monkeypatch.setattr(gmail, "send_email", always_fail_transiently)
+    repository = InMemoryEmailTrackingRepository()
+    tracking_service = EmailTrackingService(
+        repository,
+        allowed_hosts={"donations.animallove.cr"},
+    )
+    monkeypatch.setattr(
+        email_sender, "get_email_tracking_service", lambda: tracking_service
+    )
+
+    _run_locked_campaign(campaign_id)
+
+    assert attempts == [
+        "donor@example.org",
+        "donor@example.org",
+        "donor@example.org",
+    ]
+    assert not (sent_logs / f"sent_{campaign_id}.csv").exists()
+    stored = json.loads(config_path.read_text(encoding="utf-8"))
+    assert stored["status"] == "Error - Sending Failed"
+    delivery = repository.delivery_for(campaign_id, "donor@example.org")
+    assert delivery is not None
+    assert delivery.status == "failed"
+
+
+def test_worker_releases_queue_item_after_unexpected_processing_error(
+    campaign_environment, monkeypatch
+):
+    campaign_data, sent_logs, targets, gmail, _remote = campaign_environment
+    campaign_id = "Campaign_tracking-worker-exception"
+    config_path = _write_csv_campaign(
+        campaign_data,
+        targets,
+        campaign_id,
+        click_tracking_enabled=False,
+    )
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["html_body"] = {"unexpected": "shape"}
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    repository = InMemoryEmailTrackingRepository()
+    tracking_service = EmailTrackingService(
+        repository,
+        allowed_hosts={"donations.animallove.cr"},
+    )
+    monkeypatch.setattr(
+        email_sender, "get_email_tracking_service", lambda: tracking_service
+    )
+
+    _run_locked_campaign(campaign_id)
+
+    assert gmail.sent == []
+    assert not (sent_logs / f"sent_{campaign_id}.csv").exists()
+    stored = json.loads(config_path.read_text(encoding="utf-8"))
+    assert stored["status"] == "Error - Sending Failed"
 
 
 def test_worker_does_not_log_raw_exception_from_gmail_service(

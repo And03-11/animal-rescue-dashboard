@@ -115,6 +115,69 @@ def test_create_csv_campaign_preserves_files_and_remote_sync(write_environment):
     assert remote_service.created[0]["status"] == "Draft"
 
 
+def test_create_csv_campaign_rolls_back_local_files_when_remote_save_fails(
+    write_environment, monkeypatch
+):
+    campaign_data, _sent_logs, targets, remote_service = write_environment
+
+    def fail_remote_save(_config):
+        raise RuntimeError("database schema mismatch")
+
+    monkeypatch.setattr(remote_service, "create_campaign", fail_remote_save)
+
+    response = client.post(
+        "/api/v1/sender/campaigns",
+        json={
+            "source_type": "csv",
+            "subject": "Welcome",
+            "html_body": "<p>Hello</p>",
+            "campaign_name": "Must not become a ghost campaign",
+            "sender_config": "all",
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "Unable to save campaign. Try again."
+    }
+    assert list(campaign_data.glob("Campaign_*.json")) == []
+    assert list(targets.glob("target_Campaign_*.csv")) == []
+
+
+def test_create_csv_campaign_keeps_files_when_remote_insert_was_committed(
+    write_environment, monkeypatch
+):
+    campaign_data, _sent_logs, targets, remote_service = write_environment
+
+    def fail_after_commit(config):
+        remote_service.created.append(config.copy())
+        raise RuntimeError("connection dropped after commit")
+
+    monkeypatch.setattr(remote_service, "create_campaign", fail_after_commit)
+    monkeypatch.setattr(
+        remote_service,
+        "get_campaign",
+        lambda campaign_id: {"id": campaign_id},
+        raising=False,
+    )
+
+    response = client.post(
+        "/api/v1/sender/campaigns",
+        json={
+            "source_type": "csv",
+            "subject": "Welcome",
+            "html_body": "<p>Hello</p>",
+            "campaign_name": "Committed despite transport error",
+            "sender_config": "all",
+        },
+    )
+
+    assert response.status_code == 201
+    campaign_id = response.json()["id"]
+    assert (campaign_data / f"{campaign_id}.json").exists()
+    assert (targets / f"target_{campaign_id}.csv").exists()
+
+
 @pytest.mark.parametrize("click_tracking_enabled", [True, False])
 def test_create_campaign_persists_explicit_click_tracking_boolean(
     write_environment, click_tracking_enabled

@@ -174,6 +174,16 @@ _TERMINAL_CAMPAIGN_STATUSES = {
 }
 
 
+def _retry_should_yield_to_other_worker(
+    contact: Dict[str, Any], *, worker_id: int, worker_count: int
+) -> bool:
+    """Let another selected sender claim a retry when one is available."""
+    return (
+        worker_count > 1
+        and contact.get("_retry_avoid_worker_id") == worker_id
+    )
+
+
 def _sync_remote_campaign_status(campaign_id: str, status_value: str) -> None:
     try:
         get_email_sender_service().update_campaign(
@@ -592,6 +602,8 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
 
         processed_count = 0
         processed_count_lock = threading.Lock()
+        send_attempts: dict[str, int] = {}
+        send_attempts_lock = threading.Lock()
 
         # Worker Function
         def email_worker(service: GmailService, worker_id: int):
@@ -600,13 +612,33 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
             credential_name = os.path.basename(service.credentials_path)
             print(f"[{campaign_id}] Worker {worker_id} started using {credential_name}")
 
-            while not contacts_queue.empty() and not stop_event.is_set():
+            while not stop_event.is_set():
+                task_pending = False
+                contact = None
                 try:
                     # Retrieve contact
                     try:
                         contact = contacts_queue.get(timeout=1)
+                        task_pending = True
                     except queue.Empty:
-                        break
+                        if contacts_queue.unfinished_tasks == 0:
+                            break
+                        continue
+
+                    if _retry_should_yield_to_other_worker(
+                        contact,
+                        worker_id=worker_id,
+                        worker_count=len(gmail_services),
+                    ):
+                        contacts_queue.put(contact)
+                        contacts_queue.task_done()
+                        task_pending = False
+                        stop_event.wait(0.05)
+                        continue
+
+                    retry_not_before = contact.get("_retry_not_before")
+                    if isinstance(retry_not_before, (int, float)):
+                        time.sleep(max(0.0, retry_not_before - time.monotonic()))
 
                     # Status Check (Reading file)
                     try:
@@ -616,6 +648,7 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
                          if current_status == "Paused":
                              contacts_queue.put(contact)
                              contacts_queue.task_done()
+                             task_pending = False
                              time.sleep(5)
                              continue
 
@@ -623,12 +656,14 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
                              print(f"[{campaign_id}] CANCELLED detected by Worker {worker_id}.")
                              stop_event.set()
                              contacts_queue.task_done()
+                             task_pending = False
                              break
 
                          elif current_status != "Sending":
                              print(f"[{campaign_id}] Unexpected status '{current_status}'. Stopping.")
                              stop_event.set()
                              contacts_queue.task_done()
+                             task_pending = False
                              break
 
                     except Exception as status_error:
@@ -638,15 +673,21 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
                         )
                         stop_event.set()
                         contacts_queue.task_done()
+                        task_pending = False
                         break
 
                     if stop_event.is_set():
                         contacts_queue.task_done()
+                        task_pending = False
                         break
 
                     # Processing
                     email = contact.get('Email')
                     name = contact.get('Name', 'Valued Supporter')
+                    normalized_email = email.strip().lower()
+                    with send_attempts_lock:
+                        attempt_number = send_attempts.get(normalized_email, 0) + 1
+                        send_attempts[normalized_email] = attempt_number
 
                     with processed_count_lock:
                         processed_count += 1
@@ -668,6 +709,7 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
                             with failed_contacts_lock:
                                 suppressed_emails_set.add(email.strip().lower())
                             contacts_queue.task_done()
+                            task_pending = False
                             continue
                         prepared_email = tracking_service.prepare_email(
                             campaign_id=campaign_id,
@@ -704,6 +746,7 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
                                     )
                                 stop_event.set()
                             contacts_queue.task_done()
+                            task_pending = False
                             if stop_event.is_set():
                                 break
                             continue
@@ -737,6 +780,7 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
                             )
                         stop_event.set()
                         contacts_queue.task_done()
+                        task_pending = False
                         break
 
                     success = False
@@ -779,6 +823,7 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
                                 )
                             stop_event.set()
                             contacts_queue.task_done()
+                            task_pending = False
                             break
                         gmail_message_id = gmail_message_id.strip()
 
@@ -843,6 +888,27 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
                         failure_reason = (
                             getattr(send_result, "error", None) or "Send failed"
                         )
+                        if (
+                            getattr(send_result, "retryable", False) is True
+                            and attempt_number < 3
+                            and not stop_event.is_set()
+                        ):
+                            base_delay = 5.0 if attempt_number == 1 else 30.0
+                            retry_delay = base_delay + random.uniform(0.0, 1.0)
+                            retry_contact = dict(contact)
+                            retry_contact["_retry_not_before"] = (
+                                time.monotonic() + retry_delay
+                            )
+                            retry_contact["_retry_avoid_worker_id"] = worker_id
+                            contacts_queue.put(retry_contact)
+                            print(
+                                f"[{campaign_id}] Retrying transient failure for "
+                                f"{email}: attempt {attempt_number + 1}/3 in "
+                                f"{retry_delay:.1f}s"
+                            )
+                            contacts_queue.task_done()
+                            task_pending = False
+                            continue
                         if prepared_delivery_id is not None:
                             try:
                                 tracking_service.mark_delivery_failed(
@@ -861,10 +927,24 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
                         time.sleep(random.uniform(30.0, 60.0))
 
                     contacts_queue.task_done()
+                    task_pending = False
 
                 except Exception as e_worker:
                     print(f"[{campaign_id}] Worker {worker_id} crashed: {e_worker}")
                     traceback.print_exc()
+                    if task_pending:
+                        contacts_queue.task_done()
+                    with failed_contacts_lock:
+                        failed_contacts.append(
+                            {
+                                "email": contact.get("Email", "")
+                                if isinstance(contact, dict)
+                                else "",
+                                "reason": "Worker failed unexpectedly",
+                                "account": credential_name,
+                            }
+                        )
+                    stop_event.set()
 
         # Launch Threads
         threads = []
@@ -983,6 +1063,52 @@ def run_campaign_task(campaign_id: str, launch_id: Optional[str] = None):
 
 # --- Fin función ---
 
+
+def _persist_created_campaign_or_rollback(
+    storage: CampaignFileStorage,
+    campaign_id: str,
+    campaign_config: Dict[str, Any],
+) -> None:
+    """Keep local campaign files only when the scheduling record is durable."""
+    service = get_email_sender_service()
+    try:
+        service.create_campaign(campaign_config)
+    except Exception as error:
+        try:
+            persisted_campaign = service.get_campaign(campaign_id)
+        except Exception as verification_error:
+            logger.warning(
+                "[%s] Could not verify campaign after create failure: %s",
+                campaign_id,
+                type(verification_error).__name__,
+            )
+        else:
+            if (
+                isinstance(persisted_campaign, dict)
+                and persisted_campaign.get("id") == campaign_id
+            ):
+                logger.warning(
+                    "[%s] Campaign insert raised but the committed row was confirmed",
+                    campaign_id,
+                )
+                return
+
+        logger.exception("[%s] Supabase campaign creation failed", campaign_id)
+        try:
+            deletion = storage.delete_campaign_files(campaign_id)
+            if deletion.errors:
+                logger.error(
+                    "[%s] Campaign creation rollback was incomplete: %s",
+                    campaign_id,
+                    "; ".join(deletion.errors),
+                )
+        except Exception:
+            logger.exception("[%s] Campaign creation rollback failed", campaign_id)
+        raise HTTPException(
+            status_code=503,
+            detail="Unable to save campaign. Try again.",
+        ) from error
+
 # --- Reemplaza la función create_campaign existente ---
 @router.post("/sender/campaigns", status_code=201, response_model=Dict[str, Any])
 def create_campaign(
@@ -1032,10 +1158,9 @@ def create_campaign(
         })
         storage.write_target_contacts(campaign_id, resolution.contacts)
         storage.save_campaign(campaign_id, campaign_config, serialize_unknown=True)
-        try:
-            get_email_sender_service().create_campaign(campaign_config)
-        except Exception as error:
-            print(f"[{campaign_id}] Supabase save warning: {error}")
+        _persist_created_campaign_or_rollback(
+            storage, campaign_id, campaign_config
+        )
         return campaign_config
 
     # --- Lógica Condicional para obtener contactos ---
@@ -1080,13 +1205,10 @@ def create_campaign(
     })
     storage.save_campaign(campaign_id, campaign_config, serialize_unknown=True)
 
-    # Guardar en Supabase para scheduling
-    try:
-        service = get_email_sender_service()
-        service.create_campaign(campaign_config)
-        print(f"[{campaign_id}] Saved to Supabase (status: {initial_status})")
-    except Exception as e:
-        print(f"[{campaign_id}] Supabase save warning: {e}")
+    # Guardar en Supabase para scheduling. A failed remote save must not leave a
+    # campaign that only exists locally and can never be claimed by the scheduler.
+    _persist_created_campaign_or_rollback(storage, campaign_id, campaign_config)
+    print(f"[{campaign_id}] Saved to Supabase (status: {initial_status})")
 
     return campaign_config
 

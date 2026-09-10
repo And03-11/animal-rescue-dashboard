@@ -1,6 +1,7 @@
 # backend/app/services/gmail_service.py
 import os
 import base64
+import json
 import logging
 import re
 from dataclasses import dataclass
@@ -19,6 +20,10 @@ SCOPES = ['https://www.googleapis.com/auth/gmail.send']
 _HEADER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9-]+$")
 _SAFE_GMAIL_ERROR = "Gmail API request failed."
 _MISSING_MESSAGE_ID_ERROR = "Gmail API response did not include a message ID."
+_RETRYABLE_HTTP_STATUSES = frozenset({429, 500, 502, 503, 504})
+_RETRYABLE_FORBIDDEN_REASONS = frozenset(
+    {"rateLimitExceeded", "userRateLimitExceeded"}
+)
 logger = logging.getLogger(__name__)
 PROJECT_ROOT = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "..")
@@ -132,6 +137,29 @@ def _sanitized_http_status(error: Exception) -> int | None:
     return None
 
 
+def _is_retryable_gmail_error(error: Exception, status_code: int | None) -> bool:
+    if status_code in _RETRYABLE_HTTP_STATUSES:
+        return True
+    if status_code != 403:
+        return False
+
+    content = getattr(error, "content", None)
+    if isinstance(content, bytes):
+        content = content.decode("utf-8", errors="replace")
+    if not isinstance(content, str):
+        return False
+    try:
+        payload = json.loads(content)
+    except (TypeError, ValueError):
+        return False
+    errors = payload.get("error", {}).get("errors", [])
+    return any(
+        isinstance(item, dict)
+        and item.get("reason") in _RETRYABLE_FORBIDDEN_REASONS
+        for item in errors
+    )
+
+
 def resolve_gmail_token_path(
     credentials_path: str, *, project_root: str | None = None
 ) -> str:
@@ -172,6 +200,7 @@ class GmailSendResult:
     message_id: str | None = None
     thread_id: str | None = None
     error: str | None = None
+    retryable: bool = False
 
     def __bool__(self) -> bool:
         return self.success
@@ -263,4 +292,8 @@ class GmailService:
                 type(error).__name__,
                 status_code if status_code is not None else "unknown",
             )
-            return GmailSendResult(success=False, error=_SAFE_GMAIL_ERROR)
+            return GmailSendResult(
+                success=False,
+                error=_SAFE_GMAIL_ERROR,
+                retryable=_is_retryable_gmail_error(error, status_code),
+            )
