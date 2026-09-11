@@ -165,7 +165,8 @@ def _get_campaign_storage() -> CampaignFileStorage:
     return CampaignFileStorage(CAMPAIGN_DATA_DIR, SENT_LOGS_DIR, TARGETS_DIR)
 
 
-_ACTIVE_CAMPAIGN_STATUSES = {"Launching", "Sending", "Paused"}
+_ACTIVE_CAMPAIGN_STATUSES = {"Launching", "Sending", "Pausing", "Paused"}
+_PAUSE_REQUESTED_STATUSES = {"Pausing", "Paused"}
 _TERMINAL_CAMPAIGN_STATUSES = {
     "Cancelled",
     "Completed",
@@ -191,6 +192,22 @@ def _sync_remote_campaign_status(campaign_id: str, status_value: str) -> None:
         )
     except Exception as error:
         print(f"[{campaign_id}] Remote status sync warning: {error}")
+
+
+def _finalize_campaign_pause(
+    campaign_id: str, storage: CampaignFileStorage
+) -> bool:
+    """Finish a requested pause without marking pending recipients as failures."""
+    latest_config = storage.load_campaign(campaign_id)
+    if latest_config.get("status") not in _PAUSE_REQUESTED_STATUSES:
+        return False
+
+    latest_config["status"] = "Paused"
+    latest_config["last_updated"] = datetime.now().isoformat()
+    storage.save_campaign(campaign_id, latest_config, serialize_unknown=True)
+    _sync_remote_campaign_status(campaign_id, "Paused")
+    print(f"[{campaign_id}] Campaign paused after releasing the execution lock.")
+    return True
 
 
 def _refresh_airtable_campaign_contacts(
@@ -433,6 +450,10 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
             return
 
     # --- Actualizar Estado a 'Sending' ---
+    latest_config = storage.load_campaign(campaign_id)
+    if latest_config.get("status") in _PAUSE_REQUESTED_STATUSES:
+        return True
+    config = latest_config
     config['status'] = 'Sending'
     try:
         storage.save_campaign(campaign_id, config, serialize_unknown=True)
@@ -645,12 +666,15 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
                          current_config = storage.load_campaign(campaign_id)
                          current_status = current_config.get('status', 'Unknown')
 
-                         if current_status == "Paused":
-                             contacts_queue.put(contact)
+                         if current_status in _PAUSE_REQUESTED_STATUSES:
+                             print(
+                                 f"[{campaign_id}] PAUSE detected by Worker "
+                                 f"{worker_id}."
+                             )
+                             stop_event.set()
                              contacts_queue.task_done()
                              task_pending = False
-                             time.sleep(5)
-                             continue
+                             break
 
                          elif current_status == "Cancelled":
                              print(f"[{campaign_id}] CANCELLED detected by Worker {worker_id}.")
@@ -959,6 +983,12 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
         for t in threads:
             t.join()
 
+    if (
+        storage.load_campaign(campaign_id).get("status")
+        in _PAUSE_REQUESTED_STATUSES
+    ):
+        return True
+
     # --- INICIO: REEMPLAZO de Actualización Final de Estado ---
     print(f"[{campaign_id}] Campaña finalizada.")
     final_sent_count = len(sent_emails_set) # Conteo final desde el conjunto actualizado
@@ -1045,8 +1075,9 @@ def run_campaign_task(campaign_id: str, launch_id: Optional[str] = None):
         print(f"[{campaign_id}] Launch skipped: execution lock is not owned.")
         return
 
+    pause_ready = False
     try:
-        _run_campaign_task_unlocked(campaign_id, launch_id)
+        pause_ready = _run_campaign_task_unlocked(campaign_id, launch_id) is True
     except Exception as error:
         print(f"[{campaign_id}] Unexpected campaign failure: {error}")
         try:
@@ -1058,7 +1089,17 @@ def run_campaign_task(campaign_id: str, launch_id: Optional[str] = None):
         except Exception as recovery_error:
             print(f"[{campaign_id}] Could not persist interrupted state: {recovery_error}")
     finally:
-        storage.release_launch_lock(campaign_id, launch_id)
+        lock_released = storage.release_launch_lock(campaign_id, launch_id)
+        if pause_ready and (
+            lock_released or not storage.is_launch_locked(campaign_id)
+        ):
+            try:
+                _finalize_campaign_pause(campaign_id, storage)
+            except Exception as pause_error:
+                print(
+                    f"[{campaign_id}] Could not persist paused state after "
+                    f"releasing the execution lock: {pause_error}"
+                )
 
 
 # --- Fin función ---
@@ -1910,8 +1951,8 @@ def pause_campaign(
     current_user: str = Depends(get_current_user)
 ):
     """
-    Sets the campaign status to 'Paused'.
-    The background task should check this status and temporarily stop sending.
+    Requests a safe pause. Workers finish their current send, stop, and then
+    transition the campaign to 'Paused' after releasing execution resources.
     """
     storage = _get_campaign_storage()
     if not storage.campaign_exists(campaign_id):
@@ -1924,7 +1965,7 @@ def pause_campaign(
         )
     # Aquí podríamos añadir lógica para verificar que la campaña esté realmente 'Sending'
     print(f"[{campaign_id}] Solicitud de pausa recibida.")
-    updated_config = _update_campaign_status(campaign_id, "Paused")
+    updated_config = _update_campaign_status(campaign_id, "Pausing")
     return updated_config
 
 @router.post("/sender/campaigns/{campaign_id}/resume",

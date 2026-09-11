@@ -297,7 +297,7 @@ export const EmailSenderPage = () => {
     setSnackbarMessage(null);
     try {
       await apiClient.post(`/sender/campaigns/${campaignId}/pause`);
-      setSnackbarMessage(`Campaign '${campaignId}' paused.`);
+      setSnackbarMessage(`Campaign '${campaignId}' is finishing its current sends before editing is enabled.`);
       fetchCampaigns(); // Refresca para actualizar el estado visual
     } catch (err: unknown) {
       console.error("Error pausing campaign:", err);

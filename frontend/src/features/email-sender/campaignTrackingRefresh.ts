@@ -22,7 +22,9 @@ export async function runExclusiveRefresh(
 
 export function shouldPollCampaignList(campaigns: EmailCampaign[]): boolean {
   return campaigns.some(
-    (campaign) => campaign.status === 'Sending' || campaign.click_tracking_enabled === true,
+    (campaign) => campaign.status === 'Sending'
+      || campaign.status === 'Pausing'
+      || campaign.click_tracking_enabled === true,
   );
 }
 

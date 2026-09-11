@@ -189,6 +189,141 @@ def test_execution_wrapper_releases_lock_after_completion(
     assert not email_sender._get_campaign_storage().is_launch_locked(campaign_id)
 
 
+def test_pausing_stops_before_the_next_recipient_and_releases_for_editing(
+    campaign_directories, monkeypatch
+):
+    campaign_data, sent_logs, targets = campaign_directories
+    campaign_id = "Campaign_pause_for_edit"
+    config_path = campaign_data / f"{campaign_id}.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "id": campaign_id,
+                "source_type": "csv",
+                "status": "Launching",
+                "subject": "Original subject",
+                "html_body": "<p>Original {{name}}</p>",
+                "sender_config": "all",
+                "mapping": {
+                    "email": "Email",
+                    "name": "Name",
+                    "has_header": True,
+                },
+                "target_count": 2,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (targets / f"target_{campaign_id}.csv").write_text(
+        "Email,Name\nfirst@example.org,First\nsecond@example.org,Second\n",
+        encoding="utf-8",
+    )
+
+    first_send_started = threading.Event()
+    allow_first_send_to_finish = threading.Event()
+
+    class BlockingGmailService(RecordingGmailService):
+        def __init__(self, events):
+            super().__init__(events)
+            self.sent_bodies = []
+
+        def send_email(self, *, to_email, subject, html_body, extra_headers=None):
+            first_send_started.set()
+            assert allow_first_send_to_finish.wait(timeout=2)
+            self.sent_bodies.append(html_body)
+            return super().send_email(
+                to_email=to_email,
+                subject=subject,
+                html_body=html_body,
+                extra_headers=extra_headers,
+            )
+
+    storage = email_sender._get_campaign_storage()
+
+    class LockObservingRemoteService(RecordingRemoteService):
+        def __init__(self):
+            super().__init__()
+            self.pause_sync_lock_states = []
+
+        def update_campaign(self, campaign_id, updates):
+            super().update_campaign(campaign_id, updates)
+            if updates.get("status") == "Paused":
+                self.pause_sync_lock_states.append(
+                    storage.is_launch_locked(campaign_id)
+                )
+
+    events = []
+    gmail = BlockingGmailService(events)
+    remote = LockObservingRemoteService()
+    tracking_service = EmailTrackingService(
+        InMemoryEmailTrackingRepository(),
+        allowed_hosts={"donations.animallove.cr"},
+    )
+    monkeypatch.setattr(
+        email_sender, "credentials_manager_instance", FakeCredentialsManager(gmail)
+    )
+    monkeypatch.setattr(email_sender, "get_email_sender_service", lambda: remote)
+    monkeypatch.setattr(
+        email_sender, "get_email_tracking_service", lambda: tracking_service
+    )
+    monkeypatch.setattr(email_sender.time, "sleep", lambda _seconds: None)
+    monkeypatch.setenv(
+        "EMAIL_PUBLIC_API_BASE_URL", "https://dashboard.animallove.cr"
+    )
+
+    launch_id = storage.acquire_launch_lock(campaign_id)
+    assert launch_id
+    runner = threading.Thread(
+        target=email_sender.run_campaign_task,
+        args=(campaign_id, launch_id),
+    )
+    runner.start()
+    assert first_send_started.wait(timeout=2)
+
+    pausing_config = storage.load_campaign(campaign_id)
+    pausing_config["status"] = "Pausing"
+    storage.save_campaign(campaign_id, pausing_config, serialize_unknown=True)
+    allow_first_send_to_finish.set()
+    runner.join(timeout=2)
+
+    assert not runner.is_alive()
+    assert gmail.sent == ["first@example.org"]
+    assert storage.load_campaign(campaign_id)["status"] == "Paused"
+    assert not storage.is_launch_locked(campaign_id)
+    assert remote.pause_sync_lock_states == [False]
+    assert (sent_logs / f"sent_{campaign_id}.csv").read_text(
+        encoding="utf-8"
+    ).splitlines()[1].startswith("first@example.org,")
+
+    updated = email_sender.update_campaign(
+        campaign_id,
+        email_sender.CampaignUpdateRequest(
+            subject="Updated subject",
+            html_body="<p>Updated {{name}}</p>",
+        ),
+        current_user="admin@example.org",
+    )
+
+    assert updated["status"] == "Paused"
+    assert updated["subject"] == "Updated subject"
+    assert updated["html_body"] == "<p>Updated {{name}}</p>"
+
+    tasks = CapturingBackgroundTasks()
+    resumed = email_sender.resume_campaign(
+        campaign_id,
+        background_tasks=tasks,
+        current_user="admin@example.org",
+    )
+    assert resumed["status"] == "Sending"
+    assert len(tasks.tasks) == 1
+    task, args, kwargs = tasks.tasks[0]
+    task(*args, **kwargs)
+
+    assert gmail.sent == ["first@example.org", "second@example.org"]
+    assert "Updated Second" in gmail.sent_bodies[1]
+    assert storage.load_campaign(campaign_id)["status"] == "Completed"
+
+
 def test_restart_recovery_marks_only_active_campaigns_as_interrupted(
     campaign_directories,
 ):
@@ -198,18 +333,23 @@ def test_restart_recovery_marks_only_active_campaigns_as_interrupted(
     )
     active_id = "Campaign_interrupted"
     scheduled_id = "Campaign_scheduled"
+    pausing_id = "Campaign_pausing"
     storage.save_campaign(active_id, {"id": active_id, "status": "Sending"})
     storage.save_campaign(
         scheduled_id, {"id": scheduled_id, "status": "Scheduled"}
     )
+    storage.save_campaign(pausing_id, {"id": pausing_id, "status": "Pausing"})
     assert storage.acquire_launch_lock(active_id)
+    assert storage.acquire_launch_lock(pausing_id)
 
     recovered = storage.recover_interrupted_campaigns()
 
-    assert recovered == [active_id]
+    assert set(recovered) == {active_id, pausing_id}
     assert storage.load_campaign(active_id)["status"] == "Interrupted"
     assert storage.load_campaign(scheduled_id)["status"] == "Scheduled"
+    assert storage.load_campaign(pausing_id)["status"] == "Paused"
     assert not storage.is_launch_locked(active_id)
+    assert not storage.is_launch_locked(pausing_id)
 
 
 def test_duplicate_and_previously_sent_addresses_are_removed():

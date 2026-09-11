@@ -43,6 +43,7 @@ import {
 import {
   buildCampaignMetricDisplay,
   buildCampaignPresentation,
+  canEditCampaign,
 } from './campaignPresentation';
 import { campaignColumnPercentages } from './campaignTableLayout';
 import type { EmailCampaign } from './types';
@@ -242,7 +243,7 @@ export function CampaignTable({
                             ? 'success'
                             : campaign.status === 'Completed with Errors'
                               ? 'warning'
-                            : campaign.status === 'Sending'
+                            : campaign.status === 'Sending' || campaign.status === 'Pausing'
                               ? 'warning'
                               : campaign.status === 'Scheduled'
                                 ? 'info'
@@ -450,7 +451,7 @@ export function CampaignTable({
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
       >
         <MenuItem
-          disabled={!menuCampaign || menuCampaign.status === 'Sending' || deleting}
+          disabled={!menuCampaign || !canEditCampaign(menuCampaign.status) || deleting}
           onClick={() => {
             if (menuCampaign) onEdit(menuCampaign.id);
             setMenuAnchor(null);
@@ -461,7 +462,7 @@ export function CampaignTable({
           <ListItemText>Edit campaign</ListItemText>
         </MenuItem>
         <MenuItem
-          disabled={!menuCampaign || menuCampaign.status === 'Sending' || deleting}
+          disabled={!menuCampaign || !canEditCampaign(menuCampaign.status) || deleting}
           onClick={() => {
             if (menuCampaign) onDelete(menuCampaign);
             setMenuAnchor(null);

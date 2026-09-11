@@ -33,6 +33,20 @@ test('sending campaigns keep status refreshes when tracking is off', () => {
   ]), true);
 });
 
+test('pausing campaigns keep refreshing until they become editable', () => {
+  assert.ok(refreshModule, 'campaign tracking refresh module is missing');
+
+  assert.equal(refreshModule.shouldPollCampaignList([
+    {
+      id: 'Campaign_pausing',
+      createdAt: '2026-09-11T10:00:00',
+      source_type: 'csv',
+      status: 'Pausing',
+      click_tracking_enabled: false,
+    },
+  ]), true);
+});
+
 test('completed tracked reports remain eligible for detail refreshes', () => {
   assert.ok(refreshModule, 'campaign tracking refresh module is missing');
 

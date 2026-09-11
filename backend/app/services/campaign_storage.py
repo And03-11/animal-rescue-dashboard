@@ -219,6 +219,12 @@ class CampaignFileStorage:
                 config = self.load_campaign(campaign_id)
             except (OSError, json.JSONDecodeError):
                 continue
+            if config.get("status") == "Pausing":
+                config["status"] = "Paused"
+                config["last_updated"] = datetime.now(timezone.utc).isoformat()
+                self.save_campaign(campaign_id, config, serialize_unknown=True)
+                recovered.append(campaign_id)
+                continue
             if config.get("status") not in {"Launching", "Sending"}:
                 continue
             config["status"] = "Interrupted"

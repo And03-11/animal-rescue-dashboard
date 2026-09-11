@@ -59,6 +59,31 @@ test('campaigns where every recipient failed also expose retry', async () => {
   assert.equal(presentation.primaryAction, 'retry');
 });
 
+test('campaign editing waits for pausing workers but is enabled once paused', async () => {
+  const { canEditCampaign } = await import(
+    '../src/features/email-sender/campaignPresentation.ts'
+  );
+
+  assert.equal(canEditCampaign('Sending'), false);
+  assert.equal(canEditCampaign('Pausing'), false);
+  assert.equal(canEditCampaign('Paused'), true);
+});
+
+test('pausing campaigns expose no action until their workers stop', async () => {
+  const { buildCampaignPresentation } = await import(
+    '../src/features/email-sender/campaignPresentation.ts'
+  );
+
+  const presentation = buildCampaignPresentation({
+    id: 'Campaign_pausing',
+    createdAt: '2026-09-11T10:00:00',
+    source_type: 'csv',
+    status: 'Pausing',
+  });
+
+  assert.equal(presentation.primaryAction, 'none');
+});
+
 test('tracked engagement counts and rates are exposed without recalculating them in the table', async () => {
   const { buildCampaignPresentation } = await import(
     '../src/features/email-sender/campaignPresentation.ts'

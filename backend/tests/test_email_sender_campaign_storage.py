@@ -190,7 +190,7 @@ def test_campaign_details_preserve_contact_statuses(campaign_directories):
     }
 
 
-def test_pause_and_resume_preserve_state_contract(campaign_directories):
+def test_pause_enters_transition_until_workers_release_the_campaign(campaign_directories):
     campaign_data, _sent_logs, _targets = campaign_directories
     campaign_id = "Campaign_state"
     config_path = campaign_data / f"{campaign_id}.json"
@@ -199,11 +199,23 @@ def test_pause_and_resume_preserve_state_contract(campaign_directories):
     )
 
     paused = client.post(f"/api/v1/sender/campaigns/{campaign_id}/pause")
-    resumed = client.post(f"/api/v1/sender/campaigns/{campaign_id}/resume")
 
     assert paused.status_code == 200
-    assert paused.json()["status"] == "Paused"
+    assert paused.json()["status"] == "Pausing"
     assert isinstance(paused.json()["last_updated"], str)
+    assert json.loads(config_path.read_text(encoding="utf-8"))["status"] == "Pausing"
+
+
+def test_resume_preserves_state_contract(campaign_directories):
+    campaign_data, _sent_logs, _targets = campaign_directories
+    campaign_id = "Campaign_paused"
+    config_path = campaign_data / f"{campaign_id}.json"
+    config_path.write_text(
+        json.dumps({"id": campaign_id, "status": "Paused"}), encoding="utf-8"
+    )
+
+    resumed = client.post(f"/api/v1/sender/campaigns/{campaign_id}/resume")
+
     assert resumed.status_code == 200
     assert resumed.json()["status"] == "Sending"
     assert json.loads(config_path.read_text(encoding="utf-8"))["status"] == "Sending"

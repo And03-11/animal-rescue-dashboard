@@ -24,6 +24,10 @@ export interface CampaignMetricDisplay {
   helper: string;
 }
 
+export function canEditCampaign(status: string): boolean {
+  return status !== 'Sending' && status !== 'Pausing';
+}
+
 export function buildCampaignMetricDisplay(
   trackingEnabled: boolean,
   count: number | null,
