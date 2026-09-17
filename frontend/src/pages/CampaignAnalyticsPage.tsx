@@ -21,6 +21,7 @@ import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import apiClient from '../api/axiosConfig';
 import { useWebSocket } from '../context/webSocketContext';
 import { FormTitleSelector } from '../components/FormTitleSelector';
+import { useDonationLoadObserver } from '../hooks/useDonationLoadObserver';
 import {
     getErrorMessage,
     getResponseStatus,
@@ -178,9 +179,6 @@ export const CampaignAnalyticsPage: React.FC = () => {
     const theme = useTheme();
     const reduceMotion = Boolean(useReducedMotion());
     const { subscribe } = useWebSocket();
-    const scrollObserver = useRef<IntersectionObserver | null>(null);
-    const loadMoreRef = useRef(null);
-    const tableContainerRef = useRef<HTMLDivElement | null>(null);
 
     const [sources, setSources] = useState<ApiListItem[]>([]);
     const [campaigns, setCampaigns] = useState<ApiListItem[]>([]);
@@ -403,8 +401,11 @@ export const CampaignAnalyticsPage: React.FC = () => {
                     signal: controller.signal
                 });
             } else {
-                setIsLoadingMore(false);
-                return;
+                const sourceReportUrl = `/campaigns/source/${selectedSource}/donations`;
+                donationsRes = await apiClient.get<PaginatedDonationsResponse>(sourceReportUrl, {
+                    params: commonParams,
+                    signal: controller.signal
+                });
             }
 
             const { donations: newDonations, total_count } = donationsRes.data;
@@ -425,6 +426,12 @@ export const CampaignAnalyticsPage: React.FC = () => {
             }
         }
     }, [isLoadingMore, hasMoreDonations, selectedSource, selectedCampaign, selectedTitles, startDate, endDate, formTitles, currentOffset]);
+
+    const { containerRef: tableContainerRef, sentinelRef: loadMoreRef } = useDonationLoadObserver({
+        hasMore: hasMoreDonations,
+        isLoading: isLoadingMore,
+        onLoadMore: fetchMoreDonations,
+    });
 
     const fetchData = useCallback(async (isSilent = false) => {
         if (!selectedSource) {
@@ -583,34 +590,6 @@ export const CampaignAnalyticsPage: React.FC = () => {
             if (inFlightDonations.current) inFlightDonations.current.abort();
         };
     }, [subscribe, fetchData]);
-
-    useEffect(() => {
-        const options = {
-            root: tableContainerRef.current,
-            rootMargin: '240px 0px',
-            threshold: 0.1
-        };
-
-        const callback = (entries: IntersectionObserverEntry[]) => {
-            const target = entries[0];
-            if (target.isIntersecting && !isLoadingMore && hasMoreDonations) {
-                fetchMoreDonations();
-            }
-        };
-
-        scrollObserver.current = new IntersectionObserver(callback, options);
-
-        const currentLoadMoreRef = loadMoreRef.current;
-        if (currentLoadMoreRef) {
-            scrollObserver.current.observe(currentLoadMoreRef);
-        }
-
-        return () => {
-            if (scrollObserver.current && currentLoadMoreRef) {
-                scrollObserver.current.unobserve(currentLoadMoreRef);
-            }
-        };
-    }, [detailTab, fetchMoreDonations, isLoadingMore, hasMoreDonations]);
 
     const handleClearAllFilters = () => {
         setSelectedSource('');
