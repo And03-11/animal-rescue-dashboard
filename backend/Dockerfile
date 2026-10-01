@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+RUN python -c "import psycopg, psycopg2"
 
 # Copy application code into backend/ subdirectory to match import paths
 COPY . ./backend/
