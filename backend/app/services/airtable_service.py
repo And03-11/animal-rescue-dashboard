@@ -1061,6 +1061,13 @@ class AirtableService:
         else:
             formula_parts.append(f"NOT({{{exclude_field}}} = 1)")
 
+        all_audiences_selected = set(audiences) == {
+            AudienceBranch(region="USA", is_bounced=False),
+            AudienceBranch(region="USA", is_bounced=True),
+            AudienceBranch(region="EUR", is_bounced=False),
+            AudienceBranch(region="EUR", is_bounced=True),
+        }
+
         try:
             email_records = self.emails_table.all(
                 formula=f"AND({', '.join(formula_parts)})",
@@ -1097,11 +1104,26 @@ class AirtableService:
                 "Email": fields.get(email_field, ""),
                 "Name": name or "Valued Supporter",
             }
+            if all_audiences_selected:
+                contact["_audience_region"] = region
             contacts_by_branch[branch].append(contact)
             all_contacts.append(contact)
 
+        unique_contacts = deduplicate_contacts(all_contacts)
+        if all_audiences_selected:
+            eur_emails = {
+                contact["Email"].strip().lower()
+                for branch, branch_contacts in contacts_by_branch.items()
+                if branch.region == "EUR"
+                for contact in branch_contacts
+                if isinstance(contact.get("Email"), str)
+            }
+            for contact in unique_contacts:
+                if contact["Email"].lower() in eur_emails:
+                    contact["_audience_region"] = "EUR"
+
         return AudienceResolution(
-            contacts=deduplicate_contacts(all_contacts),
+            contacts=unique_contacts,
             branches=tuple(
                 AudienceCount(
                     region=branch.region,

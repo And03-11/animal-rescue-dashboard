@@ -139,6 +139,57 @@ def test_normalizes_list_and_dict_bounced_values_without_aborting_resolution():
 
 
 @pytest.mark.skipif(_IMPORT_ERROR is not None, reason="campaign audience resolver is missing")
+def test_all_audiences_tag_contact_regions_for_send_phases():
+    table = CapturingTable([
+        {"fields": {"Email": "usa@example.org", "Name": ["Una"], "Region": "USA", "Bounced Account": False}},
+        {"fields": {"Email": "eur@example.org", "Name": ["Eva"], "Region": "EUR", "Bounced Account": True}},
+    ])
+    service = AirtableService.__new__(AirtableService)
+    service.emails_table = table
+
+    result = service.resolve_campaign_audiences(
+        normalize_audiences([
+            {"region": "USA", "is_bounced": False},
+            {"region": "USA", "is_bounced": True},
+            {"region": "EUR", "is_bounced": False},
+            {"region": "EUR", "is_bounced": True},
+        ]),
+        "standard",
+    )
+
+    assert result.contacts == (
+        {"Email": "usa@example.org", "Name": "Una", "_audience_region": "USA"},
+        {"Email": "eur@example.org", "Name": "Eva", "_audience_region": "EUR"},
+    )
+    assert len(table.calls) == 1
+
+
+@pytest.mark.skipif(_IMPORT_ERROR is not None, reason="campaign audience resolver is missing")
+def test_all_audiences_assign_cross_region_duplicate_to_eur_phase():
+    table = CapturingTable([
+        {"fields": {"Email": " shared@example.org ", "Name": ["First"], "Region": "USA", "Bounced Account": False}},
+        {"fields": {"Email": "SHARED@example.org", "Name": ["Second"], "Region": "EUR", "Bounced Account": True}},
+    ])
+    service = AirtableService.__new__(AirtableService)
+    service.emails_table = table
+
+    result = service.resolve_campaign_audiences(
+        normalize_audiences([
+            {"region": "USA", "is_bounced": False},
+            {"region": "USA", "is_bounced": True},
+            {"region": "EUR", "is_bounced": False},
+            {"region": "EUR", "is_bounced": True},
+        ]),
+        "standard",
+    )
+
+    assert result.contacts == (
+        {"Email": "shared@example.org", "Name": "First", "_audience_region": "EUR"},
+    )
+    assert result.total_unique == 1
+
+
+@pytest.mark.skipif(_IMPORT_ERROR is not None, reason="campaign audience resolver is missing")
 def test_wraps_airtable_access_errors_without_treating_them_as_empty():
     class FailingTable:
         def all(self, **_kwargs):

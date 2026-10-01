@@ -600,6 +600,92 @@ def test_worker_refreshes_multiple_audiences_and_rewrites_targets_before_send(
     assert not storage.is_launch_locked(campaign_id)
 
 
+def test_all_airtable_audiences_finish_eur_before_starting_usa(
+    execution_environment, monkeypatch
+):
+    campaign_data, _sent_logs, _targets, events, _gmail, _remote = execution_environment
+    campaign_id = "Campaign_all_eur_before_usa"
+    write_airtable_campaign(
+        campaign_data,
+        campaign_id,
+        status="Launching",
+        audiences=[
+            {"region": "USA", "is_bounced": False},
+            {"region": "USA", "is_bounced": True},
+            {"region": "EUR", "is_bounced": False},
+            {"region": "EUR", "is_bounced": True},
+        ],
+        target_count=2,
+    )
+    resolution = AudienceResolution(
+        contacts=(
+            {"Email": "usa@example.org", "Name": "Una", "_audience_region": "USA"},
+            {"Email": "eur@example.org", "Name": "Eva", "_audience_region": "EUR"},
+        ),
+        branches=(
+            AudienceCount(region="USA", is_bounced=False, count=1),
+            AudienceCount(region="USA", is_bounced=True, count=0),
+            AudienceCount(region="EUR", is_bounced=False, count=1),
+            AudienceCount(region="EUR", is_bounced=True, count=0),
+        ),
+    )
+    monkeypatch.setattr(
+        email_sender, "AirtableService", make_airtable_service([resolution], events)
+    )
+
+    eur_started = threading.Event()
+    release_eur = threading.Event()
+    usa_started = threading.Event()
+
+    class ControlledGmailService(RecordingGmailService):
+        def __init__(self, account_id):
+            super().__init__(events)
+            self.credentials_path = f"{account_id}.json"
+
+        def send_email(self, *, to_email, subject, html_body, extra_headers=None):
+            events.append(("start", to_email))
+            if to_email == "eur@example.org":
+                eur_started.set()
+                release_eur.wait(timeout=3)
+            else:
+                usa_started.set()
+            result = super().send_email(
+                to_email=to_email,
+                subject=subject,
+                html_body=html_body,
+                extra_headers=extra_headers,
+            )
+            events.append(("finish", to_email))
+            return result
+
+    services = [ControlledGmailService("sender-one"), ControlledGmailService("sender-two")]
+
+    class TwoAccountManager:
+        def get_gmail_services(self, _selection):
+            return services
+
+    monkeypatch.setattr(email_sender, "credentials_manager_instance", TwoAccountManager())
+    storage = email_sender._get_campaign_storage()
+    launch_id = storage.acquire_launch_lock(campaign_id)
+    assert launch_id
+
+    campaign_thread = threading.Thread(
+        target=email_sender.run_campaign_task, args=(campaign_id, launch_id)
+    )
+    campaign_thread.start()
+    try:
+        assert eur_started.wait(timeout=2), "EUR send did not start"
+        assert not usa_started.wait(timeout=0.15), "USA started while EUR was in flight"
+    finally:
+        release_eur.set()
+        campaign_thread.join(timeout=5)
+
+    assert not campaign_thread.is_alive()
+    assert events.index(("finish", "eur@example.org")) < events.index(
+        ("start", "usa@example.org")
+    )
+
+
 def test_worker_synthesizes_one_legacy_audience_branch(
     execution_environment, monkeypatch
 ):

@@ -592,6 +592,23 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
         contact_data, sent_emails_set
     )
 
+    contact_batches = [contacts_to_send]
+    if source_type == 'airtable' and len(config.get('audiences') or []) == 4:
+        eur_contacts = [
+            contact for contact in contacts_to_send
+            if contact.get('_audience_region') == 'EUR'
+        ]
+        usa_contacts = [
+            contact for contact in contacts_to_send
+            if contact.get('_audience_region') == 'USA'
+        ]
+        if len(eur_contacts) + len(usa_contacts) != len(contacts_to_send):
+            config['status'] = 'Error - Audience Region Missing'
+            storage.save_campaign(campaign_id, config, serialize_unknown=True)
+            _sync_remote_campaign_status(campaign_id, config['status'])
+            return
+        contact_batches = [eur_contacts, usa_contacts]
+
     total_contacts_to_send = len(contacts_to_send)
     print(f"[{campaign_id}] Emails pending in this run: {total_contacts_to_send}")
 
@@ -610,8 +627,6 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
 
         # Setup Concurrency
         contacts_queue = queue.Queue()
-        for contact in contacts_to_send:
-            contacts_queue.put(contact)
 
         # Shared state for threads
         log_lock = threading.Lock()
@@ -970,18 +985,27 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
                         )
                     stop_event.set()
 
-        # Launch Threads
-        threads = []
-        for i, service in enumerate(gmail_services):
-            t = threading.Thread(target=email_worker, args=(service, i+1))
-            t.daemon = True
-            t.start()
-            threads.append(t)
+        # All Airtable audiences run as EUR and USA phases. Other selections
+        # keep their original single queue; workers still run in parallel.
+        for batch in contact_batches:
+            if stop_event.is_set():
+                break
+            if not batch:
+                continue
+            for contact in batch:
+                contacts_queue.put(contact)
 
-        print(f"[{campaign_id}] Launched {len(threads)} worker threads.")
+            threads = []
+            for i, service in enumerate(gmail_services):
+                t = threading.Thread(target=email_worker, args=(service, i+1))
+                t.daemon = True
+                t.start()
+                threads.append(t)
 
-        for t in threads:
-            t.join()
+            print(f"[{campaign_id}] Launched {len(threads)} worker threads.")
+
+            for t in threads:
+                t.join()
 
     if (
         storage.load_campaign(campaign_id).get("status")
