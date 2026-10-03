@@ -41,9 +41,6 @@ import InboxOutlinedIcon from '@mui/icons-material/InboxOutlined';
 import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded';
 import SendOutlinedIcon from '@mui/icons-material/SendOutlined';
 import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
-import DesignServicesRoundedIcon from '@mui/icons-material/DesignServicesRounded';
-import FileUploadRoundedIcon from '@mui/icons-material/FileUploadRounded';
-import { Link as RouterLink } from 'react-router-dom';
 
 import apiClient from '../api/axiosConfig';
 import { EmailPreview } from '../components/EmailPreview';
@@ -64,7 +61,7 @@ interface Template extends TemplateSummary {
 const emptyTemplate = {
   id: 0,
   name: '',
-  content: '<h1>New Template</h1>\n<p>Your content here...</p>',
+  content: '',
 };
 
 const formatCreatedAt = (value: string) => {
@@ -243,20 +240,9 @@ export default function TemplatesPage() {
 
   const templateActions = (template: TemplateSummary) => (
     <Stack direction="row" spacing={0.5} justifyContent="flex-end">
-      <Tooltip title="Open in Email Studio">
+      <Tooltip title="Edit HTML">
         <IconButton
-          component={RouterLink}
-          to={`/email-studio?template=${template.id}`}
-          aria-label={`Open ${template.name} in Email Studio`}
-          size="small"
-          color="primary"
-        >
-          <DesignServicesRoundedIcon fontSize="small" />
-        </IconButton>
-      </Tooltip>
-      <Tooltip title="Edit template">
-        <IconButton
-          aria-label={`Edit ${template.name}`}
+          aria-label={`Edit HTML for ${template.name}`}
           onClick={() => handleOpenForm(template)}
           size="small"
           disabled={loadingTemplateId === template.id}
@@ -294,7 +280,7 @@ export default function TemplatesPage() {
       <WorkspacePageHeader
         eyebrow="Communications"
         title="Email templates"
-        description="Create, preview and validate reusable messages before they enter a donor campaign."
+        description="Paste and preserve your HTML exactly as written, then preview and test it before using it in a campaign."
         icon={<ArticleOutlinedIcon />}
         meta={!loading && !error && (
           <Chip
@@ -304,24 +290,13 @@ export default function TemplatesPage() {
           />
         )}
         actions={(
-          <Stack direction={{ xs: 'column', sm: 'row' }} gap={1}>
-            <Button
-              component={RouterLink}
-              to="/email-studio?mode=import"
-              variant="outlined"
-              startIcon={<FileUploadRoundedIcon />}
-            >
-              Import HTML
-            </Button>
-            <Button
-              component={RouterLink}
-              to="/email-studio?mode=blank"
-              variant="contained"
-              startIcon={<DesignServicesRoundedIcon />}
-            >
-              Create from scratch
-            </Button>
-          </Stack>
+          <Button
+            variant="contained"
+            startIcon={<CodeRoundedIcon />}
+            onClick={() => handleOpenForm()}
+          >
+            Create HTML template
+          </Button>
         )}
       />
 
@@ -358,19 +333,11 @@ export default function TemplatesPage() {
           dashed
           icon={<InboxOutlinedIcon />}
           title="No templates yet"
-          description="Create a reusable email template to keep campaign messaging consistent and easier to test."
+          description="Paste an HTML email to create a reusable template without passing it through a visual editor."
           action={(
-            <Stack direction={{ xs: 'column', sm: 'row' }} gap={1}>
-              <Button component={RouterLink} to="/email-studio?mode=blank" variant="contained" startIcon={<DesignServicesRoundedIcon />}>
-                Create from scratch
-              </Button>
-              <Button component={RouterLink} to="/email-studio?mode=import" variant="outlined" startIcon={<FileUploadRoundedIcon />}>
-                Import HTML
-              </Button>
-              <Button variant="text" startIcon={<AddRoundedIcon />} onClick={() => handleOpenForm()}>
-                Use HTML code
-              </Button>
-            </Stack>
+            <Button variant="contained" startIcon={<AddRoundedIcon />} onClick={() => handleOpenForm()}>
+              Create HTML template
+            </Button>
           )}
         />
       ) : (
@@ -455,14 +422,14 @@ export default function TemplatesPage() {
       <Dialog
         open={formOpen}
         onClose={handleCloseForm}
-        maxWidth="md"
+        maxWidth="lg"
         fullWidth
         fullScreen={isSmallScreen}
       >
         <DialogTitle sx={{ pb: 1 }}>
           {editMode ? 'Edit template' : 'Create template'}
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            Write the HTML message, then review the inbox preview before saving.
+            Paste the final HTML, review the inbox preview and save it without visual-editor conversion.
           </Typography>
         </DialogTitle>
         <DialogContent sx={{ pt: '16px !important' }}>
@@ -479,9 +446,9 @@ export default function TemplatesPage() {
 
             <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" gap={1.5}>
               <Box>
-                <Typography variant="subtitle2">Message content</Typography>
+                <Typography variant="subtitle2">Email HTML</Typography>
                 <Typography variant="caption" color="text.secondary">
-                  Use the preview to check spacing and readability.
+                  The HTML is stored exactly as entered. Use the preview only to check spacing and readability.
                 </Typography>
               </Box>
               <ToggleButtonGroup
@@ -506,6 +473,7 @@ export default function TemplatesPage() {
                 multiline
                 minRows={14}
                 fullWidth
+                placeholder="Paste the complete email HTML here…"
                 value={form.content}
                 onChange={(event) => setForm({ ...form, content: event.target.value })}
                 disabled={saving}

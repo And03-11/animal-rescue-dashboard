@@ -22,7 +22,6 @@ const CampaignSchedulerPage = lazy(() => import('./pages/CampaignSchedulerPage')
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const SharedAnalyticsPage = lazy(() => import('./pages/SharedAnalyticsPage'));
 const TemplatesPage = lazy(() => import('./pages/TemplatesPage'));
-const EmailStudioPage = lazy(() => import('./pages/EmailStudioPage'));
 const TemplateSearchPage = lazy(() => import('./pages/TemplateSearchPage'));
 const FunnelPage = lazy(() => import('./pages/FunnelPage'));
 
@@ -122,7 +121,7 @@ export function AppRoutes() {
           />
           <Route
             path="email-studio"
-            element={<EmailStudioPage />}
+            element={<Navigate to="/templates" replace />}
           />
           <Route
             path="template-search"

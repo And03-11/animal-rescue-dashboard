@@ -44,7 +44,6 @@ const routeLabels: Record<string, { title: string; eyebrow: string }> = {
   '/contact-search': { title: 'Contact Search', eyebrow: 'CRM' },
   '/email-sender': { title: 'Email Campaigns', eyebrow: 'Email Marketing' },
   '/templates': { title: 'Templates', eyebrow: 'Email Marketing' },
-  '/email-studio': { title: 'Email Studio', eyebrow: 'Email Marketing' },
   '/template-search': { title: 'Template Search', eyebrow: 'Email Marketing' },
   '/settings': { title: 'Settings', eyebrow: 'Workspace' },
 };
