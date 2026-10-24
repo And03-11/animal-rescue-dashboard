@@ -1,4 +1,5 @@
 import json
+import pytest
 
 from backend.app.scripts import create_email_sender_table
 from backend.app.services.email_sender_service import EmailSenderService
@@ -127,6 +128,7 @@ def test_schema_adds_audience_columns_idempotently_for_existing_table(monkeypatc
     statements = "\n".join(query for query, _params in cursor.calls)
     assert "ADD COLUMN IF NOT EXISTS audiences JSONB NOT NULL DEFAULT '[]'::jsonb" in statements
     assert "ADD COLUMN IF NOT EXISTS segment VARCHAR(20) NOT NULL DEFAULT 'standard'" in statements
+    assert "ADD COLUMN IF NOT EXISTS send_to_unsubscribed BOOLEAN NOT NULL DEFAULT FALSE" in statements
 
 
 def test_schema_defines_audience_columns_for_new_table(monkeypatch):
@@ -142,3 +144,32 @@ def test_schema_defines_audience_columns_for_new_table(monkeypatch):
     )
     assert "audiences JSONB NOT NULL DEFAULT '[]'::jsonb" in create_statement
     assert "segment VARCHAR(20) NOT NULL DEFAULT 'standard'" in create_statement
+    assert "send_to_unsubscribed BOOLEAN NOT NULL DEFAULT FALSE" in create_statement
+
+
+@pytest.mark.parametrize("override", [True, False, None])
+def test_database_create_persists_explicit_unsubscribe_override(monkeypatch, override):
+    monkeypatch.setenv("SUPABASE_DATABASE_URL", "postgresql://test")
+    cursor = FakeCursor(row={"id": "Campaign_override"})
+    service = EmailSenderService()
+    monkeypatch.setattr(service, "_get_connection", lambda: FakeConnection(cursor))
+    config = {"id": "Campaign_override", "campaign_name": "Override", "source_type": "csv"}
+    if override is not None:
+        config["send_to_unsubscribed"] = override
+    service.create_campaign(config)
+    query, params = cursor.calls[-1]
+    assert "send_to_unsubscribed" in query
+    assert query.count("%s") == len(params)
+    assert params[-1] is (override is True)
+
+
+@pytest.mark.parametrize("override", [True, False])
+def test_database_update_persists_unsubscribe_override(monkeypatch, override):
+    monkeypatch.setenv("SUPABASE_DATABASE_URL", "postgresql://test")
+    cursor = FakeCursor(row={"id": "Campaign_override"})
+    service = EmailSenderService()
+    monkeypatch.setattr(service, "_get_connection", lambda: FakeConnection(cursor))
+    service.update_campaign("Campaign_override", {"send_to_unsubscribed": override})
+    query, params = cursor.calls[-1]
+    assert "send_to_unsubscribed = %s" in query
+    assert params == (override, "Campaign_override")

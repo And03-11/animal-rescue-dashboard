@@ -17,6 +17,99 @@ from backend.app.services.campaign_audiences import AudienceCount, AudienceResol
 client = TestClient(app)
 
 
+@pytest.mark.parametrize("source_type", ["csv", "airtable"])
+@pytest.mark.parametrize("send_to_unsubscribed", [True, False])
+def test_campaign_creation_persists_campaign_only_unsubscribe_override(
+    write_environment, source_type, send_to_unsubscribed
+):
+    campaign_data, _sent_logs, _targets, remote_service = write_environment
+    payload = {
+        "source_type": source_type,
+        "campaign_name": "Explicit unsubscribe policy",
+        "subject": "Subject",
+        "html_body": "<p>Body</p>",
+        "send_to_unsubscribed": send_to_unsubscribed,
+    }
+    if source_type == "airtable":
+        payload["audiences"] = [{"region": "EUR", "is_bounced": False}]
+    response = client.post("/api/v1/sender/campaigns", json=payload)
+    assert response.status_code == 201
+    created = response.json()
+    assert created["send_to_unsubscribed"] is send_to_unsubscribed
+    stored = json.loads((campaign_data / f"{created['id']}.json").read_text())
+    assert stored["send_to_unsubscribed"] is send_to_unsubscribed
+    assert remote_service.created[-1]["send_to_unsubscribed"] is send_to_unsubscribed
+
+
+@pytest.mark.parametrize("source_type", ["csv", "airtable"])
+def test_unsubscribe_override_is_reversible_including_audience_edits(
+    write_environment, source_type
+):
+    campaign_data, _sent_logs, _targets, remote_service = write_environment
+    campaign_id = f"Campaign_unsubscribe-override-{source_type}"
+    path = campaign_data / f"{campaign_id}.json"
+    path.write_text(json.dumps({
+        "id": campaign_id, "source_type": source_type, "status": "Draft",
+        "audiences": [{"region": "EUR", "is_bounced": False}],
+    }))
+    for value in [True, False]:
+        payload = {"send_to_unsubscribed": value}
+        if source_type == "airtable":
+            payload["audiences"] = [{"region": "EUR", "is_bounced": False}]
+        response = client.put(f"/api/v1/sender/campaigns/{campaign_id}", json=payload)
+        assert response.status_code == 200
+        assert response.json()["send_to_unsubscribed"] is value
+        assert json.loads(path.read_text())["send_to_unsubscribed"] is value
+        assert remote_service.updated[-1][1]["send_to_unsubscribed"] is value
+
+
+def test_unsubscribe_override_defaults_off_in_create_legacy_reads_and_edits(
+    write_environment,
+):
+    campaign_data, _sent_logs, _targets, remote_service = write_environment
+    created = client.post("/api/v1/sender/campaigns", json={
+        "source_type": "csv", "campaign_name": "Defaults", "subject": "Subject",
+        "html_body": "<p>Body</p>",
+    })
+    assert created.status_code == 201
+    assert created.json()["send_to_unsubscribed"] is False
+    assert remote_service.created[-1]["send_to_unsubscribed"] is False
+    campaign_id = "Campaign_legacy-unsubscribe-override"
+    path = campaign_data / f"{campaign_id}.json"
+    path.write_text(json.dumps({
+        "id": campaign_id, "source_type": "csv", "status": "Draft",
+        "createdAt": "2026-10-09T10:00:00",
+    }))
+    details = client.get(f"/api/v1/sender/campaigns/{campaign_id}/details")
+    assert details.status_code == 200
+    assert details.json()["details"]["send_to_unsubscribed"] is False
+    listing = client.get("/api/v1/sender/campaigns?page_size=15&offset=0")
+    assert listing.status_code == 200
+    summary = next(row for row in listing.json()["items"] if row["id"] == campaign_id)
+    assert summary["send_to_unsubscribed"] is False
+    updated = client.put(f"/api/v1/sender/campaigns/{campaign_id}", json={"subject": "Updated"})
+    assert updated.status_code == 200
+    assert json.loads(path.read_text())["send_to_unsubscribed"] is False
+    assert remote_service.updated[-1][1]["send_to_unsubscribed"] is False
+
+
+@pytest.mark.parametrize("invalid_value", ["true", "false", 1, 0])
+def test_unsubscribe_override_api_rejects_non_boolean_values(write_environment, invalid_value):
+    campaign_data, _sent_logs, _targets, _remote = write_environment
+    payload = {
+        "source_type": "csv", "campaign_name": "Invalid", "subject": "Subject",
+        "html_body": "<p>Body</p>", "send_to_unsubscribed": invalid_value,
+    }
+    assert client.post("/api/v1/sender/campaigns", json=payload).status_code == 422
+    campaign_id = "Campaign_invalid-unsubscribe-override"
+    (campaign_data / f"{campaign_id}.json").write_text(json.dumps({
+        "id": campaign_id, "source_type": "csv", "status": "Draft",
+    }))
+    assert client.put(f"/api/v1/sender/campaigns/{campaign_id}", json={
+        "send_to_unsubscribed": invalid_value,
+    }).status_code == 422
+
+
 class FakeEmailSenderService:
     def __init__(self):
         self.created: list[dict] = []
@@ -289,6 +382,7 @@ def test_update_campaign_preserves_status_transition_and_remote_payload(write_en
                 "html_body": "<p>Old</p>",
                 "sender_config": "all",
                 "click_tracking_enabled": False,
+                "send_to_unsubscribed": False,
                 "scheduled_at": "2026-07-15T12:00:00",
                 "status": "Scheduled",
             },

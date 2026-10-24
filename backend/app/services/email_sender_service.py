@@ -80,10 +80,11 @@ class EmailSenderService:
                         id, campaign_name, source_type, subject, html_body,
                         region, is_bounced, sender_config, status, scheduled_at,
                         target_count, audiences, segment, click_tracking_enabled,
+                        send_to_unsubscribed,
                         created_at
                     ) VALUES (
                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, NOW()
+                        %s, %s, NOW()
                     ) RETURNING *
                 """, (
                     campaign_data['id'],
@@ -100,6 +101,7 @@ class EmailSenderService:
                     audiences_json,
                     segment,
                     campaign_data.get('click_tracking_enabled', False),
+                    campaign_data.get('send_to_unsubscribed') is True,
                 ))
                 result = cur.fetchone()
             conn.commit()
@@ -172,6 +174,7 @@ class EmailSenderService:
                 'last_updated': 'last_updated',
                 'scheduled_at': 'scheduled_at',
                 'click_tracking_enabled': 'click_tracking_enabled',
+                'send_to_unsubscribed': 'send_to_unsubscribed',
             }
             
             for key, db_field in field_mapping.items():

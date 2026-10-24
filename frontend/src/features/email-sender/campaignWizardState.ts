@@ -30,6 +30,7 @@ export interface CampaignWizardDraft {
   subject: string;
   htmlBody: string;
   clickTrackingEnabled: boolean;
+  sendToUnsubscribed: boolean;
   scheduledAt: string | null;
   csvFile: File | null;
   /** Existing campaign identifier; null/undefined means a new campaign. */
@@ -80,6 +81,7 @@ type HydrationInput = Partial<CampaignFormData> & {
   campaignName?: string;
   htmlBody?: string;
   clickTrackingEnabled?: boolean;
+  sendToUnsubscribed?: boolean;
   scheduledAt?: string | null;
   senderConfig?: string | string[] | SelectedAccount[];
   senderMode?: CampaignSenderMode;
@@ -276,6 +278,7 @@ export function buildCampaignPayload(draft: CampaignWizardDraft): CampaignWizard
     subject: draft.subject,
     html_body: draft.htmlBody,
     click_tracking_enabled: draft.clickTrackingEnabled,
+    send_to_unsubscribed: draft.sendToUnsubscribed === true,
     sender_config: senderConfigForDraft(draft),
     scheduled_at: normalizeScheduledAt(draft.scheduledAt),
   };
@@ -348,6 +351,7 @@ export function hydrateCampaignWizardDraft(input: HydrationInput): CampaignWizar
     clickTrackingEnabled: input.clickTrackingEnabled
       ?? input.click_tracking_enabled
       ?? false,
+    sendToUnsubscribed: (input.sendToUnsubscribed ?? input.send_to_unsubscribed) === true,
     scheduledAt: normalizeScheduledAt(input.scheduledAt ?? input.scheduled_at ?? null),
     csvFile: input.csvFile ?? null,
   };

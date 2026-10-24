@@ -37,6 +37,7 @@ export interface CampaignFormData {
   sender_config: string | string[];
   scheduled_at: string | null;
   click_tracking_enabled: boolean;
+  send_to_unsubscribed: boolean;
   csvFile?: File | null;
   region?: string;
   is_bounced?: boolean;
@@ -133,6 +134,7 @@ export interface EmailCampaign {
   sent_count_final?: number;
   target_count?: number;
   click_tracking_enabled?: boolean;
+  send_to_unsubscribed?: boolean;
 }
 
 export interface PaginatedCampaignsResponse {
@@ -170,6 +172,7 @@ export interface CampaignDetails {
   target_count?: number;
   html_body?: string;
   click_tracking_enabled?: boolean;
+  send_to_unsubscribed?: boolean;
 }
 
 export interface CampaignDetailsResponse {

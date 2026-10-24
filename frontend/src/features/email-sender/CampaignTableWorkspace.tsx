@@ -224,6 +224,11 @@ export function CampaignTable({
                       >
                         {campaign.subject || 'No subject'}
                       </Typography>
+                      {campaign.send_to_unsubscribed === true && (
+                        <Typography variant="caption" color="warning.main">
+                          Unsubscribe override enabled
+                        </Typography>
+                      )}
                       <Typography variant="caption" color="text.secondary">
                         Created {new Date(campaign.createdAt).toLocaleString('en-US', {
                           dateStyle: 'medium',

@@ -1,4 +1,5 @@
 import {
+  Alert,
   Autocomplete,
   Box,
   Button,
@@ -234,6 +235,48 @@ export function CampaignSetupStep({
             )}
           />
         </Box>
+      </Box>
+
+      <Box component="fieldset" sx={{ m: 0, p: 0, border: 0, minWidth: 0 }}>
+        <Typography component="legend" variant="subtitle2" sx={{ mb: 1 }}>
+          Unsubscribe handling
+        </Typography>
+        <Stack spacing={1.5} sx={{ maxWidth: 680 }}>
+          <FormControlLabel
+            sx={{ m: 0, alignItems: 'flex-start' }}
+            control={(
+              <Checkbox
+                checked={draft.sendToUnsubscribed}
+                onChange={(event) => onDraftChange({
+                  sendToUnsubscribed: event.target.checked,
+                })}
+                inputProps={{ 'aria-describedby': 'unsubscribe-override-help' }}
+              />
+            )}
+            label={(
+              <Box sx={{ pt: 0.75 }}>
+                <Typography variant="body2" sx={{ fontWeight: 650 }}>
+                  Send to unsubscribed contacts (this campaign only)
+                </Typography>
+                <Typography
+                  id="unsubscribe-override-help"
+                  variant="caption"
+                  color="text.secondary"
+                  component="p"
+                  sx={{ mt: 0.25 }}
+                >
+                  Unsubscribe requests are still recorded. Leave unchecked to exclude these contacts.
+                </Typography>
+              </Box>
+            )}
+          />
+          {draft.sendToUnsubscribed && (
+            <Alert severity="warning">
+              This campaign will ignore unsubscribe requests. This can increase spam complaints and harm deliverability.
+              Recorded unsubscribes will not be deleted or reactivated.
+            </Alert>
+          )}
+        </Stack>
       </Box>
 
       <Box

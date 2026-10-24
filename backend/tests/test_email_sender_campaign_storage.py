@@ -69,6 +69,7 @@ def test_list_campaigns_preserves_progress_shape(campaign_directories):
             {
                 **config,
                 "click_tracking_enabled": False,
+                "send_to_unsubscribed": False,
                 "progress": {"sent": 2, "total": 4, "percentage": 50.0},
             }
         ],
@@ -106,6 +107,7 @@ def test_list_campaigns_returns_requested_page_with_total(campaign_directories):
             {
                     **configs[1],
                     "click_tracking_enabled": False,
+                    "send_to_unsubscribed": False,
                     "progress": {"sent": 2, "total": 4, "percentage": 50.0},
             }
         ],
@@ -158,6 +160,7 @@ def test_list_campaigns_omits_heavy_fields_from_summaries(campaign_directories):
             }
                 | {
                     "click_tracking_enabled": False,
+                    "send_to_unsubscribed": False,
                     "progress": {"sent": 0, "total": 12, "percentage": 0.0},
             }
         ],
@@ -182,7 +185,7 @@ def test_campaign_details_preserve_contact_statuses(campaign_directories):
 
     assert response.status_code == 200
     assert response.json() == {
-        "details": {**config, "click_tracking_enabled": False},
+        "details": {**config, "click_tracking_enabled": False, "send_to_unsubscribed": False},
         "contacts": [
             {"email": "One@Example.com", "status": "Sent"},
             {"email": "two@example.com", "status": "Pending"},

@@ -199,8 +199,10 @@ class EmailTrackingRepository(Protocol):
     def consume_unsubscribe_token(self, digest: str) -> bool:
         """Idempotently suppress the delivery recipient resolved by one digest."""
 
-    def is_suppressed(self, recipient_email_normalized: str) -> bool:
-        """Return whether a normalized recipient is on the local suppression list."""
+    def is_suppressed(
+        self, recipient_email_normalized: str, *, ignore_unsubscribe: bool = False
+    ) -> bool:
+        """Check suppression without deleting records; only unsubscribe can be bypassed."""
 
     def campaign_report(self, campaign_id: str) -> dict:
         """Return one campaign's conservative engagement report."""
@@ -378,8 +380,11 @@ class InMemoryEmailTrackingRepository:
         self._used_unsubscribe_hashes.add(digest)
         return True
 
-    def is_suppressed(self, recipient_email_normalized: str) -> bool:
-        return recipient_email_normalized in self._suppressions
+    def is_suppressed(
+        self, recipient_email_normalized: str, *, ignore_unsubscribe: bool = False
+    ) -> bool:
+        # This test repository records only unsubscribe suppressions.
+        return not ignore_unsubscribe and recipient_email_normalized in self._suppressions
 
     def delivery_for(
         self, campaign_id: str, recipient_email: str
@@ -786,7 +791,9 @@ class PostgresEmailTrackingRepository:
         finally:
             connection.close()
 
-    def is_suppressed(self, recipient_email_normalized: str) -> bool:
+    def is_suppressed(
+        self, recipient_email_normalized: str, *, ignore_unsubscribe: bool = False
+    ) -> bool:
         connection = self._connect()
         try:
             with connection.cursor() as cursor:
@@ -795,9 +802,10 @@ class PostgresEmailTrackingRepository:
                     SELECT EXISTS (
                         SELECT 1 FROM email_suppressions
                         WHERE recipient_email_normalized = %s
+                          AND (NOT %s OR reason <> 'unsubscribe')
                     )
                     """,
-                    (recipient_email_normalized,),
+                    (recipient_email_normalized, ignore_unsubscribe),
                 )
                 row = cursor.fetchone()
         finally:
@@ -1275,8 +1283,12 @@ class EmailTrackingService:
         self.repository.consume_unsubscribe_token(token_digest(token))
         return None
 
-    def is_suppressed(self, recipient_email: str) -> bool:
+    def is_suppressed(
+        self, recipient_email: str, *, ignore_unsubscribe: bool = False
+    ) -> bool:
         _original, normalized_email = self._normalize_email(recipient_email)
+        if ignore_unsubscribe:
+            return self.repository.is_suppressed(normalized_email, ignore_unsubscribe=True)
         return self.repository.is_suppressed(normalized_email)
 
     def campaign_summaries(self, campaign_ids: Sequence[str]) -> dict[str, dict]:

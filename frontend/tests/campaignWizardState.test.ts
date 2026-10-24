@@ -21,6 +21,7 @@ const baseDraft = () => ({
   subject: 'Subject',
   htmlBody: '<p>Body</p>',
   clickTrackingEnabled: false,
+  sendToUnsubscribed: false,
   scheduledAt: null,
   csvFile: null,
 });
@@ -205,6 +206,28 @@ test('click tracking defaults off, hydrates explicit true, and persists in paylo
     wizardState.buildCampaignPayload(tracked).click_tracking_enabled,
     true,
   );
+});
+
+test('unsubscribe override defaults off and is explicitly enabled per campaign', () => {
+  assert.ok(wizardState, 'campaign wizard state module is missing');
+  const fresh = wizardState.hydrateCampaignWizardDraft({});
+  const enabled = wizardState.hydrateCampaignWizardDraft({ send_to_unsubscribed: true });
+  assert.equal(fresh.sendToUnsubscribed, false);
+  assert.equal(wizardState.buildCampaignPayload(fresh).send_to_unsubscribed, false);
+  assert.equal(enabled.sendToUnsubscribed, true);
+  assert.equal(wizardState.buildCampaignPayload(enabled).send_to_unsubscribed, true);
+  const disabled = wizardState.hydrateCampaignWizardDraft({ ...enabled, sendToUnsubscribed: false });
+  assert.equal(wizardState.buildCampaignPayload(disabled).send_to_unsubscribed, false);
+  assert.equal(enabled.sendToUnsubscribed, true);
+  assert.equal(wizardState.hydrateCampaignWizardDraft({}).sendToUnsubscribed, false);
+});
+
+test('CSV payload also carries the campaign-only unsubscribe override', () => {
+  assert.ok(wizardState, 'campaign wizard state module is missing');
+  const draft = wizardState.hydrateCampaignWizardDraft({
+    source_type: 'csv', id: 'Campaign_csv-override', send_to_unsubscribed: true,
+  });
+  assert.equal(wizardState.buildCampaignPayload(draft).send_to_unsubscribed, true);
 });
 
 test('payload maps group and manual sender branches immutably', () => {

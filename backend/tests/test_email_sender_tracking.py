@@ -113,6 +113,75 @@ def _run_locked_campaign(campaign_id):
     email_sender.run_campaign_task(campaign_id, launch_id)
 
 
+@pytest.mark.parametrize("click_tracking_enabled", [True, False])
+@pytest.mark.parametrize("override", [None, False, "true", 1, True])
+def test_campaign_unsubscribe_override_requires_explicit_true_and_preserves_bajas(
+    campaign_environment, monkeypatch, click_tracking_enabled, override
+):
+    campaign_data, sent_logs, targets, gmail, _remote = campaign_environment
+    campaign_id = f"Campaign_unsubscribe-override-{click_tracking_enabled}-{override}"
+    config_path = _write_csv_campaign(
+        campaign_data, targets, campaign_id,
+        click_tracking_enabled=click_tracking_enabled,
+    )
+    config = json.loads(config_path.read_text())
+    if override is not None:
+        config["send_to_unsubscribed"] = override
+    config_path.write_text(json.dumps(config))
+    repository = InMemoryEmailTrackingRepository()
+    service = EmailTrackingService(repository, allowed_hosts={"donations.animallove.cr"})
+    token = service.prepare_unsubscribe(
+        campaign_id="Campaign_original-baja", recipient_email="donor@example.org",
+    )
+    service.unsubscribe(token)
+    monkeypatch.setattr(email_sender, "get_email_tracking_service", lambda: service)
+
+    _run_locked_campaign(campaign_id)
+
+    stored = json.loads(config_path.read_text())
+    assert stored["status"] == "Completed"
+    assert service.is_suppressed("donor@example.org") is True
+    if override is True:
+        assert [message["to_email"] for message in gmail.sent] == ["donor@example.org"]
+        assert "List-Unsubscribe" in gmail.sent[0]["extra_headers"]
+        assert stored["sent_count_final"] == 1
+        assert stored["suppressed_count_final"] == 0
+        assert repository.delivery_for(campaign_id, "donor@example.org").status == "sent"
+        # A resumed/retried execution must still deduplicate accepted deliveries.
+        _run_locked_campaign(campaign_id)
+        assert len(gmail.sent) == 1
+        assert len(pd.read_csv(sent_logs / f"sent_{campaign_id}.csv")) == 1
+    else:
+        assert gmail.sent == []
+        assert stored["sent_count_final"] == 0
+        assert stored["suppressed_count_final"] == 1
+        assert repository.delivery_for(campaign_id, "donor@example.org") is None
+
+
+def test_turning_override_off_honors_original_baja_without_reactivation(
+    campaign_environment, monkeypatch,
+):
+    campaign_data, _sent_logs, targets, gmail, _remote = campaign_environment
+    service = EmailTrackingService(
+        InMemoryEmailTrackingRepository(), allowed_hosts={"donations.animallove.cr"},
+    )
+    service.unsubscribe(service.prepare_unsubscribe(
+        campaign_id="Campaign_original-request", recipient_email="donor@example.org",
+    ))
+    monkeypatch.setattr(email_sender, "get_email_tracking_service", lambda: service)
+    for override in [True, False]:
+        campaign_id = f"Campaign_restore-suppression-{override}"
+        config_path = _write_csv_campaign(
+            campaign_data, targets, campaign_id, click_tracking_enabled=False,
+        )
+        config = json.loads(config_path.read_text())
+        config["send_to_unsubscribed"] = override
+        config_path.write_text(json.dumps(config))
+        _run_locked_campaign(campaign_id)
+        assert service.is_suppressed("donor@example.org") is True
+    assert len(gmail.sent) == 1
+
+
 def test_retry_jobs_prefer_a_different_sender_when_available():
     retry_contact = {"_retry_avoid_worker_id": 1}
 

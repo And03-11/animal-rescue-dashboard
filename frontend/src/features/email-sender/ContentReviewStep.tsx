@@ -137,6 +137,7 @@ export function ContentReviewStep({
             ['Senders', senderModeLabel],
             ['Delivery', scheduleLabel],
             ['Tracking', draft.clickTrackingEnabled ? 'Donation clicks' : 'Off'],
+            ['Unsubscribes', draft.sendToUnsubscribed ? 'Send anyway — records retained' : 'Excluded from sending'],
           ].map(([label, value]) => (
             <Box key={label} sx={{ minWidth: 0 }}>
               <Typography component="dt" variant="caption" color="text.secondary">{label}</Typography>
@@ -147,6 +148,13 @@ export function ContentReviewStep({
           ))}
         </Box>
       </Paper>
+
+      {draft.sendToUnsubscribed && (
+        <Alert severity="warning">
+          Unsubscribe override is enabled for this campaign. Emails will also be sent to unsubscribed contacts;
+          their unsubscribe history remains saved.
+        </Alert>
+      )}
 
       <Stack
         direction={{ xs: 'column', md: 'row' }}

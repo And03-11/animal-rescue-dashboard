@@ -357,6 +357,7 @@ class CampaignRequest(BaseModel):
     source_type: Literal["airtable", "csv"]
     segment: Literal["standard", "dnr"] = "standard"
     click_tracking_enabled: StrictBool = False
+    send_to_unsubscribed: StrictBool = False
 
 class CampaignUpdateRequest(BaseModel):
     campaign_name: Optional[str] = None
@@ -372,6 +373,7 @@ class CampaignUpdateRequest(BaseModel):
     )
     segment: Optional[Literal["standard", "dnr"]] = None
     click_tracking_enabled: Optional[StrictBool] = None
+    send_to_unsubscribed: Optional[StrictBool] = None
 
 
 
@@ -555,6 +557,14 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
     subject = config.get('subject', '(No Subject)')
     html_body_template = config.get('html_body', '<p>Error: Email body missing.</p>')
     click_tracking_enabled = config.get("click_tracking_enabled") is True
+    # This campaign-only override never deletes or changes recorded unsubscribes.
+    send_to_unsubscribed = config.get("send_to_unsubscribed") is True
+    if send_to_unsubscribed:
+        logger.warning(
+            "[%s] Unsubscribe suppression override enabled for this campaign; "
+            "unsubscribe records are retained.",
+            campaign_id,
+        )
     try:
         tracking_service = get_email_tracking_service()
         public_api_base_url = _email_public_api_base_url()
@@ -740,7 +750,12 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
                     html_body_to_send = html_body_personalized
                     extra_headers = None
                     try:
-                        if tracking_service.is_suppressed(email):
+                        recipient_suppressed = (
+                            tracking_service.is_suppressed(email, ignore_unsubscribe=True)
+                            if send_to_unsubscribed
+                            else tracking_service.is_suppressed(email)
+                        )
+                        if recipient_suppressed:
                             print(
                                 f"[{campaign_id}] Worker {worker_id} skipped a "
                                 "suppressed recipient."
@@ -1368,6 +1383,7 @@ def update_campaign(
 
         config = storage.load_campaign(campaign_id)
         config.setdefault("click_tracking_enabled", False)
+        config.setdefault("send_to_unsubscribed", False)
         request_fields = req.model_fields_set
         audience_filters_changed = bool(
             {"audiences", "region", "is_bounced", "segment"} & request_fields
@@ -1399,6 +1415,8 @@ def update_campaign(
             except ValueError as error:
                 raise HTTPException(status_code=422, detail=str(error)) from error
             segment = req.segment or config.get("segment") or "standard"
+            if req.send_to_unsubscribed is not None:
+                config["send_to_unsubscribed"] = req.send_to_unsubscribed
             try:
                 resolution = AirtableService().resolve_campaign_audiences(
                     branches, segment
@@ -1438,6 +1456,7 @@ def update_campaign(
                     "campaign_name", "subject", "html_body", "sender_config",
                     "scheduled_at", "status", "region", "is_bounced", "segment",
                     "audiences", "target_count", "click_tracking_enabled",
+                    "send_to_unsubscribed",
                 ]
                 get_email_sender_service().update_campaign(
                     campaign_id, {key: config[key] for key in remote_fields if key in config}
@@ -1479,7 +1498,7 @@ def update_campaign(
         # Intentar actualizar supabase
         try:
             service = get_email_sender_service()
-            supabase_update = {k: v for k, v in config.items() if k in ['campaign_name', 'subject', 'html_body', 'sender_config', 'scheduled_at', 'status', 'region', 'is_bounced', 'segment', 'click_tracking_enabled']}
+            supabase_update = {k: v for k, v in config.items() if k in ['campaign_name', 'subject', 'html_body', 'sender_config', 'scheduled_at', 'status', 'region', 'is_bounced', 'segment', 'click_tracking_enabled', 'send_to_unsubscribed']}
             service.update_campaign(campaign_id, supabase_update)
         except Exception as e:
             print(f"Supabase update error: {e}")

@@ -6,6 +6,7 @@ from backend.app.api.v1.endpoints import email_tracking as email_tracking_api
 from backend.app.services.email_tracking import (
     EmailTrackingService,
     InMemoryEmailTrackingRepository,
+    PostgresEmailTrackingRepository,
     append_unsubscribe_footer,
 )
 
@@ -23,6 +24,60 @@ def unsubscribe_environment():
         html_body='<a href="https://donations.animallove.cr/give/">Donate</a>',
     )
     return service, repository, prepared
+
+
+def test_campaign_override_never_removes_original_or_new_unsubscribe_records(
+    unsubscribe_environment,
+):
+    service, repository, prepared = unsubscribe_environment
+    service.unsubscribe(prepared.unsubscribe_token)
+    assert service.is_suppressed("Person@Example.org", ignore_unsubscribe=True) is False
+    assert service.is_suppressed("Person@Example.org") is True
+    assert repository.suppression_count == 1
+    service.unsubscribe(service.prepare_unsubscribe(
+        campaign_id="Campaign_override-new-baja", recipient_email="second@example.org",
+    ))
+    assert service.is_suppressed("second@example.org", ignore_unsubscribe=True) is False
+    assert service.is_suppressed("second@example.org") is True
+    assert repository.suppression_count == 2
+
+
+@pytest.mark.parametrize("ignore_unsubscribe", [True, False])
+def test_postgres_campaign_override_filters_only_unsubscribe_without_writes(
+    monkeypatch, ignore_unsubscribe,
+):
+    calls = []
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params):
+            calls.append((query, params))
+
+        def fetchone(self):
+            return (True,)
+
+    class Connection:
+        def cursor(self):
+            return Cursor()
+
+        def close(self):
+            pass
+
+    repository = PostgresEmailTrackingRepository("postgresql://not-connected")
+    monkeypatch.setattr(repository, "_connect", lambda: Connection())
+    service = EmailTrackingService(repository, allowed_hosts={"donations.animallove.cr"})
+    assert service.is_suppressed(" BLOCKED@example.org ", ignore_unsubscribe=ignore_unsubscribe) is True
+    assert len(calls) == 1
+    query, params = calls[0]
+    assert "SELECT EXISTS" in query
+    assert "AND (NOT %s OR reason <> 'unsubscribe')" in query
+    assert params == ("blocked@example.org", ignore_unsubscribe)
+    assert "DELETE" not in query and "UPDATE" not in query and "INSERT" not in query
 
 
 def test_unsubscribe_token_is_hashed_and_suppression_is_normalized_idempotently(
