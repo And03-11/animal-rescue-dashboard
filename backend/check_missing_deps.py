@@ -10,10 +10,7 @@ REQUIREMENTS_FILE = BASE_DIR / "requirements.txt"
 PROJECT_DIR = BASE_DIR / "app"
 
 def read_requirements():
-    # requirements.txt is UTF-16 in this legacy project. Resolve it relative to
-    # this script so the check behaves identically locally and in CI.
-    with open(REQUIREMENTS_FILE, "r", encoding="utf-16") as f:
-        lines = f.read().splitlines()
+    lines = REQUIREMENTS_FILE.read_text(encoding="utf-8-sig").splitlines()
     packages = set()
     for line in lines:
         requirement = line.strip()
