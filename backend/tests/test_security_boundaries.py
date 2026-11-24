@@ -101,7 +101,8 @@ def test_tracking_event_response_never_allows_browser_credentials(monkeypatch):
     assert response.headers["access-control-allow-origin"] == (
         "https://donations.animallove.cr"
     )
-    assert response.headers["vary"] == "Origin"
+    vary_fields = {field.strip().lower() for field in response.headers["vary"].split(",")}
+    assert vary_fields == {"origin"}
     assert "access-control-allow-credentials" not in response.headers
 
 
