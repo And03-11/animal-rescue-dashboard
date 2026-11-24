@@ -1,6 +1,7 @@
 # --- Archivo: backend/app/schemas.py ---
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List, Dict, Any
+from backend.app.services.donor_personalization import DonorPhraseFields
 
 class ContactCreate(BaseModel):
     name: str
@@ -51,12 +52,12 @@ class SearchResponse(BaseModel):
     brevo: List[BrevoDetail]
 
 # Modelos para Templates de Email
-class TemplateCreate(BaseModel):
+class TemplateCreate(DonorPhraseFields):
     name: str
     content: str
     design_json: Optional[str] = None
 
-class TemplateResponse(BaseModel):
+class TemplateResponse(DonorPhraseFields):
     id: int
     name: str
     content: str

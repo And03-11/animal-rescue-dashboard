@@ -42,11 +42,13 @@ class RecordingGmailService:
         self.events = events
         self.sent = []
         self.extra_headers = []
+        self.bodies = []
 
     def send_email(self, *, to_email, subject, html_body, extra_headers=None):
         self.events.append(("send", to_email))
         self.sent.append(to_email)
         self.extra_headers.append(dict(extra_headers or {}))
+        self.bodies.append(html_body)
         return GmailSendResult(
             success=True,
             message_id=f"gmail-message-{len(self.sent)}",
@@ -1125,3 +1127,58 @@ def test_resume_queue_failure_restores_paused_before_releasing_lock(
 
     assert json.loads(config_path.read_text(encoding="utf-8"))["status"] == "Paused"
     assert not email_sender._get_campaign_storage().is_launch_locked(campaign_id)
+
+
+def test_resumed_donor_campaign_uses_fresh_context_and_saved_phrases(execution_environment, monkeypatch):
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    campaign_data, _sent_logs, targets, events, gmail, _remote = execution_environment
+    cid = 'Campaign_donor_resume'
+    write_airtable_campaign(campaign_data, cid, status='Paused', segment='dnr',
+        html_body='<p>{{name}}: {{Day}}</p>', donor_singular_phrase='gift you gave {{when}}',
+        donor_plural_phrase='{{count}} gifts you’ve made over the past week')
+    (targets / f'target_{cid}.csv').write_text('Email\nstale@example.org\n')
+    donated_on = (datetime.now(ZoneInfo('America/Costa_Rica')) - timedelta(days=3)).date().isoformat()
+    class DonorAirtable:
+        def resolve_campaign_audiences(self, _audiences, _segment):
+            events.append(('fresh-audience',))
+            return AudienceResolution(contacts=(
+                {'Email': 'one@example.org', 'Name': 'One'},
+                {'Email': 'three@example.org', 'Name': 'Three'},
+            ), branches=())
+        def enrich_donor_campaign_contacts(self, contacts):
+            events.append(('fresh-donations',))
+            return [{**contact, '_donation_count': str(count), '_last_donation_at': donated_on}
+                for contact, count in zip(contacts, [1, 3])]
+    monkeypatch.setattr(email_sender, 'AirtableService', DonorAirtable)
+    tasks = CapturingBackgroundTasks()
+    email_sender.resume_campaign(cid, tasks, current_user='tester')
+    function, args, kwargs = tasks.tasks[0]
+    function(*args, **kwargs)
+    assert events[0:2] == [('fresh-audience',), ('fresh-donations',)]
+    assert gmail.sent == ['one@example.org', 'three@example.org']
+    assert '<p>One: gift you gave three days ago</p>' in gmail.bodies[0]
+    assert '<p>Three: three gifts you’ve made over the past week</p>' in gmail.bodies[1]
+    assert all('{{' not in body for body in gmail.bodies)
+    assert json.loads((campaign_data / f'{cid}.json').read_text())['status'] == 'Completed'
+
+
+def test_donor_context_failure_preserves_targets_and_sends_nothing(execution_environment, monkeypatch):
+    campaign_data, _sent_logs, targets, _events, gmail, _remote = execution_environment
+    cid = 'Campaign_donor_missing_date'
+    path = write_airtable_campaign(campaign_data, cid, segment='dnr', html_body='<p>{{Day}}</p>')
+    target = targets / f'target_{cid}.csv'
+    target.write_text('Email\nold@example.org\n')
+    class DonorAirtable:
+        def resolve_campaign_audiences(self, _audiences, _segment):
+            return AudienceResolution(contacts=({'Email': 'one@example.org', 'Name': 'One'},), branches=())
+        def enrich_donor_campaign_contacts(self, _contacts):
+            raise ValueError('No donation date available')
+    monkeypatch.setattr(email_sender, 'AirtableService', DonorAirtable)
+    storage = email_sender._get_campaign_storage()
+    launch_id = storage.acquire_launch_lock(cid)
+    email_sender.run_campaign_task(cid, launch_id)
+    assert gmail.sent == []
+    assert json.loads(path.read_text())['status'] == 'Error - Airtable Fetch Failed'
+    assert target.read_text() == 'Email\nold@example.org\n'
+    assert not storage.is_launch_locked(cid)

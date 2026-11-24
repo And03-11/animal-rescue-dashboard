@@ -46,6 +46,10 @@ import apiClient from '../api/axiosConfig';
 import { EmailPreview } from '../components/EmailPreview';
 import { WorkspacePageHeader } from '../components/WorkspacePageHeader';
 import { WorkspaceStatePanel } from '../components/WorkspaceStatePanel';
+import { DonorPersonalizationSection } from '../components/DonorPersonalizationSection';
+import { DonorDetectionFeedback } from '../components/DonorDetectionFeedback';
+import { useDonorHtmlDetection } from '../features/email-sender/useDonorHtmlDetection';
+import { defaultDonorPhrases, previewDonorHtml, validateDonorPhrases } from '../features/email-sender/donorPersonalization';
 
 interface TemplateSummary {
   id: number;
@@ -56,12 +60,15 @@ interface TemplateSummary {
 interface Template extends TemplateSummary {
   content: string;
   design_json?: string | null;
+  donor_singular_phrase?: string;
+  donor_plural_phrase?: string;
 }
 
 const emptyTemplate = {
   id: 0,
   name: '',
   content: '',
+  ...defaultDonorPhrases,
 };
 
 const formatCreatedAt = (value: string) => {
@@ -76,7 +83,8 @@ const getApiErrorMessage = (error: unknown, fallback: string) => {
   if (error.code === 'ECONNABORTED') {
     return 'The template database took too long to respond. Check the backend database connection and retry.';
   }
-  return error.response?.data?.detail || fallback;
+  const detail: unknown = error.response?.data?.detail;
+  return typeof detail === 'string' ? detail : fallback;
 };
 
 export default function TemplatesPage() {
@@ -93,7 +101,11 @@ export default function TemplatesPage() {
   const [editMode, setEditMode] = useState(false);
   const [saving, setSaving] = useState(false);
   const [viewMode, setViewMode] = useState<'code' | 'preview'>('code');
+  const [donorSampleCount, setDonorSampleCount] = useState(1);
   const [loadingTemplateId, setLoadingTemplateId] = useState<number | null>(null);
+  const donorDetection = useDonorHtmlDetection({ content: form.content, settings: form, enabled: formOpen,
+    onChange: (snapshot) => setForm((current) => ({ ...current, ...snapshot })),
+  });
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [templateToDelete, setTemplateToDelete] = useState<TemplateSummary | null>(null);
@@ -104,6 +116,7 @@ export default function TemplatesPage() {
   const [testEmails, setTestEmails] = useState('');
   const [testSubject, setTestSubject] = useState('Test Email');
   const [sendingTest, setSendingTest] = useState(false);
+  const [testDonorCount, setTestDonorCount] = useState(1);
 
   const fetchTemplates = async () => {
     try {
@@ -123,7 +136,9 @@ export default function TemplatesPage() {
   }, []);
 
   const handleOpenForm = async (template?: TemplateSummary) => {
+    donorDetection.reset();
     setError('');
+    setDonorSampleCount(1);
 
     if (!template) {
       setForm(emptyTemplate);
@@ -136,7 +151,10 @@ export default function TemplatesPage() {
     setLoadingTemplateId(template.id);
     try {
       const response = await apiClient.get<Template>(`/templates/${template.id}`, { timeout: 15_000 });
-      setForm({ id: response.data.id, name: response.data.name, content: response.data.content });
+      setForm({ id: response.data.id, name: response.data.name, content: response.data.content,
+        donor_singular_phrase: response.data.donor_singular_phrase ?? defaultDonorPhrases.donor_singular_phrase,
+        donor_plural_phrase: response.data.donor_plural_phrase ?? defaultDonorPhrases.donor_plural_phrase,
+      });
       setEditMode(true);
       setViewMode('code');
       setFormOpen(true);
@@ -149,11 +167,13 @@ export default function TemplatesPage() {
 
   const handleCloseForm = () => {
     if (saving) return;
+    donorDetection.reset();
     setFormOpen(false);
     setError('');
   };
 
   const handleSubmit = async () => {
+    if (donorDetection.isDetecting) return;
     if (!form.name.trim()) {
       setError('Template name is required.');
       return;
@@ -162,11 +182,14 @@ export default function TemplatesPage() {
       setError('Template content is required.');
       return;
     }
+    const phraseError = validateDonorPhrases({ donor_singular_phrase: form.donor_singular_phrase, donor_plural_phrase: form.donor_plural_phrase });
+    if (phraseError) { setError(phraseError); return; }
 
     setSaving(true);
     setError('');
     try {
-      const payload = { name: form.name.trim(), content: form.content };
+      const payload = { name: form.name.trim(), content: form.content,
+        donor_singular_phrase: form.donor_singular_phrase, donor_plural_phrase: form.donor_plural_phrase };
       if (editMode) {
         await apiClient.put(`/templates/${form.id}`, payload);
         setSuccessMessage('Template updated.');
@@ -210,6 +233,7 @@ export default function TemplatesPage() {
     setTestEmails('');
     setTestSubject(`Test: ${template.name}`);
     setError('');
+    setTestDonorCount(1);
     setSendTestDialogOpen(true);
   };
 
@@ -227,6 +251,7 @@ export default function TemplatesPage() {
       const response = await apiClient.post(`/templates/${templateToTest.id}/send-test`, {
         emails: emailList,
         subject: testSubject.trim(),
+        donor_preview_count: testDonorCount,
       });
       setSuccessMessage(response.data.message || 'Test email sent.');
       setSendTestDialogOpen(false);
@@ -475,7 +500,8 @@ export default function TemplatesPage() {
                 fullWidth
                 placeholder="Paste the complete email HTML here…"
                 value={form.content}
-                onChange={(event) => setForm({ ...form, content: event.target.value })}
+                onPaste={donorDetection.onPaste}
+                onChange={(event) => { donorDetection.reset(); setForm({ ...form, content: event.target.value }); }}
                 disabled={saving}
                 sx={{
                   '& .MuiInputBase-root': {
@@ -492,16 +518,21 @@ export default function TemplatesPage() {
                 variant="outlined"
                 sx={{ minHeight: 360, p: { xs: 1.5, sm: 2.5 }, bgcolor: '#f7f8f8', color: '#17211f' }}
               >
-                <EmailPreview subject={form.name || 'Untitled template'} htmlBody={form.content} />
+                <EmailPreview subject={form.name || 'Untitled template'} htmlBody={previewDonorHtml(form.content, form, donorSampleCount)} />
               </Paper>
             )}
 
+            <DonorDetectionFeedback {...donorDetection} onDetect={donorDetection.detect} onUndo={donorDetection.undo}
+              disabled={saving || !form.content.trim()} />
+            <DonorPersonalizationSection settings={form} disabled={saving}
+              onChange={(patch) => { donorDetection.reset(); setForm((current) => ({ ...current, ...patch })); }}
+              sampleCount={donorSampleCount} onSampleCountChange={setDonorSampleCount} />
             {error && formOpen && <Alert severity="error">{error}</Alert>}
           </Stack>
         </DialogContent>
         <DialogActions sx={{ px: 3, py: 2 }}>
           <Button onClick={handleCloseForm} disabled={saving}>Cancel</Button>
-          <Button variant="contained" onClick={handleSubmit} disabled={saving}>
+          <Button variant="contained" onClick={handleSubmit} disabled={saving || donorDetection.isDetecting}>
             {saving ? <CircularProgress size={20} color="inherit" /> : editMode ? 'Save changes' : 'Create template'}
           </Button>
         </DialogActions>
@@ -547,6 +578,14 @@ export default function TemplatesPage() {
               disabled={sendingTest}
               fullWidth
             />
+            <ToggleButtonGroup value={testDonorCount} exclusive size="small" aria-label="Test donor example"
+              onChange={(_, value: number | null) => { if (value !== null) setTestDonorCount(value); }}>
+              <ToggleButton value={1}>One donation</ToggleButton>
+              <ToggleButton value={3}>Three donations</ToggleButton>
+            </ToggleButtonGroup>
+            <Typography variant="caption" color="text.secondary">
+              {'For {{Day}}, tests use the selected example and a last donation three days ago.'}
+            </Typography>
             {error && sendTestDialogOpen && <Alert severity="error">{error}</Alert>}
           </Stack>
         </DialogContent>

@@ -30,6 +30,15 @@ from backend.app.services.campaign_storage import (
     InvalidCampaignIdError,
 )
 from backend.app.services.email_test_delivery import deliver_test_emails
+from backend.app.services.donor_personalization import (
+    DonorPhrase,
+    DonorPhraseFields,
+    donor_phrase_for_contact,
+    has_day_token,
+    personalize_donor_html,
+    preview_donor_html,
+    validate_campaign_personalization,
+)
 from backend.app.services.email_tracking import (
     append_unsubscribe_footer,
     get_email_tracking_service,
@@ -223,10 +232,16 @@ def _refresh_airtable_campaign_contacts(
         legacy_region=config.get("region"),
         legacy_is_bounced=config.get("is_bounced"),
     )
-    resolution = AirtableService().resolve_campaign_audiences(
+    validate_campaign_personalization(config)
+    airtable_service = AirtableService()
+    resolution = airtable_service.resolve_campaign_audiences(
         branches, config.get("segment") or "standard"
     )
     contact_data = list(resolution.contacts)
+    if has_day_token(config.get("html_body") or ""):
+        contact_data = airtable_service.enrich_donor_campaign_contacts(contact_data)
+        for contact in contact_data:
+            donor_phrase_for_contact(contact, config)
     updated_config = {
         **config,
         "audiences": serialize_audiences(branches),
@@ -337,7 +352,7 @@ def _select_unique_pending_contacts(
         pending.append({**contact, "Email": email.strip()})
     return pending
 
-class CampaignRequest(BaseModel):
+class CampaignRequest(DonorPhraseFields):
     source_type: str # 'airtable' o 'csv'
     subject: str
     html_body: str
@@ -374,6 +389,8 @@ class CampaignUpdateRequest(BaseModel):
     segment: Optional[Literal["standard", "dnr"]] = None
     click_tracking_enabled: Optional[StrictBool] = None
     send_to_unsubscribed: Optional[StrictBool] = None
+    donor_singular_phrase: Optional[DonorPhrase] = None
+    donor_plural_phrase: Optional[DonorPhrase] = None
 
 
 
@@ -426,6 +443,15 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
     storage = _get_campaign_storage()
     contact_data: List[Dict[str, Any]] = []
     source_type = config.get('source_type')
+
+    try:
+        validate_campaign_personalization(config)
+    except ValueError as error:
+        logger.error("[%s] Donor personalization is invalid: %s", campaign_id, error)
+        config['status'] = 'Error - Donor Personalization'
+        storage.save_campaign(campaign_id, config, serialize_unknown=True)
+        _sync_remote_campaign_status(campaign_id, config['status'])
+        return
 
     # Airtable campaigns must refresh and persist their audience before sender
     # setup or any send-loop work. The wrapper already owns this launch lock.
@@ -745,6 +771,7 @@ def _run_campaign_task_unlocked(campaign_id: str, launch_id: str):
                     print(f"[{campaign_id}] Worker {worker_id} processing {current_processed}/{total_contacts_to_send}: {email}")
 
                     html_body_personalized = html_body_template.replace("{{name}}", name).replace("*|FNAME|*", name)
+                    html_body_personalized = personalize_donor_html(html_body_personalized, contact, config)
 
                     prepared_delivery_id = None
                     html_body_to_send = html_body_personalized
@@ -1202,6 +1229,10 @@ def create_campaign(
     airtable_service = AirtableService() # Instancia local
     storage = _get_campaign_storage()
 
+    try:
+        validate_campaign_personalization(req.model_dump())
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     campaign_id = (
         f"Campaign_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
         f"_{uuid4().hex[:8]}"
@@ -1384,6 +1415,20 @@ def update_campaign(
         config = storage.load_campaign(campaign_id)
         config.setdefault("click_tracking_enabled", False)
         config.setdefault("send_to_unsubscribed", False)
+        # Save the complete template snapshot together with its phrase settings.
+        for key, value in req.model_dump(exclude_unset=True).items():
+            if key in {"audiences", "region", "is_bounced", "segment"}:
+                continue
+            if value is not None or key == "scheduled_at":
+                config[key] = (value.isoformat() if value else None) if key == "scheduled_at" else value
+        proposed_config = {**config, **{
+            key: value for key, value in req.model_dump(exclude_unset=True).items()
+            if key == "segment" and value is not None
+        }}
+        try:
+            validate_campaign_personalization(proposed_config)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
         request_fields = req.model_fields_set
         audience_filters_changed = bool(
             {"audiences", "region", "is_bounced", "segment"} & request_fields
@@ -1457,6 +1502,7 @@ def update_campaign(
                     "scheduled_at", "status", "region", "is_bounced", "segment",
                     "audiences", "target_count", "click_tracking_enabled",
                     "send_to_unsubscribed",
+                    "donor_singular_phrase", "donor_plural_phrase",
                 ]
                 get_email_sender_service().update_campaign(
                     campaign_id, {key: config[key] for key in remote_fields if key in config}
@@ -1498,7 +1544,7 @@ def update_campaign(
         # Intentar actualizar supabase
         try:
             service = get_email_sender_service()
-            supabase_update = {k: v for k, v in config.items() if k in ['campaign_name', 'subject', 'html_body', 'sender_config', 'scheduled_at', 'status', 'region', 'is_bounced', 'segment', 'click_tracking_enabled', 'send_to_unsubscribed']}
+            supabase_update = {k: v for k, v in config.items() if k in ['campaign_name', 'subject', 'html_body', 'sender_config', 'scheduled_at', 'status', 'region', 'is_bounced', 'segment', 'click_tracking_enabled', 'send_to_unsubscribed', 'donor_singular_phrase', 'donor_plural_phrase']}
             service.update_campaign(campaign_id, supabase_update)
         except Exception as e:
             print(f"Supabase update error: {e}")
@@ -1632,6 +1678,9 @@ class TestEmailRequest(BaseModel):
     subject: Optional[str] = None
     html_body: Optional[str] = None
     sender_config: Optional[Union[str, List[str]]] = None
+    donor_singular_phrase: Optional[DonorPhrase] = None
+    donor_plural_phrase: Optional[DonorPhrase] = None
+    donor_preview_count: int = Field(default=1, ge=1, le=999999)
 
 
 # --- Añade esta NUEVA función/endpoint ---
@@ -1660,6 +1709,9 @@ def send_test_email(
     subject = req.subject if req.subject is not None else config.get('subject', '(No Subject)')
     html_body_template = req.html_body if req.html_body is not None else config.get('html_body', '<p>Error: Email body missing.</p>')
     sender_config = req.sender_config if req.sender_config is not None else config.get('sender_config', 'all')
+    html_body_template = preview_donor_html(
+        html_body_template, {**config, **req.model_dump(exclude_none=True)}, count=req.donor_preview_count,
+    )
 
     # 3. Cargar Servicios de Gmail
     gmail_services = []
@@ -1689,11 +1741,12 @@ def send_test_email(
 
 
 # --- Nuevo Modelo para Test Ad-hoc ---
-class AdhocTestRequest(BaseModel):
+class AdhocTestRequest(DonorPhraseFields):
     emails: List[str]
     subject: str
     html_body: str
     sender_config: Optional[Union[str, List[str]]] = 'all'
+    donor_preview_count: int = Field(default=1, ge=1, le=999999)
 
 
 @router.post("/sender/send-test-adhoc", response_model=Dict[str, Any])
@@ -1718,7 +1771,7 @@ def send_test_email_adhoc(
     results = deliver_test_emails(
         emails=req.emails,
         subject=req.subject,
-        html_body=req.html_body,
+        html_body=preview_donor_html(req.html_body, req.model_dump(), count=req.donor_preview_count),
         gmail_services=gmail_services,
         mode="adhoc",
         sleep_between=time.sleep,

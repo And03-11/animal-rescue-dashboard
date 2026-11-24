@@ -1,10 +1,12 @@
 import os
+import json
 from dotenv import load_dotenv
 from fastapi import HTTPException
 from pyairtable import Api
 from typing import List, Dict, Optional, Any
 from datetime import datetime, time, timedelta, date
 from zoneinfo import ZoneInfo
+from backend.app.services.donor_personalization import donation_local_date
 from collections import defaultdict
 import traceback
 
@@ -1049,13 +1051,18 @@ class AirtableService:
         formula_parts = [
             f"{{{stage_field}}} = 'Big Campaign'",
             f"NOT({{{not_sending_field}}} = 1)",
-            f"FIND('Aol and other accounts', {{{tag_field}}} & '') = 0",
-            f"FIND('Apple_Accounts USA', {{{tag_field}}} & '') = 0",
-            f"FIND('Apple_Accounts EUR', {{{tag_field}}} & '') = 0",
+        ]
+        if segment == "standard":
+            formula_parts.extend([
+                f"FIND('Aol and other accounts', {{{tag_field}}} & '') = 0",
+                f"FIND('Apple_Accounts USA', {{{tag_field}}} & '') = 0",
+                f"FIND('Apple_Accounts EUR', {{{tag_field}}} & '') = 0",
+            ])
+        formula_parts.extend([
             f"FIND('Tag #4 New ones', {{{donor_tag_field}}} & '') = 0",
             f"FIND('Tag #3 New ones', {{{donor_tag_field}}} & '') = 0",
             branch_formula,
-        ]
+        ])
         if segment == "dnr":
             formula_parts.append(f"{{{exclude_field}}} = 1")
         else:
@@ -1068,10 +1075,15 @@ class AirtableService:
             AudienceBranch(region="EUR", is_bounced=True),
         }
 
+        requested_fields = [email_field, donor_first_name_field, region_field, bounced_field]
+        donor_field = EMAILS_FIELDS.get("donor", "Donor")
+        if segment == "dnr":
+            requested_fields.append(donor_field)
+
         try:
             email_records = self.emails_table.all(
                 formula=f"AND({', '.join(formula_parts)})",
-                fields=[email_field, donor_first_name_field, region_field, bounced_field],
+                fields=requested_fields,
             )
         except Exception as exc:
             raise AirtableCampaignQueryError(
@@ -1104,12 +1116,24 @@ class AirtableService:
                 "Email": fields.get(email_field, ""),
                 "Name": name or "Valued Supporter",
             }
+            if segment == "dnr" and fields.get(donor_field):
+                contact["_donor_ids"] = json.dumps(fields[donor_field])
             if all_audiences_selected:
                 contact["_audience_region"] = region
             contacts_by_branch[branch].append(contact)
             all_contacts.append(contact)
 
         unique_contacts = deduplicate_contacts(all_contacts)
+        if segment == "dnr":
+            donors_by_email: dict[str, set[str]] = defaultdict(set)
+            for contact in all_contacts:
+                email = contact.get("Email")
+                if isinstance(email, str) and contact.get("_donor_ids"):
+                    donors_by_email[email.strip().lower()].update(json.loads(contact["_donor_ids"]))
+            for contact in unique_contacts:
+                donor_ids = donors_by_email.get(contact["Email"].lower())
+                if donor_ids:
+                    contact["_donor_ids"] = json.dumps(sorted(donor_ids))
         if all_audiences_selected:
             eur_emails = {
                 contact["Email"].strip().lower()
@@ -1133,6 +1157,58 @@ class AirtableService:
                 for branch in audiences
             ),
         )
+
+    def enrich_donor_campaign_contacts(self, contacts: list[dict[str, str]]) -> list[dict[str, str]]:
+        """Attach counts and latest dates from active-campaign donations in one query."""
+        donor_ids_by_email: dict[str, str] = {}
+        for contact in contacts:
+            try:
+                ids = json.loads(contact.get("_donor_ids", "[]"))
+            except (TypeError, ValueError) as error:
+                raise ValueError("A donor email has invalid donor links.") from error
+            if not isinstance(ids, list) or len(ids) != 1 or not isinstance(ids[0], str):
+                raise ValueError("Each personalized donor email must link to exactly one donor.")
+            donor_ids_by_email[contact["Email"].strip().lower()] = ids[0]
+        if not contacts:
+            return []
+
+        try:
+            donations = self.donations_table.all(
+                formula="{Active Campaign} = 1",
+                fields=[DONATIONS_FIELDS["donor_link"], DONATIONS_FIELDS["date"]],
+            )
+        except Exception as error:
+            raise AirtableCampaignQueryError("Unable to load active-campaign donor details.") from error
+
+        selected_ids = set(donor_ids_by_email.values())
+        dates_by_donor: dict[str, list[date]] = defaultdict(list)
+        seen_donations: set[str] = set()
+        for donation in donations:
+            record_id = donation.get("id")
+            if record_id and record_id in seen_donations:
+                continue
+            if record_id:
+                seen_donations.add(record_id)
+            fields = donation.get("fields", {})
+            matching_ids = set(fields.get(DONATIONS_FIELDS["donor_link"], [])) & selected_ids
+            if not matching_ids:
+                continue
+            donated_on = donation_local_date(fields.get(DONATIONS_FIELDS["date"]))
+            for donor_id in matching_ids:
+                dates_by_donor[donor_id].append(donated_on)
+
+        enriched = []
+        for contact in contacts:
+            donor_id = donor_ids_by_email[contact["Email"].strip().lower()]
+            dates = dates_by_donor.get(donor_id)
+            if not dates:
+                raise ValueError("A personalized donor has no dated donation to the active campaign.")
+            enriched.append({
+                **contact,
+                "_donation_count": str(len(dates)),
+                "_last_donation_at": max(dates).isoformat(),
+            })
+        return enriched
 
     def get_campaign_contacts(
         self,

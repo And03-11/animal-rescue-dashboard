@@ -9,6 +9,7 @@ from psycopg2.extras import RealDictCursor
 from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
 from dotenv import load_dotenv
+from backend.app.services.donor_personalization import DEFAULT_PLURAL_PHRASE, DEFAULT_SINGULAR_PHRASE
 
 load_dotenv()
 
@@ -80,11 +81,12 @@ class EmailSenderService:
                         id, campaign_name, source_type, subject, html_body,
                         region, is_bounced, sender_config, status, scheduled_at,
                         target_count, audiences, segment, click_tracking_enabled,
+                        donor_singular_phrase, donor_plural_phrase,
                         send_to_unsubscribed,
                         created_at
                     ) VALUES (
                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                        %s, %s, NOW()
+                        %s, %s, %s, %s, NOW()
                     ) RETURNING *
                 """, (
                     campaign_data['id'],
@@ -101,6 +103,8 @@ class EmailSenderService:
                     audiences_json,
                     segment,
                     campaign_data.get('click_tracking_enabled', False),
+                    campaign_data.get('donor_singular_phrase') or DEFAULT_SINGULAR_PHRASE,
+                    campaign_data.get('donor_plural_phrase') or DEFAULT_PLURAL_PHRASE,
                     campaign_data.get('send_to_unsubscribed') is True,
                 ))
                 result = cur.fetchone()
@@ -175,6 +179,8 @@ class EmailSenderService:
                 'scheduled_at': 'scheduled_at',
                 'click_tracking_enabled': 'click_tracking_enabled',
                 'send_to_unsubscribed': 'send_to_unsubscribed',
+                'donor_singular_phrase': 'donor_singular_phrase',
+                'donor_plural_phrase': 'donor_plural_phrase',
             }
             
             for key, db_field in field_mapping.items():

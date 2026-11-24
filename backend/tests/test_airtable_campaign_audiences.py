@@ -72,7 +72,12 @@ def test_standard_segment_excludes_current_campaign_marked_contacts():
         "standard",
     )
 
-    assert "NOT({Exclude From Current Campaign} = 1)" in table.calls[0]["formula"]
+    formula = table.calls[0]["formula"]
+    assert "NOT({Exclude From Current Campaign} = 1)" in formula
+    for provider_tag in (
+        "Aol and other accounts", "Apple_Accounts USA", "Apple_Accounts EUR",
+    ):
+        assert f"FIND('{provider_tag}', {{Tag (Mailchimp)}} & '') = 0" in formula
 
 
 @pytest.mark.skipif(_IMPORT_ERROR is not None, reason="campaign audience resolver is missing")
@@ -86,7 +91,16 @@ def test_dnr_segment_requires_current_campaign_marked_contacts():
         "dnr",
     )
 
-    assert "{Exclude From Current Campaign} = 1" in table.calls[0]["formula"]
+    formula = table.calls[0]["formula"]
+    assert "{Exclude From Current Campaign} = 1" in formula
+    for provider_tag in (
+        "Aol and other accounts", "Apple_Accounts USA", "Apple_Accounts EUR",
+    ):
+        assert provider_tag not in formula
+    assert "{Stage (from Donor)} = 'Big Campaign'" in formula
+    assert "NOT({Not Sending} = 1)" in formula
+    assert "FIND('Tag #4 New ones', {Tag (from Donor)} & '') = 0" in formula
+    assert "FIND('Tag #3 New ones', {Tag (from Donor)} & '') = 0" in formula
 
 
 @pytest.mark.skipif(_IMPORT_ERROR is not None, reason="campaign audience resolver is missing")

@@ -52,6 +52,7 @@ import { CampaignSetupStep } from './CampaignSetupStep';
 import { WizardSessionLifecycle } from './campaignWizardOrchestration';
 import type { WizardSessionHandle } from './campaignWizardOrchestration';
 import { ContentReviewStep } from './ContentReviewStep';
+import { defaultDonorPhrases } from './donorPersonalization';
 import type {
   AudiencePreview,
   CampaignFormData,
@@ -491,12 +492,16 @@ export function CampaignWizard({
   };
   const handleLoadTemplate = (templateId: string) => {
     if (!templateId) {
-      patchDraft({ htmlBody: DEFAULT_HTML, templateId: null });
+      patchDraft({ htmlBody: DEFAULT_HTML, templateId: null,
+        donorSingularPhrase: defaultDonorPhrases.donor_singular_phrase,
+        donorPluralPhrase: defaultDonorPhrases.donor_plural_phrase });
       return;
     }
     const template = templates.find((item) => item.id === Number(templateId));
     if (template?.content) {
-      patchDraft({ htmlBody: template.content, templateId: template.id, template });
+      patchDraft({ htmlBody: template.content, templateId: template.id, template,
+        donorSingularPhrase: template.donor_singular_phrase ?? defaultDonorPhrases.donor_singular_phrase,
+        donorPluralPhrase: template.donor_plural_phrase ?? defaultDonorPhrases.donor_plural_phrase });
       return;
     }
 
@@ -507,11 +512,13 @@ export function CampaignWizard({
       timeout: 15_000,
       signal: session.signal,
     }).then((response) => {
-      if (!isSessionCurrent(session)) return;
+      if (!isSessionCurrent(session) || Number(draftRef.current.templateId) !== Number(templateId)) return;
       patchDraft({
         htmlBody: response.data.content,
         templateId: response.data.id,
         template: response.data,
+        donorSingularPhrase: response.data.donor_singular_phrase ?? defaultDonorPhrases.donor_singular_phrase,
+        donorPluralPhrase: response.data.donor_plural_phrase ?? defaultDonorPhrases.donor_plural_phrase,
       });
     }).catch((requestError: unknown) => {
       if (isSessionCurrent(session) && !isAbortError(requestError)) {
@@ -530,6 +537,8 @@ export function CampaignWizard({
       const response = await apiClient.post<EmailTemplate>('/templates', {
         name,
         content: draftRef.current.htmlBody,
+        donor_singular_phrase: draftRef.current.donorSingularPhrase,
+        donor_plural_phrase: draftRef.current.donorPluralPhrase,
       }, { timeout: 15_000, signal: session.signal });
       if (!isSessionCurrent(session)) return;
       setTemplates((current) => [response.data, ...current]);
@@ -540,7 +549,7 @@ export function CampaignWizard({
       throw requestError;
     }
   };
-  const handleSendTest = async (emails: string[]) => {
+  const handleSendTest = async (emails: string[], donorPreviewCount = 1) => {
     const session = getActiveSession();
     if (!session) return;
     const current = draftRef.current;
@@ -553,6 +562,9 @@ export function CampaignWizard({
         subject: current.subject,
         html_body: current.htmlBody,
         sender_config: senderConfig,
+        donor_singular_phrase: current.donorSingularPhrase,
+        donor_plural_phrase: current.donorPluralPhrase,
+        donor_preview_count: donorPreviewCount,
       };
       await apiClient.post(
         current.campaignId

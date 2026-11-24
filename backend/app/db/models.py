@@ -3,6 +3,7 @@ from sqlalchemy import Column, DateTime, Integer, String, Boolean, Text, Foreign
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from .database import Base
+from backend.app.services.donor_personalization import DEFAULT_PLURAL_PHRASE, DEFAULT_SINGULAR_PHRASE
 
 class User(Base):
     __tablename__ = "users"
@@ -92,4 +93,6 @@ class EmailTemplate(Base):
     content = Column(Text, nullable=False)
     # GrapesJS project state. ``content`` remains the portable, send-ready HTML.
     design_json = Column(Text, nullable=True)
+    donor_singular_phrase = Column(Text, nullable=False, default=DEFAULT_SINGULAR_PHRASE)
+    donor_plural_phrase = Column(Text, nullable=False, default=DEFAULT_PLURAL_PHRASE)
     created_at = Column(DateTime, default=datetime.utcnow)

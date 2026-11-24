@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, load_only
 from sqlalchemy.exc import SQLAlchemyError
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.app.db.database import get_db
 from backend.app.db.models import EmailTemplate
@@ -11,6 +11,8 @@ from backend.app.schemas import TemplateCreate, TemplateListResponse, TemplateRe
 from backend.app.services.gmail_service import GmailService
 from backend.app.services.credentials_manager import credentials_manager_instance
 from backend.app.core.security import get_current_user
+from backend.app.services.donor_personalization import DonorPhrase, preview_donor_html
+from backend.app.services.donor_phrase_detection import DetectionResult, detect_donor_phrase
 
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
@@ -19,11 +21,24 @@ class TemplateUpdate(BaseModel):
     name: Optional[str] = None
     content: Optional[str] = None
     design_json: Optional[str] = None
+    donor_singular_phrase: Optional[DonorPhrase] = None
+    donor_plural_phrase: Optional[DonorPhrase] = None
 
 
 class SendTestRequest(BaseModel):
     emails: List[str]
     subject: str = "Test Email"
+    donor_preview_count: int = Field(default=1, ge=1, le=999999)
+
+
+class DetectDonorPhraseRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=1_000_000)
+
+
+@router.post("/templates/detect-donor-phrase", response_model=DetectionResult)
+async def detect_template_donor_phrase(request: DetectDonorPhraseRequest):
+    # No database writes, template creation, or sending during detection.
+    return await detect_donor_phrase(request.content)
 
 
 @router.get("/templates", response_model=List[TemplateListResponse])
@@ -69,6 +84,8 @@ def create_template(template: TemplateCreate, db: Session = Depends(get_db)):
         name=template.name,
         content=template.content,
         design_json=template.design_json,
+        donor_singular_phrase=template.donor_singular_phrase,
+        donor_plural_phrase=template.donor_plural_phrase,
     )
     db.add(db_template)
     db.commit()
@@ -100,6 +117,10 @@ def update_template(template_id: int, template_update: TemplateUpdate, db: Sessi
 
     if template_update.design_json is not None:
         template.design_json = template_update.design_json
+
+    for field in ("donor_singular_phrase", "donor_plural_phrase"):
+        if getattr(template_update, field) is not None:
+            setattr(template, field, getattr(template_update, field))
     
     db.commit()
     db.refresh(template)
@@ -155,6 +176,10 @@ def send_test_email(template_id: int, request: SendTestRequest, db: Session = De
             # Personalize content for test
             test_name = "Test User"
             html_body_personalized = template.content.replace("{{name}}", test_name).replace("*|FNAME|*", test_name)
+            html_body_personalized = preview_donor_html(html_body_personalized, {
+                "donor_singular_phrase": template.donor_singular_phrase,
+                "donor_plural_phrase": template.donor_plural_phrase,
+            }, count=request.donor_preview_count)
 
             if gmail_service.send_email(
                 to_email=email,

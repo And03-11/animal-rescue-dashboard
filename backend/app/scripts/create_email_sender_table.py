@@ -51,6 +51,11 @@ def create_email_sender_table():
                 ALTER TABLE email_sender_campaigns
                 ADD COLUMN IF NOT EXISTS send_to_unsubscribed BOOLEAN NOT NULL DEFAULT FALSE
             """)
+            cur.execute("""
+                ALTER TABLE email_sender_campaigns
+                ADD COLUMN IF NOT EXISTS donor_singular_phrase TEXT NOT NULL DEFAULT 'donation you made {{when}}',
+                ADD COLUMN IF NOT EXISTS donor_plural_phrase TEXT NOT NULL DEFAULT '{{count}} donations you’ve made over the past week'
+            """)
             conn.commit()
             print("✅ Added scheduled_at column if missing.")
             return True
@@ -70,6 +75,8 @@ def create_email_sender_table():
                 is_bounced BOOLEAN DEFAULT FALSE,
                 click_tracking_enabled BOOLEAN NOT NULL DEFAULT FALSE,
                 send_to_unsubscribed BOOLEAN NOT NULL DEFAULT FALSE,
+                donor_singular_phrase TEXT NOT NULL DEFAULT 'donation you made {{when}}',
+                donor_plural_phrase TEXT NOT NULL DEFAULT '{{count}} donations you’ve made over the past week',
                 sender_config JSONB,
                 csv_filename VARCHAR(255),
                 mapping JSONB,

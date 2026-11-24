@@ -12,6 +12,7 @@ import type {
   CsvPreview,
   SelectedAccount,
 } from './types.ts';
+import { defaultDonorPhrases, hasDayToken, validateDonorPhrases } from './donorPersonalization.ts';
 
 export type CampaignWizardStep = 0 | 1 | 2;
 export type CampaignSenderMode = 'all' | 'group' | 'manual';
@@ -29,6 +30,8 @@ export interface CampaignWizardDraft {
   campaignName: string;
   subject: string;
   htmlBody: string;
+  donorSingularPhrase?: string;
+  donorPluralPhrase?: string;
   clickTrackingEnabled: boolean;
   sendToUnsubscribed: boolean;
   scheduledAt: string | null;
@@ -80,6 +83,8 @@ type HydrationInput = Partial<CampaignFormData> & {
   sourceType?: CampaignSource;
   campaignName?: string;
   htmlBody?: string;
+  donorSingularPhrase?: string;
+  donorPluralPhrase?: string;
   clickTrackingEnabled?: boolean;
   sendToUnsubscribed?: boolean;
   scheduledAt?: string | null;
@@ -255,6 +260,18 @@ export function validateWizardStep(
   if (!draft.htmlBody.trim()) {
     return CAMPAIGN_WIZARD_VALIDATION_MESSAGES.bodyRequired;
   }
+  if (/{{\s*(when|count)\s*}}/i.test(draft.htmlBody)) {
+    return 'Put {{Day}} in the email HTML; use {{when}} and {{count}} inside the donor phrases.';
+  }
+  if (hasDayToken(draft.htmlBody)) {
+    if (draft.sourceType !== 'airtable' || draft.segment !== 'dnr') {
+      return '{{Day}} requires an Airtable Donors audience.';
+    }
+    return validateDonorPhrases({
+      donor_singular_phrase: draft.donorSingularPhrase ?? defaultDonorPhrases.donor_singular_phrase,
+      donor_plural_phrase: draft.donorPluralPhrase ?? defaultDonorPhrases.donor_plural_phrase,
+    });
+  }
   return null;
 }
 
@@ -281,6 +298,8 @@ export function buildCampaignPayload(draft: CampaignWizardDraft): CampaignWizard
     send_to_unsubscribed: draft.sendToUnsubscribed === true,
     sender_config: senderConfigForDraft(draft),
     scheduled_at: normalizeScheduledAt(draft.scheduledAt),
+    donor_singular_phrase: draft.donorSingularPhrase ?? defaultDonorPhrases.donor_singular_phrase,
+    donor_plural_phrase: draft.donorPluralPhrase ?? defaultDonorPhrases.donor_plural_phrase,
   };
 
   if (draft.sourceType === 'airtable') {
@@ -348,6 +367,8 @@ export function hydrateCampaignWizardDraft(input: HydrationInput): CampaignWizar
     campaignName: input.campaignName ?? input.campaign_name ?? '',
     subject: input.subject ?? '',
     htmlBody: input.htmlBody ?? input.html_body ?? '',
+    donorSingularPhrase: input.donorSingularPhrase ?? input.donor_singular_phrase ?? defaultDonorPhrases.donor_singular_phrase,
+    donorPluralPhrase: input.donorPluralPhrase ?? input.donor_plural_phrase ?? defaultDonorPhrases.donor_plural_phrase,
     clickTrackingEnabled: input.clickTrackingEnabled
       ?? input.click_tracking_enabled
       ?? false,

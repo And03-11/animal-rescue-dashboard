@@ -1371,3 +1371,35 @@ def test_update_campaign_rejects_direct_invalid_id(write_environment):
     assert response.json() == {"detail": "Invalid campaign ID."}
     assert json.loads(invalid_path.read_text(encoding="utf-8")) == original
     assert remote_service.updated == []
+
+
+def test_donor_template_snapshot_survives_create_edit_and_reload(write_environment):
+    campaign_data, _sent_logs, _targets, remote = write_environment
+    payload = {'source_type': 'airtable', 'campaign_name': 'Donor thanks', 'subject': 'Thanks',
+        'html_body': '<p>{{Day}}</p>', 'segment': 'dnr',
+        'audiences': [{'region': 'EUR', 'is_bounced': False}],
+        'donor_singular_phrase': 'gift you gave {{when}}',
+        'donor_plural_phrase': '{{count}} gifts over the past week'}
+    created = client.post('/api/v1/sender/campaigns', json=payload)
+    assert created.status_code == 201
+    cid = created.json()['id']
+    assert remote.created[-1]['donor_singular_phrase'] == 'gift you gave {{when}}'
+    edited = client.put(f'/api/v1/sender/campaigns/{cid}', json={
+        'html_body': '<b>{{Day}}</b>', 'donor_plural_phrase': '{{count}} generous donations',
+        'audiences': [{'region': 'EUR', 'is_bounced': False}], 'segment': 'dnr'})
+    assert edited.status_code == 200
+    details = client.get(f'/api/v1/sender/campaigns/{cid}/details').json()['details']
+    assert details['html_body'] == '<b>{{Day}}</b>'
+    assert details['donor_singular_phrase'] == 'gift you gave {{when}}'
+    assert details['donor_plural_phrase'] == '{{count}} generous donations'
+    assert remote.updated[-1][1]['donor_plural_phrase'] == '{{count}} generous donations'
+    assert json.loads((campaign_data / f'{cid}.json').read_text())['status'] == 'Draft'
+
+
+@pytest.mark.parametrize('source,segment', [('airtable', 'standard'), ('csv', 'dnr')])
+def test_day_cannot_be_saved_for_an_unrelated_audience(write_environment, source, segment):
+    response = client.post('/api/v1/sender/campaigns', json={'source_type': source, 'segment': segment,
+        'campaign_name': 'Wrong audience', 'subject': 'Thanks', 'html_body': '{{Day}}',
+        'audiences': [{'region': 'EUR', 'is_bounced': False}]})
+    assert response.status_code == 422
+    assert 'Donors' in response.json()['detail']

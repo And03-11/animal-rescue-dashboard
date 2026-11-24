@@ -38,6 +38,8 @@ export interface CampaignFormData {
   scheduled_at: string | null;
   click_tracking_enabled: boolean;
   send_to_unsubscribed: boolean;
+  donor_singular_phrase?: string;
+  donor_plural_phrase?: string;
   csvFile?: File | null;
   region?: string;
   is_bounced?: boolean;
@@ -146,6 +148,8 @@ export interface EmailTemplate {
   id: number;
   name: string;
   content: string;
+  donor_singular_phrase?: string;
+  donor_plural_phrase?: string;
 }
 
 export interface CreateCampaignResponse {
@@ -173,6 +177,8 @@ export interface CampaignDetails {
   html_body?: string;
   click_tracking_enabled?: boolean;
   send_to_unsubscribed?: boolean;
+  donor_singular_phrase?: string;
+  donor_plural_phrase?: string;
 }
 
 export interface CampaignDetailsResponse {

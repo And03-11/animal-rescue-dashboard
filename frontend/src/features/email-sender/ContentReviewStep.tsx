@@ -28,6 +28,8 @@ import { summarizeAudienceSelection } from './audienceSelection';
 import type { CampaignWizardDraft } from './campaignWizardState';
 import { WIZARD_FOCUS_TARGET_IDS } from './campaignWizardFocus';
 import type { EmailTemplate } from './types';
+import { DonorPersonalizationSection } from '../../components/DonorPersonalizationSection';
+import { defaultDonorPhrases, hasDayToken, previewDonorHtml } from './donorPersonalization';
 
 export interface ContentReviewStepProps {
   draft: CampaignWizardDraft;
@@ -38,7 +40,7 @@ export interface ContentReviewStepProps {
   onViewModeChange: (mode: 'code' | 'preview') => void;
   onLoadTemplate: (templateId: string) => void;
   onSaveTemplate: (name: string) => Promise<void>;
-  onSendTest: (emails: string[]) => Promise<void>;
+  onSendTest: (emails: string[], donorPreviewCount?: number) => Promise<void>;
 }
 
 function formatSchedule(scheduledAt: string | null): string {
@@ -65,6 +67,12 @@ export function ContentReviewStep({
   const [testDialogOpen, setTestDialogOpen] = useState(false);
   const [testEmails, setTestEmails] = useState('');
   const [dialogError, setDialogError] = useState<string | null>(null);
+  const [donorSampleCount, setDonorSampleCount] = useState(1);
+  const donorSettings = {
+    donor_singular_phrase: draft.donorSingularPhrase ?? defaultDonorPhrases.donor_singular_phrase,
+    donor_plural_phrase: draft.donorPluralPhrase ?? defaultDonorPhrases.donor_plural_phrase,
+  };
+  const usesDonorPersonalization = draft.sourceType === 'airtable' && draft.segment === 'dnr';
 
   const audienceSummary = draft.sourceType === 'airtable'
     ? summarizeAudienceSelection(draft.audiences)
@@ -103,7 +111,7 @@ export function ContentReviewStep({
     }
     setDialogError(null);
     try {
-      await onSendTest(emails);
+      await onSendTest(emails, donorSampleCount);
       setTestEmails('');
       setTestDialogOpen(false);
     } catch {
@@ -247,8 +255,20 @@ export function ContentReviewStep({
         />
       ) : (
         <Box sx={{ minWidth: 0 }}>
-          <EmailPreview subject={draft.subject} htmlBody={draft.htmlBody} />
+          <EmailPreview subject={draft.subject} htmlBody={usesDonorPersonalization
+            ? previewDonorHtml(draft.htmlBody, donorSettings, donorSampleCount) : draft.htmlBody} />
         </Box>
+      )}
+
+      {usesDonorPersonalization && (
+        <DonorPersonalizationSection settings={donorSettings} sampleCount={donorSampleCount}
+          onSampleCountChange={setDonorSampleCount} onChange={(patch) => onDraftChange({
+            ...(patch.donor_singular_phrase !== undefined ? { donorSingularPhrase: patch.donor_singular_phrase } : {}),
+            ...(patch.donor_plural_phrase !== undefined ? { donorPluralPhrase: patch.donor_plural_phrase } : {}),
+          })} />
+      )}
+      {!usesDonorPersonalization && hasDayToken(draft.htmlBody) && (
+        <Alert severity="error">{'{{Day}} requires an Airtable Donors audience.'}</Alert>
       )}
 
       <Dialog
